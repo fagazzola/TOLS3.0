@@ -34,8 +34,8 @@ export default function Calendario() {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♣ Torrente On Line Series · Temporada 2026 · MOD 1</div>
-          <h1>Calendario TOLS</h1>
+          <div className="eyebrow">♣ Torrente On Line Series · MOD 1</div>
+          <h1>Calendario TOLS 3.0</h1>
           <p className="subtitle">
             Calendario paramétrico: cada fecha tiene su propio día y hora (por default lunes 20:00 hrs, movible por
             feriado).

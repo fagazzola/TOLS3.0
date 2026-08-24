@@ -19,7 +19,7 @@ export default function Tablero() {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♦ Torrente On Line Series · Temporada 2026 · MOD 2</div>
+          <div className="eyebrow">♦ Torrente On Line Series · MOD 2</div>
           <h1>Tablero de Control</h1>
           <p className="subtitle">
             Reglas paramétricas de la liga: reparto de premios, puntos por posición, costos de inscripción y gastos

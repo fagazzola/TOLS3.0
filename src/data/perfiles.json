@@ -1,10 +1,25 @@
 {
   "roles": [
-    { "tipo": "Administrador General", "acceso": "Acceso total", "permisos": "lectura / escritura" },
-    { "tipo": "Administrador", "acceso": "Administración de las partidas", "permisos": "lectura / escritura" },
-    { "tipo": "Anfitrión", "acceso": "Administración de las partidas", "permisos": "lectura / escritura" },
-    { "tipo": "Cobranza", "acceso": "Módulo de cobranza", "permisos": "lectura / escritura" },
-    { "tipo": "Jugador", "acceso": "Consulta", "permisos": "solo lectura" }
+    {
+      "tipo": "Administrador General",
+      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "escritura", "mod4": "escritura", "mod5": "escritura" }
+    },
+    {
+      "tipo": "Administrador",
+      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "ninguno", "mod4": "escritura", "mod5": "escritura" }
+    },
+    {
+      "tipo": "Anfitrión",
+      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "ninguno", "mod5": "escritura" }
+    },
+    {
+      "tipo": "Cobranza",
+      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "escritura", "mod5": "lectura" }
+    },
+    {
+      "tipo": "Jugador",
+      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "ninguno", "mod5": "lectura" }
+    }
   ],
   "usuarios": [
     { "nombre": "Federico", "usuario": "federico", "password": "cambia-esta-clave", "rol": "Administrador General" }

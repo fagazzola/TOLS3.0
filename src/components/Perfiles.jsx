@@ -1,7 +1,14 @@
 import data from "../data/perfiles.json";
+import { MODULOS, NIVEL_LABEL } from "../lib/permisos.js";
 
 function mask(s) {
   return "•".repeat(Math.max(6, String(s || "").length));
+}
+
+function nivelBadgeClass(nivel) {
+  if (nivel === "escritura") return "badge-nivel-escritura";
+  if (nivel === "lectura") return "badge-nivel-lectura";
+  return "badge-nivel-ninguno";
 }
 
 export default function Perfiles({ session }) {
@@ -11,29 +18,37 @@ export default function Perfiles({ session }) {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♠ Torrente On Line Series · Temporada 2026 · MOD 3</div>
-          <h1>Perfiles de usuario</h1>
+          <div className="eyebrow">♠ Torrente On Line Series · MOD 3</div>
+          <h1>Perfiles de usuario TOLS 3.0</h1>
           <p className="subtitle">
-            Roles y accesos de la liga. La contraseña de cada quien vive en el código del sitio — no es seguridad
-            bancaria, solo mantiene el sitio fuera de curiosos.
+            Roles y permisos de la liga, módulo por módulo. La contraseña de cada quien vive en el código del sitio —
+            no es seguridad bancaria, solo mantiene el sitio fuera de curiosos.
           </p>
         </div>
       </div>
 
       <div className="section">
-        <div className="section-head"><div className="section-title">Roles</div></div>
+        <div className="section-head"><div className="section-title">Permisos por módulo</div></div>
         <div className="tbl">
-          <div className="trow thead" style={{ gridTemplateColumns: "1fr 1.4fr 1fr" }}>
-            <div>Tipo</div><div>Acceso</div><div>Permisos</div>
+          <div className="trow thead" style={{ gridTemplateColumns: `1.2fr repeat(${MODULOS.length}, 1fr)` }}>
+            <div>Tipo</div>
+            {MODULOS.map((m) => <div className="right" key={m.key}>{m.label}</div>)}
           </div>
-          {data.roles.map((r, i) => (
-            <div className="trow" style={{ gridTemplateColumns: "1fr 1.4fr 1fr" }} key={i}>
+          {data.roles.map((r) => (
+            <div className="trow" style={{ gridTemplateColumns: `1.2fr repeat(${MODULOS.length}, 1fr)` }} key={r.tipo}>
               <div><span className="badge badge-regular">{r.tipo}</span></div>
-              <div>{r.acceso}</div>
-              <div>{r.permisos}</div>
+              {MODULOS.map((m) => {
+                const nivel = r.permisos[m.key] || "ninguno";
+                return (
+                  <div className="right" key={m.key}>
+                    <span className={"badge " + nivelBadgeClass(nivel)}>{NIVEL_LABEL[nivel]}</span>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
+        <div className="section-sub">MOD 4 (Cobranza) y MOD 5 (Game Day) aún no están construidos — los permisos ya quedaron definidos para cuando existan.</div>
       </div>
 
       {isAdminGeneral && (

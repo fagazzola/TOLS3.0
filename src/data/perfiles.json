@@ -1,0 +1,12 @@
+{
+  "roles": [
+    { "tipo": "Administrador General", "acceso": "Acceso total", "permisos": "lectura / escritura" },
+    { "tipo": "Administrador", "acceso": "Administración de las partidas", "permisos": "lectura / escritura" },
+    { "tipo": "Anfitrión", "acceso": "Administración de las partidas", "permisos": "lectura / escritura" },
+    { "tipo": "Cobranza", "acceso": "Módulo de cobranza", "permisos": "lectura / escritura" },
+    { "tipo": "Jugador", "acceso": "Consulta", "permisos": "solo lectura" }
+  ],
+  "usuarios": [
+    { "nombre": "Federico", "usuario": "federico", "password": "cambia-esta-clave", "rol": "Administrador General" }
+  ]
+}

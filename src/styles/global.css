@@ -1,3 +1,6 @@
+/* Identidad única de la mesa: paño verde sobre negro por fuera, tarjeta clara
+   (la "mesa de trabajo") por dentro para que las tablas de datos se lean bien.
+   Deliberadamente no cambia con el tema del sistema — es un casino, no una app. */
 :root {
   --bg: #f2ede1;
   --surface: #fffdf8;
@@ -14,37 +17,14 @@
   --good: #3d6b47;
   --bad: #a13d3d;
   --shadow: 0 1px 2px rgba(28, 43, 35, 0.06), 0 8px 24px -12px rgba(28, 43, 35, 0.18);
-  --felt-1: #2f5646;
-  --felt-2: #1c3a2f;
-  --felt-3: #142a22;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #101b16;
-    --surface: #16241d;
-    --surface-2: #1d3128;
-    --line: #2c4237;
-    --ink: #ecf1ea;
-    --ink-soft: #93a89c;
-    --gold: #d3ab4c;
-    --gold-strong: #e6c675;
-    --felt: #cfe3d7;
-    --felt-soft: #8fac9c;
-    --burgundy: #d17f60;
-    --burgundy-soft: #e6a486;
-    --good: #79c290;
-    --bad: #e08a7a;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px -14px rgba(0, 0, 0, 0.6);
-    --felt-1: #14261f;
-    --felt-2: #0c1815;
-    --felt-3: #070f0d;
-  }
+  --felt-1: #1f6b46;
+  --felt-2: #071310;
+  --felt-3: #010302;
 }
 
 * { box-sizing: border-box; }
 
-html { background: var(--felt-2); }
+html { background: #000; }
 
 body {
   margin: 0;
@@ -52,15 +32,55 @@ body {
   color: var(--ink);
   font-family: "Work Sans", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  position: relative;
   background:
-    radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.07), transparent 55%),
-    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.018) 0px, rgba(255, 255, 255, 0.018) 1px, transparent 1px, transparent 3px),
-    radial-gradient(140% 140% at 50% 15%, var(--felt-1) 0%, var(--felt-2) 62%, var(--felt-3) 100%);
+    radial-gradient(120% 65% at 50% -10%, rgba(255, 255, 255, 0.08), transparent 55%),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.02) 0px, rgba(255, 255, 255, 0.02) 1px, transparent 1px, transparent 3px),
+    radial-gradient(130% 130% at 50% 18%, var(--felt-1) 0%, var(--felt-2) 60%, var(--felt-3) 100%);
   background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+/* fichas decorativas — dibujadas en CSS puro (sin imágenes externas), asomando por los bordes */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.35), transparent 42%),
+    repeating-conic-gradient(var(--chip-a) 0deg 30deg, var(--chip-b) 30deg 60deg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), inset 0 0 0 8px rgba(255, 253, 248, 0.85);
+  opacity: 0.5;
+}
+body::before {
+  --chip-a: #a13d3d;
+  --chip-b: #fffdf8;
+  width: 140px;
+  height: 140px;
+  top: 10%;
+  left: -55px;
+  transform: rotate(-14deg);
+}
+body::after {
+  --chip-a: #1f6b46;
+  --chip-b: #fffdf8;
+  width: 170px;
+  height: 170px;
+  bottom: 7%;
+  right: -60px;
+  transform: rotate(16deg);
+}
+@media (max-width: 720px) {
+  body::before, body::after { display: none; }
 }
 
 /* the "table surface" card that holds every page's content, floating on the felt */
 .wrap {
+  position: relative;
+  z-index: 1;
   max-width: 900px;
   margin: 36px auto 64px;
   padding: 40px 32px 64px;
@@ -154,7 +174,7 @@ h1 {
 
 footer.page-footer { margin-top: 56px; font-size: 12px; color: var(--ink-soft); text-align: center; }
 
-.login-shell { min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-shell { position: relative; z-index: 1; min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .login-card {
   position: relative; width: 100%; max-width: 360px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 18px; padding: 40px 32px;
@@ -177,9 +197,71 @@ footer.page-footer { margin-top: 56px; font-size: 12px; color: var(--ink-soft); 
 .login-error { color: var(--bad); font-size: 12.5px; margin-top: 12px; text-align: center; font-family: "IBM Plex Mono", monospace; }
 .login-hint { color: var(--ink-soft); font-size: 12px; margin-top: 20px; text-align: center; line-height: 1.5; }
 
+/* generic form field, reused by the calendar's create/edit modal */
+.field { font-family: "IBM Plex Mono", monospace; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+.field:focus { outline: 2px solid var(--gold-strong); outline-offset: 1px; }
+.chk-inline { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); margin: 4px 0 18px; }
+.chk-inline input { width: 16px; height: 16px; accent-color: var(--burgundy); }
+
+/* month calendar */
+.cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 16px; flex-wrap: wrap; }
+.cal-nav { display: flex; align-items: center; gap: 14px; }
+.cal-nav-btn {
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.cal-nav-btn:hover { background: var(--surface-2); }
+.cal-month-label { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 19px; min-width: 170px; text-align: center; }
+
+.cal-grid { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+.cal-row { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-row-head { background: var(--surface-2); }
+.cal-headcell {
+  padding: 9px 0; text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); border-bottom: 1px solid var(--line);
+}
+.cal-cell {
+  min-height: 92px; padding: 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px; background: var(--surface);
+}
+.cal-row .cal-cell:last-child { border-right: none; }
+.cal-cell-out { background: var(--surface-2); opacity: 0.55; }
+.cal-cell-clickable { cursor: pointer; transition: background 0.12s ease; }
+.cal-cell-clickable:hover { background: color-mix(in srgb, var(--gold) 10%, var(--surface)); }
+.cal-daynum { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft); }
+.cal-daynum-today {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 600;
+}
+.cal-chip {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px; padding: 3px 6px; border-radius: 6px;
+  background: var(--surface-2); color: var(--ink-soft); display: flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.cal-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--felt-soft); flex-shrink: 0; }
+.cal-chip-main { background: color-mix(in srgb, var(--burgundy) 16%, transparent); color: var(--burgundy); }
+.cal-chip-main .cal-chip-dot { background: var(--burgundy); }
+
+.notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+.note-box { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; background: var(--surface); font-size: 14.5px; line-height: 1.5; }
+.note-label { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--gold-strong); margin-bottom: 6px; }
+
+/* create/edit modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(5, 12, 9, 0.55); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+}
+.modal-card {
+  width: 100%; max-width: 340px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 16px; padding: 26px 26px 22px; box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.6);
+}
+.modal-title { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 19px; margin-bottom: 18px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
 @media (max-width: 640px) {
   .wrap { margin: 0; border-radius: 0; box-shadow: none; border: none; padding: 28px 18px 56px; }
   .stats { grid-template-columns: 1fr; }
   .thead { display: none; }
   .headtop { flex-direction: column; }
+  .cal-cell { min-height: 64px; padding: 5px; }
+  .cal-month-label { min-width: 0; }
 }

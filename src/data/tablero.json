@@ -41,7 +41,7 @@
   "cobrosPorTorneo": [
     { "id": "buyin", "nombre": "Buy-in", "regular": 400, "main": 600, "protegido": true },
     { "id": "rebuy", "nombre": "Re-buy (c/u)", "regular": 300, "main": 400, "protegido": true },
-    { "id": "addon-1", "nombre": "Add-on", "regular": 350, "main": 500, "protegido": false }
+    { "id": "addon", "nombre": "Add-on", "regular": 350, "main": 500, "protegido": true }
   ],
   "pagosPorTorneo": [
     { "nombre": "Sale en la burbuja", "regular": 0, "main": 500 },

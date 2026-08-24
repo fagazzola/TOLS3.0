@@ -1,7 +1,31 @@
 import { useEffect, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
+import seed from "../data/tablero.json";
 
 const API = "/api/tablero";
+
+// red de seguridad del lado del navegador: si el backend devuelve algo incompleto (por ejemplo,
+// datos guardados con un esquema anterior), se completa con la semilla en vez de tronar la pantalla
+function normalizar(json) {
+  const d = json && typeof json === "object" ? { ...json } : {};
+  d.premios = d.premios || seed.premios;
+  d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
+  d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
+  d.puntos = d.puntos || seed.puntos;
+  d.puntos.asistencia = d.puntos.asistencia || seed.puntos.asistencia;
+  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : seed.puntos.posiciones;
+  if (typeof d.recomprasMax !== "number") d.recomprasMax = seed.recomprasMax;
+  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = seed.cuotaInscripcion;
+  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
+  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
+  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
+  for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
+    const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
+    if (!existente) d.cobrosPorTorneo.push({ ...req });
+    else existente.protegido = true;
+  }
+  return d;
+}
 
 function money(n) {
   return "$" + Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 });
@@ -33,8 +57,9 @@ export default function Tablero({ session }) {
         return r.json();
       })
       .then((json) => {
-        setData(json);
-        setDraft(json);
+        const normalizado = normalizar(json);
+        setData(normalizado);
+        setDraft(normalizado);
       })
       .catch((e) => setLoadError(e.message || "Error al cargar el tablero."))
       .finally(() => setLoading(false));
@@ -71,6 +96,10 @@ export default function Tablero({ session }) {
     if (!d.premios.porCampeonato.lugares.some((l) => l.reyKiller)) return "Premios por campeonato: falta el % de Rey Killer.";
     if (Math.abs(sumPct(d.premios.porCampeonato.lugares) - 100) > 0.01) return "Premios por campeonato: los lugares (con Rey Killer) deben sumar 100%.";
     if (d.puntos.posiciones.length < 1) return "Puntos: debe haber al menos 1 posición.";
+    const tieneBuyin = d.cobrosPorTorneo.some((c) => c.id === "buyin");
+    const tieneRebuy = d.cobrosPorTorneo.some((c) => c.id === "rebuy");
+    const tieneAddon = d.cobrosPorTorneo.some((c) => c.id === "addon");
+    if (!tieneBuyin || !tieneRebuy || !tieneAddon) return "Buy-in, Re-buy y Add-on son obligatorios.";
     return null;
   }
 
@@ -356,7 +385,7 @@ export default function Tablero({ session }) {
             + Agregar cobro
           </button>
         )}
-        <div className="section-sub">Buy-in (único, obligatorio) y Re-buy (hasta el máximo de arriba) no se pueden eliminar; Add-on y cualquier cobro adicional son opcionales.</div>
+        <div className="section-sub">Buy-in (único), Re-buy (hasta el máximo de arriba) y Add-on siempre están presentes y no se pueden eliminar; solo los montos son editables. Cualquier cobro adicional que agregues sí se puede quitar.</div>
 
         <div className="subhead">Pagos por torneo — se le pagan a jugadores con lo recabado en el torneo</div>
         <div className="tbl">

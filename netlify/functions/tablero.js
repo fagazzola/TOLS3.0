@@ -8,6 +8,31 @@ function sumPct(lugares) {
   return lugares.reduce((a, l) => a + Number(l.pct || 0), 0);
 }
 
+// completa cualquier campo faltante (con los valores de la semilla) cuando lo guardado en Blobs
+// viene de una versión anterior del esquema — evita que la pantalla truene por un campo undefined
+function normalizar(data) {
+  const d = data && typeof data === "object" ? { ...data } : {};
+  d.premios = d.premios || seed.premios;
+  d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
+  d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
+  d.puntos = d.puntos || seed.puntos;
+  d.puntos.asistencia = d.puntos.asistencia || seed.puntos.asistencia;
+  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : seed.puntos.posiciones;
+  if (typeof d.recomprasMax !== "number") d.recomprasMax = seed.recomprasMax;
+  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = seed.cuotaInscripcion;
+  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
+  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
+  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
+  // Buy-in, Re-buy y Add-on siempre deben existir y estar protegidos contra borrado
+  for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
+    const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
+    if (!existente) d.cobrosPorTorneo.push({ ...req });
+    else existente.protegido = true;
+  }
+  delete d.costosUnicos; // campo del esquema anterior, ya no se usa
+  return d;
+}
+
 function validar(data) {
   if (!data || typeof data !== "object") return "Formato inválido.";
 
@@ -58,8 +83,9 @@ function validar(data) {
   }
   const tieneBuyin = data.cobrosPorTorneo.some((c) => c.id === "buyin");
   const tieneRebuy = data.cobrosPorTorneo.some((c) => c.id === "rebuy");
-  if (!tieneBuyin || !tieneRebuy) {
-    return "Cobros por torneo: Buy-in y Re-buy son obligatorios y no se pueden eliminar.";
+  const tieneAddon = data.cobrosPorTorneo.some((c) => c.id === "addon");
+  if (!tieneBuyin || !tieneRebuy || !tieneAddon) {
+    return "Cobros por torneo: Buy-in, Re-buy y Add-on son obligatorios y no se pueden eliminar.";
   }
   if (!Array.isArray(data.pagosPorTorneo) || data.pagosPorTorneo.length > 10) {
     return "Pagos por torneo: máximo 10 conceptos.";
@@ -73,11 +99,12 @@ export default async (req) => {
 
   if (req.method === "GET") {
     let data = await store.get("data", { type: "json" });
-    if (!data) {
-      data = seed;
-      await store.setJSON("data", data);
+    const normalizado = normalizar(data || seed);
+    // si lo guardado venía incompleto (esquema anterior) o no existía, se re-guarda ya corregido
+    if (!data || JSON.stringify(data) !== JSON.stringify(normalizado)) {
+      await store.setJSON("data", normalizado);
     }
-    return new Response(JSON.stringify(data), { headers: HEADERS });
+    return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
 
   if (req.method === "PUT" || req.method === "POST") {
@@ -87,12 +114,13 @@ export default async (req) => {
     } catch (e) {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
-    const problema = validar(body);
+    const normalizado = normalizar(body);
+    const problema = validar(normalizado);
     if (problema) {
       return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
     }
-    await store.setJSON("data", body);
-    return new Response(JSON.stringify(body), { headers: HEADERS });
+    await store.setJSON("data", normalizado);
+    return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
 
   return new Response(JSON.stringify({ error: "Método no permitido." }), { status: 405, headers: HEADERS });

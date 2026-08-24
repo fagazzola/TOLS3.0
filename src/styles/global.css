@@ -87,22 +87,24 @@ body {
 .nav-session { font-size: 12px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace; display: flex; align-items: center; gap: 10px; }
 
 .suit-divider {
-  display: flex; justify-content: center; gap: 20px;
-  margin: 0 0 36px; font-size: 14px; opacity: 0.55; user-select: none;
+  display: flex; justify-content: center; gap: 24px;
+  margin: 0 0 36px; font-size: 30px; user-select: none;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
-.suit-divider .suit-red { color: var(--burgundy); }
-.suit-divider .suit-black { color: var(--ink); }
+.suit-divider .suit-red { color: #d81e2c; }
+.suit-divider .suit-black { color: #0a0a0a; }
 
 .headtop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .eyebrow {
   display: flex; align-items: center; gap: 10px;
-  font-family: "IBM Plex Mono", monospace; font-size: 12.5px; letter-spacing: 0.09em;
-  text-transform: uppercase; color: var(--gold-strong); margin-bottom: 14px;
+  font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: clamp(1.5rem, 3.4vw, 2.1rem);
+  letter-spacing: 0.01em; text-transform: none; color: var(--gold-strong); margin-bottom: 10px;
+  line-height: 1.1;
 }
 h1 {
-  font-family: "Fraunces", Georgia, serif; font-weight: 600;
-  font-size: clamp(2.2rem, 5.5vw, 3.1rem); line-height: 1.03; margin: 0 0 8px;
-  text-wrap: balance;
+  font-family: "IBM Plex Mono", monospace; font-weight: 600;
+  font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft);
+  margin: 0 0 8px;
 }
 .subtitle { font-size: 16px; color: var(--ink-soft); max-width: 58ch; line-height: 1.5; margin: 0; }
 
@@ -156,8 +158,6 @@ h1 {
 .check-line { margin-top: 10px; font-size: 12.5px; font-family: "IBM Plex Mono", monospace; }
 .check-ok { color: var(--good); }
 .check-bad { color: var(--bad); }
-
-footer.page-footer { margin-top: 56px; font-size: 12px; color: var(--ink-soft); text-align: center; }
 
 .login-shell { position: relative; z-index: 1; min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .login-card {

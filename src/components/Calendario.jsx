@@ -188,8 +188,8 @@ export default function Calendario({ session }) {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♣ Torrente On Line Series</div>
-          <h1>Calendario TOLS 3.0</h1>
+          <div className="eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
+          <h1>Calendario</h1>
           <p className="subtitle">
             {editable
               ? "Haz clic en cualquier día para crear, editar o borrar un torneo."
@@ -288,7 +288,6 @@ export default function Calendario({ session }) {
         </div>
       </div>
 
-      <footer className="page-footer">Fuente: torneos guardados en Netlify Blobs · Liga Torrente</footer>
 
       {modal && (
         <div className="modal-backdrop" onClick={() => !saving && setModal(null)}>

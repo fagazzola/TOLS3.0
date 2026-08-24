@@ -22,7 +22,7 @@ export default function Login({ onLogin }) {
   return (
     <div className="login-shell">
       <div className="login-card">
-        <div className="login-eyebrow">♣ Torrente On Line Series</div>
+        <div className="login-eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
         <div className="login-title">TOLS 3.0</div>
         <form onSubmit={handleSubmit}>
           <div className="login-field">
@@ -51,7 +51,7 @@ export default function Login({ onLogin }) {
           {error && <div className="login-error">{error}</div>}
         </form>
         <div className="login-hint">
-          Acceso restringido a la liga Torrente. Si no tienes usuario, pídelo al administrador.
+          Acceso restringido a TOLS 3.0. Si no tienes usuario, pídelo al administrador.
         </div>
       </div>
     </div>

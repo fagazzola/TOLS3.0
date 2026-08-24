@@ -14,7 +14,7 @@
         { "label": "Lugar 2", "pct": 25 },
         { "label": "Lugar 3", "pct": 12.5 },
         { "label": "Lugar 4", "pct": 6.25 },
-        { "label": "Rey Killer", "pct": 6.25 }
+        { "label": "Rey Killer", "pct": 6.25, "reyKiller": true }
       ]
     }
   },
@@ -32,19 +32,19 @@
       { "pos": 9, "regular": 2, "main": 3 }
     ]
   },
-  "costos": {
-    "cuotaInscripcion": 400,
-    "recomprasMax": 2,
-    "conceptos": [
-      { "nombre": "Lote Inicial", "regular": 400, "main": 600 },
-      { "nombre": "Recompra (c/u)", "regular": 300, "main": 400 },
-      { "nombre": "Addon", "regular": 350, "main": 500 },
-      { "nombre": "Sale en la burbuja", "regular": 0, "main": 500 },
-      { "nombre": "Mejor Mano", "regular": 0, "main": 500 }
-    ]
-  },
-  "gastos": [
+  "recomprasMax": 2,
+  "costosUnicos": [
+    { "concepto": "Cuota de inscripción", "monto": 400 },
     { "concepto": "Tesorero", "monto": 3000 },
     { "concepto": "Pulsera", "monto": 1000 }
+  ],
+  "cobrosPorTorneo": [
+    { "id": "buyin", "nombre": "Buy-in", "regular": 400, "main": 600, "protegido": true },
+    { "id": "rebuy", "nombre": "Re-buy (c/u)", "regular": 300, "main": 400, "protegido": true },
+    { "id": "addon-1", "nombre": "Add-on", "regular": 350, "main": 500, "protegido": false }
+  ],
+  "pagosPorTorneo": [
+    { "nombre": "Sale en la burbuja", "regular": 0, "main": 500 },
+    { "nombre": "Mejor Mano", "regular": 0, "main": 500 }
   ]
 }

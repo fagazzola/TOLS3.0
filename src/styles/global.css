@@ -159,6 +159,21 @@ h1 {
 .check-ok { color: var(--good); }
 .check-bad { color: var(--bad); }
 
+/* editable-table controls, used by Tablero */
+.btn-add { margin-top: 10px; font-size: 12px; padding: 7px 12px; }
+.btn-icon-remove {
+  width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--bad); cursor: pointer; font-size: 12px; line-height: 1; justify-self: end;
+}
+.btn-icon-remove:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
+.btn-icon-remove:disabled { opacity: 0.3; cursor: not-allowed; }
+.login-field-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.tablero-savebar {
+  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px;
+  margin: 4px 0 28px; box-shadow: var(--shadow);
+}
+
 .login-shell { position: relative; z-index: 1; min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .login-card {
   position: relative; width: 100%; max-width: 360px; background: var(--surface);

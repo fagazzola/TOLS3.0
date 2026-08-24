@@ -19,7 +19,7 @@ export default function Tablero() {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♦ Torrente On Line Series · MOD 2</div>
+          <div className="eyebrow">♦ Torrente On Line Series</div>
           <h1>Tablero de Control</h1>
           <p className="subtitle">
             Reglas paramétricas de la liga: reparto de premios, puntos por posición, costos de inscripción y gastos
@@ -64,7 +64,7 @@ export default function Tablero() {
           {sumCampeonato === 100 ? "✓ suma 100% del acumulado" : `⚠ suma ${pct(sumCampeonato)} — debería sumar 100%`}
         </div>
         <div className="section-sub">
-          Regla de cómo se gana "Rey Killer": se define en <b>MOD 5 · Game Day</b>.
+          Regla de cómo se gana "Rey Killer": se define en <b>Game Night</b>.
         </div>
       </div>
 
@@ -120,7 +120,7 @@ export default function Tablero() {
         </div>
       </div>
 
-      <footer className="page-footer">Fuente: Excel maestro TOLS 3.0 · MOD 2 · Liga Torrente</footer>
+      <footer className="page-footer">Fuente: Excel maestro TOLS 3.0 · Liga Torrente</footer>
     </div>
   );
 }

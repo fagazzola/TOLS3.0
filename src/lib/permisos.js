@@ -1,11 +1,11 @@
 import perfiles from "../data/perfiles.json";
 
 export const MODULOS = [
-  { key: "mod1", label: "MOD 1 · Calendario" },
-  { key: "mod2", label: "MOD 2 · Tablero" },
-  { key: "mod3", label: "MOD 3 · Perfiles" },
-  { key: "mod4", label: "MOD 4 · Cobranza" },
-  { key: "mod5", label: "MOD 5 · Game Day" },
+  { key: "mod1", label: "Calendario" },
+  { key: "mod2", label: "Tablero" },
+  { key: "mod3", label: "Perfiles" },
+  { key: "mod4", label: "Cobranza" },
+  { key: "mod5", label: "Game Night" },
 ];
 
 export const NIVEL_LABEL = {

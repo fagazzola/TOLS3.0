@@ -1,20 +1,19 @@
 {
   "torneos": [
-    { "n": 1, "fecha": "2026-09-21", "hora": "20:00", "main": false },
-    { "n": 2, "fecha": "2026-09-28", "hora": "20:00", "main": false },
-    { "n": 3, "fecha": "2026-10-05", "hora": "20:00", "main": false },
-    { "n": 4, "fecha": "2026-10-12", "hora": "20:00", "main": true },
-    { "n": 5, "fecha": "2026-10-19", "hora": "20:00", "main": false },
-    { "n": 6, "fecha": "2026-10-26", "hora": "20:00", "main": false },
-    { "n": 7, "fecha": "2026-11-02", "hora": "20:00", "main": false },
-    { "n": 8, "fecha": "2026-11-09", "hora": "20:00", "main": true },
-    { "n": 9, "fecha": "2026-11-16", "hora": "20:00", "main": false },
-    { "n": 10, "fecha": "2026-11-23", "hora": "20:00", "main": false },
-    { "n": 11, "fecha": "2026-11-30", "hora": "20:00", "main": false },
-    { "n": 12, "fecha": "2026-12-07", "hora": "20:00", "main": true }
+    { "n": 1, "fecha": "2026-09-21", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 2, "fecha": "2026-09-28", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 3, "fecha": "2026-10-05", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 4, "fecha": "2026-10-12", "hora": "20:00", "main": true, "temporada": "2026-I" },
+    { "n": 5, "fecha": "2026-10-19", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 6, "fecha": "2026-10-26", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 7, "fecha": "2026-11-02", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 8, "fecha": "2026-11-09", "hora": "20:00", "main": true, "temporada": "2026-I" },
+    { "n": 9, "fecha": "2026-11-16", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 10, "fecha": "2026-11-23", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 11, "fecha": "2026-11-30", "hora": "20:00", "main": false, "temporada": "2026-I" },
+    { "n": 12, "fecha": "2026-12-07", "hora": "20:00", "main": true, "temporada": "2026-I" }
   ],
   "pagoFinal": { "fecha": "2026-12-14", "nota": "7 días después del último torneo" },
-  "horaLimiteMejorMano": "22:00",
   "defaultDow": 1,
   "defaultHora": "20:00"
 }

@@ -18,7 +18,7 @@ export default function Perfiles({ session }) {
     <div>
       <div className="headtop">
         <div>
-          <div className="eyebrow">♠ Torrente On Line Series · MOD 3</div>
+          <div className="eyebrow">♠ Torrente On Line Series</div>
           <h1>Perfiles de usuario TOLS 3.0</h1>
           <p className="subtitle">
             Roles y permisos de la liga, módulo por módulo. La contraseña de cada quien vive en el código del sitio —
@@ -48,7 +48,7 @@ export default function Perfiles({ session }) {
             </div>
           ))}
         </div>
-        <div className="section-sub">MOD 4 (Cobranza) y MOD 5 (Game Day) aún no están construidos — los permisos ya quedaron definidos para cuando existan.</div>
+        <div className="section-sub">Cobranza y Game Night aún no están construidos — los permisos ya quedaron definidos para cuando existan.</div>
       </div>
 
       {isAdminGeneral && (
@@ -71,7 +71,7 @@ export default function Perfiles({ session }) {
         </div>
       )}
 
-      <footer className="page-footer">Fuente: Excel maestro TOLS 3.0 · MOD 3 · Liga Torrente</footer>
+      <footer className="page-footer">Fuente: Excel maestro TOLS 3.0 · Liga Torrente</footer>
     </div>
   );
 }

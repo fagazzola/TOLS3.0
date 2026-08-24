@@ -9,8 +9,9 @@ function validar(data) {
     if (!t.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(t.fecha)) return `Fecha inválida: ${t.fecha}`;
     if (!t.hora || !/^\d{2}:\d{2}$/.test(t.hora)) return `Hora inválida: ${t.hora}`;
   }
-  if (!data.pagoFinal || !data.pagoFinal.fecha) return "Falta la fecha de pago final.";
-  if (!data.horaLimiteMejorMano) return "Falta la hora límite de Mejor Mano.";
+  if (!data.pagoFinal || !data.pagoFinal.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(data.pagoFinal.fecha)) {
+    return "Falta o es inválida la fecha de pago final.";
+  }
   return null;
 }
 

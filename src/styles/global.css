@@ -41,40 +41,25 @@ body {
   overflow-x: hidden;
 }
 
-/* fichas decorativas — dibujadas en CSS puro (sin imágenes externas), asomando por los bordes */
-body::before,
-body::after {
-  content: "";
+/* fichas y cartas decorativas reales (PokerArt.jsx vía Decor.jsx), fijas en pantalla, detrás de todo */
+.decor {
   position: fixed;
-  border-radius: 50%;
+  inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.35), transparent 42%),
-    repeating-conic-gradient(var(--chip-a) 0deg 30deg, var(--chip-b) 30deg 60deg);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), inset 0 0 0 8px rgba(255, 253, 248, 0.85);
-  opacity: 0.5;
+  overflow: hidden;
 }
-body::before {
-  --chip-a: #a13d3d;
-  --chip-b: #fffdf8;
-  width: 140px;
-  height: 140px;
-  top: 10%;
-  left: -55px;
-  transform: rotate(-14deg);
+.decor-cluster {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  filter: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.5));
+  opacity: 0.85;
 }
-body::after {
-  --chip-a: #1f6b46;
-  --chip-b: #fffdf8;
-  width: 170px;
-  height: 170px;
-  bottom: 7%;
-  right: -60px;
-  transform: rotate(16deg);
-}
+.decor-tl { top: 6%; left: -40px; }
+.decor-br { bottom: 4%; right: -20px; }
 @media (max-width: 720px) {
-  body::before, body::after { display: none; }
+  .decor-cluster { display: none; }
 }
 
 /* the "table surface" card that holds every page's content, floating on the felt */
@@ -235,13 +220,25 @@ footer.page-footer { margin-top: 56px; font-size: 12px; color: var(--ink-soft); 
 }
 .cal-chip {
   font-family: "IBM Plex Mono", monospace; font-size: 10.5px; padding: 3px 6px; border-radius: 6px;
-  background: var(--surface-2); color: var(--ink-soft); display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  background: var(--surface-2); color: var(--ink-soft); display: flex; flex-direction: column; gap: 2px; white-space: nowrap;
 }
+.cal-chip-row { display: flex; align-items: center; gap: 5px; }
 .cal-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--felt-soft); flex-shrink: 0; }
-.cal-chip-main { background: color-mix(in srgb, var(--burgundy) 16%, transparent); color: var(--burgundy); }
-.cal-chip-main .cal-chip-dot { background: var(--burgundy); }
+.cal-chip-hora { color: var(--ink); }
+.cal-chip-tag { font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; font-size: 9.5px; }
+.cal-chip-tag-main { color: var(--burgundy); }
+.cal-chip-tag-regular { color: var(--good); }
+.cal-chip-temporada {
+  font-size: 9px; letter-spacing: 0.04em; color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 14%, transparent);
+  border-radius: 4px; padding: 1px 5px; align-self: flex-start;
+}
+.cal-chip-pago {
+  flex-direction: row; align-items: center; gap: 5px;
+  background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good); font-weight: 600;
+  cursor: pointer;
+}
 
-.notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+.notes-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 12px; max-width: 420px; }
 .note-box { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; background: var(--surface); font-size: 14.5px; line-height: 1.5; }
 .note-label { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--gold-strong); margin-bottom: 6px; }
 

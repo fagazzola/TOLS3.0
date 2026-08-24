@@ -46,8 +46,12 @@ function validar(data) {
     return "Falta el número máximo de recompras (Re-buys) por jugador.";
   }
 
-  if (!Array.isArray(data.costosUnicos) || data.costosUnicos.length > 10) {
-    return "Costos únicos por campeonato: máximo 10 conceptos.";
+  if (typeof data.cuotaInscripcion !== "number" || data.cuotaInscripcion < 0) {
+    return "Falta la cuota de inscripción por jugador.";
+  }
+
+  if (!Array.isArray(data.gastosCampeonato) || data.gastosCampeonato.length > 10) {
+    return "Gastos del campeonato: máximo 10 conceptos.";
   }
   if (!Array.isArray(data.cobrosPorTorneo) || data.cobrosPorTorneo.length > 10) {
     return "Cobros por torneo: máximo 10 conceptos.";

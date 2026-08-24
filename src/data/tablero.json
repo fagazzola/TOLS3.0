@@ -33,8 +33,8 @@
     ]
   },
   "recomprasMax": 2,
-  "costosUnicos": [
-    { "concepto": "Cuota de inscripción", "monto": 400 },
+  "cuotaInscripcion": 400,
+  "gastosCampeonato": [
     { "concepto": "Tesorero", "monto": 3000 },
     { "concepto": "Pulsera", "monto": 1000 }
   ],

@@ -277,39 +277,49 @@ export default function Tablero({ session }) {
       <div className="section">
         <div className="section-head"><div className="section-title">Costos</div></div>
 
-        <div className="login-field" style={{ maxWidth: 220 }}>
-          <label>Recompras (Re-buys) máximas por jugador</label>
-          <input type="number" min="0" className="field" disabled={!editable} value={draft.recomprasMax}
-            onChange={(e) => set((d) => { d.recomprasMax = Number(e.target.value); })} />
+        <div className="login-field-row">
+          <div className="login-field" style={{ maxWidth: 220 }}>
+            <label>Cuota de inscripción (por jugador)</label>
+            <input type="number" min="0" className="field" disabled={!editable} value={draft.cuotaInscripcion}
+              onChange={(e) => set((d) => { d.cuotaInscripcion = Number(e.target.value); })} />
+          </div>
+          <div className="login-field" style={{ maxWidth: 220 }}>
+            <label>Recompras (Re-buys) máximas por jugador</label>
+            <input type="number" min="0" className="field" disabled={!editable} value={draft.recomprasMax}
+              onChange={(e) => set((d) => { d.recomprasMax = Number(e.target.value); })} />
+          </div>
         </div>
-        <div className="section-sub">Se define una sola vez por campeonato. No es un costo — limita cuántas veces puede recomprar cada jugador.</div>
+        <div className="section-sub">
+          Ambos se definen una sola vez por campeonato. La cuota de inscripción se le cobra a cada jugador
+          (una vez, no es un gasto del acumulado); las recompras máximas no son un costo, solo un límite.
+        </div>
 
-        <div className="subhead">Costos únicos por campeonato — se cobran una sola vez y se extraen al final del acumulado</div>
+        <div className="subhead">Gastos del campeonato — se extraen del acumulado y se descuentan del monto a repartir</div>
         <div className="tbl">
           <div className="trow thead" style={{ gridTemplateColumns: editable ? "1fr 120px 40px" : "1fr 110px" }}>
             <div>Concepto</div><div className="right">Monto</div>{editable && <div />}
           </div>
-          {draft.costosUnicos.map((row, i) => (
+          {draft.gastosCampeonato.map((row, i) => (
             <div className="trow" style={{ gridTemplateColumns: editable ? "1fr 120px 40px" : "1fr 110px" }} key={i}>
               {editable ? (
                 <input className="field" value={row.concepto}
-                  onChange={(e) => set((d) => { d.costosUnicos[i].concepto = e.target.value; })} />
+                  onChange={(e) => set((d) => { d.gastosCampeonato[i].concepto = e.target.value; })} />
               ) : <div>{row.concepto}</div>}
               {editable ? (
                 <input type="number" className="field right" value={row.monto}
-                  onChange={(e) => set((d) => { d.costosUnicos[i].monto = Number(e.target.value); })} />
+                  onChange={(e) => set((d) => { d.gastosCampeonato[i].monto = Number(e.target.value); })} />
               ) : <div className="right num">{money(row.monto)}</div>}
               {editable && (
-                <button className="btn-icon-remove" title="Quitar concepto" disabled={draft.costosUnicos.length <= 1}
-                  onClick={() => set((d) => { d.costosUnicos.splice(i, 1); })}>✕</button>
+                <button className="btn-icon-remove" title="Quitar concepto" disabled={draft.gastosCampeonato.length <= 1}
+                  onClick={() => set((d) => { d.gastosCampeonato.splice(i, 1); })}>✕</button>
               )}
             </div>
           ))}
         </div>
         {editable && (
-          <button className="btn btn-secondary btn-add" disabled={draft.costosUnicos.length >= 10}
-            onClick={() => set((d) => { d.costosUnicos.push({ concepto: "Nuevo concepto", monto: 0 }); })}>
-            + Agregar concepto
+          <button className="btn btn-secondary btn-add" disabled={draft.gastosCampeonato.length >= 10}
+            onClick={() => set((d) => { d.gastosCampeonato.push({ concepto: "Nuevo gasto", monto: 0 }); })}>
+            + Agregar gasto
           </button>
         )}
 

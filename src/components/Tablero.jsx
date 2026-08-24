@@ -4,10 +4,15 @@ import seed from "../data/tablero.json";
 
 const API = "/api/tablero";
 
+// ids antiguos que cambiaron de nombre entre versiones del esquema — se renombran en vez de
+// duplicarse cuando más abajo se asegura que los conceptos protegidos existan
+const RENOMBRAR_ID_COBRO = { "addon-1": "addon" };
+
 // red de seguridad del lado del navegador: si el backend devuelve algo incompleto (por ejemplo,
 // datos guardados con un esquema anterior), se completa con la semilla en vez de tronar la pantalla
 function normalizar(json) {
   const d = json && typeof json === "object" ? { ...json } : {};
+  if (typeof d.nombreCampeonato !== "string") d.nombreCampeonato = seed.nombreCampeonato;
   d.premios = d.premios || seed.premios;
   d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
   d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
@@ -19,6 +24,16 @@ function normalizar(json) {
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
+
+  // migra ids viejos a los nuevos y quita duplicados por id (se queda con la primera aparición)
+  d.cobrosPorTorneo = d.cobrosPorTorneo.map((c) => (RENOMBRAR_ID_COBRO[c.id] ? { ...c, id: RENOMBRAR_ID_COBRO[c.id] } : c));
+  const idsVistos = new Set();
+  d.cobrosPorTorneo = d.cobrosPorTorneo.filter((c) => {
+    if (idsVistos.has(c.id)) return false;
+    idsVistos.add(c.id);
+    return true;
+  });
+
   for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
     const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
     if (!existente) d.cobrosPorTorneo.push({ ...req });
@@ -90,6 +105,7 @@ export default function Tablero({ session }) {
   }
 
   function validarLocal(d) {
+    if (!d.nombreCampeonato || !d.nombreCampeonato.trim()) return "Falta el nombre del campeonato.";
     if (d.premios.porTorneo.lugares.length < 1) return "Premios por torneo: debe haber al menos 1 lugar.";
     if (Math.abs(sumPct(d.premios.porTorneo.lugares) - 100) > 0.01) return "Premios por torneo: los lugares deben sumar 100%.";
     if (d.premios.porCampeonato.lugares.length < 1) return "Premios por campeonato: debe haber al menos 1 lugar.";
@@ -148,6 +164,23 @@ export default function Tablero({ session }) {
             Reglas paramétricas de la liga: reparto de premios, puntos por posición, costos de inscripción y pagos
             adicionales. {editable ? "Edita los valores y da clic en Guardar cambios." : "Vista de solo lectura — tu perfil no tiene permiso para modificarlo."}
           </p>
+        </div>
+      </div>
+
+      <div className="section" style={{ marginTop: 24 }}>
+        <div className="login-field" style={{ maxWidth: 320 }}>
+          <label>Nombre del campeonato</label>
+          <input
+            type="text" className="field" disabled={!editable}
+            placeholder="ej. 2026-I"
+            value={draft.nombreCampeonato}
+            onChange={(e) => set((d) => { d.nombreCampeonato = e.target.value; })}
+          />
+        </div>
+        <div className="section-sub">
+          Los premios, puntos y costos de esta pantalla quedan guardados bajo este nombre de campeonato — ya que
+          pueden cambiar de un campeonato a otro, igual que las fechas del calendario. Usa el mismo identificador
+          que la temporada del Calendario (ej. <code>2026-I</code>) para que quede claro a cuál corresponden.
         </div>
       </div>
 

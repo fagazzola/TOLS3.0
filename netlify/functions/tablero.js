@@ -8,10 +8,15 @@ function sumPct(lugares) {
   return lugares.reduce((a, l) => a + Number(l.pct || 0), 0);
 }
 
+// ids antiguos que cambiaron de nombre entre versiones del esquema — se renombran en vez de
+// duplicarse cuando más abajo se asegura que los conceptos protegidos existan
+const RENOMBRAR_ID_COBRO = { "addon-1": "addon" };
+
 // completa cualquier campo faltante (con los valores de la semilla) cuando lo guardado en Blobs
 // viene de una versión anterior del esquema — evita que la pantalla truene por un campo undefined
 function normalizar(data) {
   const d = data && typeof data === "object" ? { ...data } : {};
+  if (typeof d.nombreCampeonato !== "string") d.nombreCampeonato = seed.nombreCampeonato;
   d.premios = d.premios || seed.premios;
   d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
   d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
@@ -23,6 +28,17 @@ function normalizar(data) {
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
+
+  // migra ids viejos a los nuevos, y quita duplicados por id (se queda con la primera aparición) —
+  // así no se duplica un concepto protegido al renombrarlo entre versiones
+  d.cobrosPorTorneo = d.cobrosPorTorneo.map((c) => (RENOMBRAR_ID_COBRO[c.id] ? { ...c, id: RENOMBRAR_ID_COBRO[c.id] } : c));
+  const idsVistos = new Set();
+  d.cobrosPorTorneo = d.cobrosPorTorneo.filter((c) => {
+    if (idsVistos.has(c.id)) return false;
+    idsVistos.add(c.id);
+    return true;
+  });
+
   // Buy-in, Re-buy y Add-on siempre deben existir y estar protegidos contra borrado
   for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
     const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
@@ -35,6 +51,10 @@ function normalizar(data) {
 
 function validar(data) {
   if (!data || typeof data !== "object") return "Formato inválido.";
+
+  if (typeof data.nombreCampeonato !== "string" || !data.nombreCampeonato.trim()) {
+    return "Falta el nombre del campeonato.";
+  }
 
   const pt = data.premios?.porTorneo;
   if (!pt || !Array.isArray(pt.lugares) || pt.lugares.length < 1 || pt.lugares.length > 10) {

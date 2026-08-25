@@ -84,6 +84,8 @@ body {
   background: var(--surface); color: var(--ink-soft); cursor: pointer;
 }
 .nav-tab.active { background: var(--ink); color: var(--bg); border: 2px solid var(--ink); }
+.nav-tab-disabled { opacity: 0.4; cursor: not-allowed; }
+.nav-tab-disabled:hover { opacity: 0.4; }
 .nav-session { font-size: 12px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace; display: flex; align-items: center; gap: 10px; }
 
 .suit-divider {

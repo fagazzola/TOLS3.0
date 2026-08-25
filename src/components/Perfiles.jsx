@@ -19,10 +19,10 @@ export default function Perfiles({ session }) {
       <div className="headtop">
         <div>
           <div className="eyebrow">♠ Torrente On Line Series - TOLS 3.0</div>
-          <h1>Perfiles de usuario TOLS 3.0</h1>
+          <h1>Jugadores</h1>
           <p className="subtitle">
-            Roles y permisos de la liga, módulo por módulo. La contraseña de cada quien vive en el código del sitio —
-            no es seguridad bancaria, solo mantiene el sitio fuera de curiosos.
+            Roles y permisos de la liga, módulo por módulo, y la lista de usuarios. La contraseña de cada quien vive
+            en el código del sitio — no es seguridad bancaria, solo mantiene el sitio fuera de curiosos.
           </p>
         </div>
       </div>

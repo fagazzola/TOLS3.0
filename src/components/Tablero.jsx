@@ -159,7 +159,7 @@ export default function Tablero({ session }) {
       <div className="headtop">
         <div>
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
-          <h1>Tablero</h1>
+          <h1>Tablero de Control</h1>
           <p className="subtitle">
             Reglas paramétricas de la liga: reparto de premios, puntos por posición, costos de inscripción y pagos
             adicionales. {editable ? "Edita los valores y da clic en Guardar cambios." : "Vista de solo lectura — tu perfil no tiene permiso para modificarlo."}

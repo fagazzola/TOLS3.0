@@ -275,20 +275,6 @@ export default function Calendario({ session }) {
         ))}
       </div>
 
-      <div className="section">
-        <div className="section-head"><div className="section-title">Reglas del calendario</div></div>
-        <p className="section-sub">Recordatorio para los jugadores — la información oficial vive en el calendario de arriba.</p>
-        <div className="notes-grid">
-          <div className="note-box">
-            <div className="note-label">Día de pago final</div>
-            <div>
-              {dPago ? <><b>{dPago.getDate()} de {mesesLargos[dPago.getMonth()]}, {dPago.getFullYear()}</b> — {data.pagoFinal.nota}.</> : "–"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-
       {modal && (
         <div className="modal-backdrop" onClick={() => !saving && setModal(null)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>

@@ -9,15 +9,18 @@ import { puedeVer } from "./lib/permisos.js";
 
 const SESSION_KEY = "tols-session";
 
+// Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
+// (Tablero de Control, Calendario, Cobranza, Jugadores); Cobranza todavía no existe como
+// pantalla real, así que no aparece hasta que se construya. Game Night vive aparte, no aquí.
 const TABS = [
+  { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
-  { key: "tablero", modKey: "mod2", label: "Tablero", Component: Tablero },
-  { key: "perfiles", modKey: "mod3", label: "Perfiles", Component: Perfiles },
+  { key: "jugadores", modKey: "mod3", label: "Jugadores", Component: Perfiles },
 ];
 
 export default function App() {
   const [session, setSession] = useState(null);
-  const [tab, setTab] = useState("calendario");
+  const [tab, setTab] = useState("tablero");
 
   useEffect(() => {
     try {
@@ -31,7 +34,7 @@ export default function App() {
   function handleLogin(s) {
     setSession(s);
     const firstAllowed = TABS.find((t) => puedeVer(s, t.modKey));
-    setTab(firstAllowed ? firstAllowed.key : "calendario");
+    setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     } catch (e) {}
@@ -53,18 +56,21 @@ export default function App() {
     );
   }
 
-  const visibleTabs = TABS.filter((t) => puedeVer(session, t.modKey));
-  const active = visibleTabs.find((t) => t.key === tab) || visibleTabs[0];
+  // todas las pestañas se muestran siempre (para tener el panorama completo de la liga);
+  // las que el rol no tiene permitidas aparecen deshabilitadas en vez de ocultarse
+  const tabsConPermiso = TABS.map((t) => ({ ...t, permitido: puedeVer(session, t.modKey) }));
+  const permitidas = tabsConPermiso.filter((t) => t.permitido);
+  const active = permitidas.find((t) => t.key === tab) || permitidas[0];
 
   return (
     <>
       <Decor />
       <div className="wrap">
-        <Nav tabs={visibleTabs} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
+        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
         {active ? (
           <active.Component session={session} />
         ) : (
-          <p className="subtitle">Tu perfil no tiene acceso a ningún módulo todavía. Pídele a un administrador que revise tus permisos en Perfiles.</p>
+          <p className="subtitle">Tu perfil no tiene acceso a ningún módulo todavía. Pídele a un administrador que revise tus permisos en Jugadores.</p>
         )}
       </div>
     </>

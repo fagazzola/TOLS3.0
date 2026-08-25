@@ -1,10 +1,10 @@
 import perfiles from "../data/perfiles.json";
 
 export const MODULOS = [
+  { key: "mod2", label: "Tablero de Control" },
   { key: "mod1", label: "Calendario" },
-  { key: "mod2", label: "Tablero" },
-  { key: "mod3", label: "Perfiles" },
   { key: "mod4", label: "Cobranza" },
+  { key: "mod3", label: "Jugadores" },
   { key: "mod5", label: "Game Night" },
 ];
 

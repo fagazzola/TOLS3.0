@@ -14,6 +14,7 @@
     { "n": 12, "fecha": "2026-12-07", "hora": "20:00", "main": true, "temporada": "2026-I" }
   ],
   "pagoFinal": { "fecha": "2026-12-14", "nota": "7 días después del último torneo" },
+  "horaLimiteMejorMano": "22:00",
   "defaultDow": 1,
   "defaultHora": "20:00"
 }

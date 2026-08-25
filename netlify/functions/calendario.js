@@ -3,6 +3,25 @@ import seed from "../../src/data/calendario.json";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
+// los torneos guardados antes de que existiera el campo "temporada" (campeonato) por torneo no lo
+// tienen — se completan con el primer campeonato del registro para que no se queden huérfanos.
+// Mismo patrón defensivo que ya se usa en tablero.js y campeonatos.js: leer, completar lo que falte,
+// y volver a guardar la versión corregida.
+async function conTemporadaCompletada(data) {
+  const faltantes = (data.torneos || []).some((t) => !t.temporada);
+  if (!faltantes) return data;
+  try {
+    const campStore = getStore("tols-campeonatos");
+    const camp = await campStore.get("data", { type: "json" });
+    const primero = Array.isArray(camp?.nombres) && camp.nombres.length ? camp.nombres[0] : "";
+    if (!primero) return data;
+    return { ...data, torneos: data.torneos.map((t) => (t.temporada ? t : { ...t, temporada: primero })) };
+  } catch (e) {
+    // si el registro de campeonatos no está disponible, se deja tal cual en vez de bloquear el calendario
+    return data;
+  }
+}
+
 function validar(data) {
   if (!data || !Array.isArray(data.torneos)) return "Formato inválido: falta el arreglo de torneos.";
   for (const t of data.torneos) {
@@ -24,7 +43,11 @@ export default async (req) => {
       data = seed;
       await store.setJSON("data", data);
     }
-    return new Response(JSON.stringify(data), { headers: HEADERS });
+    const completado = await conTemporadaCompletada(data);
+    if (JSON.stringify(completado) !== JSON.stringify(data)) {
+      await store.setJSON("data", completado);
+    }
+    return new Response(JSON.stringify(completado), { headers: HEADERS });
   }
 
   if (req.method === "PUT" || req.method === "POST") {

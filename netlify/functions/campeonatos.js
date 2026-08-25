@@ -30,12 +30,30 @@ function validar(data) {
   return null;
 }
 
+// campeonatos que existen con datos guardados en el Tablero (tols-tablero) pero que por algún motivo
+// (un fallo a medias al agregar/renombrar, datos migrados de un esquema anterior, etc.) no quedaron
+// en este registro — se agregan solos al final para que no queden "huérfanos" sin aparecer en el combo
+async function conHuerfanosSanados(normalizado) {
+  try {
+    const tableroStore = getStore("tols-tablero");
+    const tablero = await tableroStore.get("data", { type: "json" });
+    if (!tablero || typeof tablero !== "object") return normalizado;
+    const huerfanos = Object.keys(tablero).filter((n) => !normalizado.nombres.includes(n));
+    if (huerfanos.length === 0) return normalizado;
+    return { nombres: [...normalizado.nombres, ...huerfanos] };
+  } catch (e) {
+    // si el store del tablero no está disponible por lo que sea, no se bloquea el registro por eso
+    return normalizado;
+  }
+}
+
 export default async (req) => {
   const store = getStore("tols-campeonatos");
 
   if (req.method === "GET") {
     const data = await store.get("data", { type: "json" });
-    const normalizado = normalizar(data);
+    let normalizado = normalizar(data);
+    normalizado = await conHuerfanosSanados(normalizado);
     if (!data || JSON.stringify(data) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
     }

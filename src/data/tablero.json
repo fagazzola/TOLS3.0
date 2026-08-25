@@ -37,7 +37,59 @@
     "cuotaInscripcion": 400,
     "gastosCampeonato": [
       { "concepto": "Tesorero", "monto": 3000 },
-      { "concepto": "Pulsera", "monto": 1000 }
+      { "concepto": "Pulsera", "monto": 1000 },
+      { "concepto": "Hosting sitio", "monto": 1500 }
+    ],
+    "cobrosPorTorneo": [
+      { "id": "buyin", "nombre": "Buy-in", "regular": 400, "main": 600, "protegido": true },
+      { "id": "rebuy", "nombre": "Re-buy (c/u)", "regular": 300, "main": 400, "protegido": true },
+      { "id": "addon", "nombre": "Add-on", "regular": 350, "main": 500, "protegido": true }
+    ],
+    "pagosPorTorneo": [
+      { "nombre": "Sale en la burbuja", "regular": 0, "main": 500 },
+      { "nombre": "Mejor Mano", "regular": 0, "main": 500 }
+    ]
+  },
+  "2026-Clausura": {
+    "premios": {
+      "porTorneo": {
+        "pctAcumulado": 15,
+        "lugares": [
+          { "label": "Lugar 1", "pct": 58 },
+          { "label": "Lugar 2", "pct": 28 },
+          { "label": "Lugar 3", "pct": 14 }
+        ]
+      },
+      "porCampeonato": {
+        "lugares": [
+          { "label": "Lugar 1", "pct": 50 },
+          { "label": "Lugar 2", "pct": 25 },
+          { "label": "Lugar 3", "pct": 12.5 },
+          { "label": "Lugar 4", "pct": 6.25 },
+          { "label": "Rey Killer", "pct": 6.25, "reyKiller": true }
+        ]
+      }
+    },
+    "puntos": {
+      "asistencia": { "regular": 1, "main": 2 },
+      "posiciones": [
+        { "pos": 1, "regular": 25, "main": 29 },
+        { "pos": 2, "regular": 18, "main": 21 },
+        { "pos": 3, "regular": 15, "main": 17 },
+        { "pos": 4, "regular": 10, "main": 11 },
+        { "pos": 5, "regular": 8, "main": 9 },
+        { "pos": 6, "regular": 6, "main": 7 },
+        { "pos": 7, "regular": 5, "main": 6 },
+        { "pos": 8, "regular": 3, "main": 4 },
+        { "pos": 9, "regular": 2, "main": 3 }
+      ]
+    },
+    "recomprasMax": 2,
+    "cuotaInscripcion": 400,
+    "gastosCampeonato": [
+      { "concepto": "Tesorero", "monto": 3000 },
+      { "concepto": "Pulsera", "monto": 1000 },
+      { "concepto": "Hosting sitio", "monto": 1500 }
     ],
     "cobrosPorTorneo": [
       { "id": "buyin", "nombre": "Buy-in", "regular": 400, "main": 600, "protegido": true },

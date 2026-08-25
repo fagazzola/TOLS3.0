@@ -4,33 +4,32 @@ import seed from "../../src/data/tablero.json";
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const TOL = 0.01; // tolerancia para sumas de porcentaje por redondeo flotante
 
-function sumPct(lugares) {
-  return lugares.reduce((a, l) => a + Number(l.pct || 0), 0);
-}
-
 // ids antiguos que cambiaron de nombre entre versiones del esquema — se renombran en vez de
 // duplicarse cuando más abajo se asegura que los conceptos protegidos existan
 const RENOMBRAR_ID_COBRO = { "addon-1": "addon" };
 
-// completa cualquier campo faltante (con los valores de la semilla) cuando lo guardado en Blobs
-// viene de una versión anterior del esquema — evita que la pantalla truene por un campo undefined
-function normalizar(data) {
-  const d = data && typeof data === "object" ? { ...data } : {};
-  if (typeof d.nombreCampeonato !== "string") d.nombreCampeonato = seed.nombreCampeonato;
-  d.premios = d.premios || seed.premios;
-  d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
-  d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
-  d.puntos = d.puntos || seed.puntos;
-  d.puntos.asistencia = d.puntos.asistencia || seed.puntos.asistencia;
-  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : seed.puntos.posiciones;
-  if (typeof d.recomprasMax !== "number") d.recomprasMax = seed.recomprasMax;
-  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = seed.cuotaInscripcion;
-  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
-  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
-  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
+const PLANTILLA = Object.values(seed)[0];
 
-  // migra ids viejos a los nuevos, y quita duplicados por id (se queda con la primera aparición) —
-  // así no se duplica un concepto protegido al renombrarlo entre versiones
+function sumPct(lugares) {
+  return lugares.reduce((a, l) => a + Number(l.pct || 0), 0);
+}
+
+// completa/corrige los datos de UN campeonato (no el mapa completo) con la plantilla como respaldo
+function normalizarUno(datos, plantilla) {
+  const base = plantilla || PLANTILLA;
+  const d = datos && typeof datos === "object" ? { ...datos } : {};
+  d.premios = d.premios || base.premios;
+  d.premios.porTorneo = d.premios.porTorneo || base.premios.porTorneo;
+  d.premios.porCampeonato = d.premios.porCampeonato || base.premios.porCampeonato;
+  d.puntos = d.puntos || base.puntos;
+  d.puntos.asistencia = d.puntos.asistencia || base.puntos.asistencia;
+  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : base.puntos.posiciones;
+  if (typeof d.recomprasMax !== "number") d.recomprasMax = base.recomprasMax;
+  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = base.cuotaInscripcion;
+  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : base.gastosCampeonato;
+  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : base.cobrosPorTorneo;
+  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : base.pagosPorTorneo;
+
   d.cobrosPorTorneo = d.cobrosPorTorneo.map((c) => (RENOMBRAR_ID_COBRO[c.id] ? { ...c, id: RENOMBRAR_ID_COBRO[c.id] } : c));
   const idsVistos = new Set();
   d.cobrosPorTorneo = d.cobrosPorTorneo.filter((c) => {
@@ -38,24 +37,37 @@ function normalizar(data) {
     idsVistos.add(c.id);
     return true;
   });
-
-  // Buy-in, Re-buy y Add-on siempre deben existir y estar protegidos contra borrado
-  for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
+  for (const req of (base.cobrosPorTorneo || []).filter((c) => c.protegido)) {
     const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
     if (!existente) d.cobrosPorTorneo.push({ ...req });
     else existente.protegido = true;
   }
-  delete d.costosUnicos; // campo del esquema anterior, ya no se usa
+  delete d.nombreCampeonato; // campo del esquema anterior (ahora el nombre es la llave del mapa)
   return d;
 }
 
-function validar(data) {
-  if (!data || typeof data !== "object") return "Formato inválido.";
-
-  if (typeof data.nombreCampeonato !== "string" || !data.nombreCampeonato.trim()) {
-    return "Falta el nombre del campeonato.";
+// completa/corrige el mapa completo { [campeonato]: datos }. Migra el esquema plano de versiones
+// anteriores (un solo campeonato con "nombreCampeonato" y los campos al nivel raíz) envolviéndolo
+// bajo su propio nombre como llave — así los datos ya guardados en Blobs no se pierden.
+function normalizarMapa(raw) {
+  if (!raw || typeof raw !== "object") return structuredCloneSafe(seed);
+  if (raw.premios || raw.nombreCampeonato) {
+    const nombre = raw.nombreCampeonato && String(raw.nombreCampeonato).trim() ? String(raw.nombreCampeonato).trim() : Object.keys(seed)[0];
+    return { [nombre]: normalizarUno(raw, PLANTILLA) };
   }
+  const mapa = {};
+  for (const [nombre, datos] of Object.entries(raw)) {
+    mapa[nombre] = normalizarUno(datos, PLANTILLA);
+  }
+  if (Object.keys(mapa).length === 0) return structuredCloneSafe(seed);
+  return mapa;
+}
 
+function structuredCloneSafe(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function validarUno(data) {
   const pt = data.premios?.porTorneo;
   if (!pt || !Array.isArray(pt.lugares) || pt.lugares.length < 1 || pt.lugares.length > 10) {
     return "Premios por torneo: debe haber entre 1 y 10 lugares.";
@@ -90,7 +102,6 @@ function validar(data) {
   if (typeof data.recomprasMax !== "number" || data.recomprasMax < 0) {
     return "Falta el número máximo de recompras (Re-buys) por jugador.";
   }
-
   if (typeof data.cuotaInscripcion !== "number" || data.cuotaInscripcion < 0) {
     return "Falta la cuota de inscripción por jugador.";
   }
@@ -118,10 +129,9 @@ export default async (req) => {
   const store = getStore("tols-tablero");
 
   if (req.method === "GET") {
-    let data = await store.get("data", { type: "json" });
-    const normalizado = normalizar(data || seed);
-    // si lo guardado venía incompleto (esquema anterior) o no existía, se re-guarda ya corregido
-    if (!data || JSON.stringify(data) !== JSON.stringify(normalizado)) {
+    const raw = await store.get("data", { type: "json" });
+    const normalizado = normalizarMapa(raw);
+    if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
     }
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
@@ -134,13 +144,50 @@ export default async (req) => {
     } catch (e) {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
-    const normalizado = normalizar(body);
-    const problema = validar(normalizado);
-    if (problema) {
-      return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
+
+    const raw = await store.get("data", { type: "json" });
+    const mapa = normalizarMapa(raw);
+
+    if (body?.accion === "guardar") {
+      const campeonato = String(body.campeonato || "").trim();
+      if (!campeonato) {
+        return new Response(JSON.stringify({ error: "Falta el nombre del campeonato." }), { status: 400, headers: HEADERS });
+      }
+      const datos = normalizarUno(body.data, mapa[campeonato] || PLANTILLA);
+      const problema = validarUno(datos);
+      if (problema) {
+        return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
+      }
+      mapa[campeonato] = datos;
+    } else if (body?.accion === "renombrar") {
+      const de = String(body.de || "").trim();
+      const a = String(body.a || "").trim();
+      if (!de || !a) {
+        return new Response(JSON.stringify({ error: "Faltan los nombres para renombrar." }), { status: 400, headers: HEADERS });
+      }
+      if (!mapa[de]) {
+        return new Response(JSON.stringify({ error: `No hay datos guardados para "${de}".` }), { status: 400, headers: HEADERS });
+      }
+      if (mapa[a] && a !== de) {
+        return new Response(JSON.stringify({ error: `Ya existe un campeonato "${a}".` }), { status: 400, headers: HEADERS });
+      }
+      mapa[a] = mapa[de];
+      if (a !== de) delete mapa[de];
+    } else if (body?.accion === "eliminar") {
+      const campeonato = String(body.campeonato || "").trim();
+      if (!campeonato || !mapa[campeonato]) {
+        return new Response(JSON.stringify({ error: "Ese campeonato no tiene datos guardados." }), { status: 400, headers: HEADERS });
+      }
+      if (Object.keys(mapa).length <= 1) {
+        return new Response(JSON.stringify({ error: "Debe quedar al menos un campeonato con datos." }), { status: 400, headers: HEADERS });
+      }
+      delete mapa[campeonato];
+    } else {
+      return new Response(JSON.stringify({ error: "Acción no reconocida." }), { status: 400, headers: HEADERS });
     }
-    await store.setJSON("data", normalizado);
-    return new Response(JSON.stringify(normalizado), { headers: HEADERS });
+
+    await store.setJSON("data", mapa);
+    return new Response(JSON.stringify(mapa), { headers: HEADERS });
   }
 
   return new Response(JSON.stringify({ error: "Método no permitido." }), { status: 405, headers: HEADERS });

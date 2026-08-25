@@ -3,6 +3,7 @@ import { puedeEditar } from "../lib/permisos.js";
 import { MoneyBadge } from "./PokerArt.jsx";
 
 const API = "/api/calendario";
+const API_CAMP = "/api/campeonatos";
 
 const diasCortos = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const mesesLargos = [
@@ -20,21 +21,23 @@ function cap(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// sugiere la temporada por defecto: la del torneo existente más cercano en fecha,
-// o si no hay ninguno, "<año>-I"
-function sugerirTemporada(torneos, fechaRef) {
-  if (torneos.length === 0) return `${new Date(fechaRef).getFullYear()}-I`;
-  const ref = new Date(fechaRef + "T00:00:00").getTime();
-  let mejor = torneos[0];
-  let mejorDist = Infinity;
-  for (const t of torneos) {
-    const dist = Math.abs(new Date(t.fecha + "T00:00:00").getTime() - ref);
-    if (dist < mejorDist) {
-      mejorDist = dist;
-      mejor = t;
+// sugiere el campeonato por defecto para un torneo nuevo: el del torneo existente más cercano en
+// fecha, o si no hay ninguno, el primero de la lista de campeonatos registrados
+function sugerirCampeonato(torneos, fechaRef, campeonatos) {
+  if (torneos.length > 0) {
+    const ref = new Date(fechaRef + "T00:00:00").getTime();
+    let mejor = torneos[0];
+    let mejorDist = Infinity;
+    for (const t of torneos) {
+      const dist = Math.abs(new Date(t.fecha + "T00:00:00").getTime() - ref);
+      if (dist < mejorDist) {
+        mejorDist = dist;
+        mejor = t;
+      }
     }
+    if (mejor.temporada) return mejor.temporada;
   }
-  return mejor.temporada || `${new Date(fechaRef).getFullYear()}-I`;
+  return campeonatos[0] || "";
 }
 
 // arma la cuadrícula completa del mes: semanas de domingo a sábado, incluyendo
@@ -60,9 +63,10 @@ function buildGrid(viewMonth) {
   return weeks;
 }
 
-export default function Calendario({ session }) {
-  const editable = puedeEditar(session, "mod1");
+export default function Calendario({ session, perfiles }) {
+  const editable = puedeEditar(perfiles, session, "mod1");
   const [data, setData] = useState(null);
+  const [campeonatos, setCampeonatos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -75,12 +79,20 @@ export default function Calendario({ session }) {
   const [pagoModal, setPagoModal] = useState(null); // { fecha, nota }
 
   useEffect(() => {
-    fetch(API)
-      .then((r) => {
+    Promise.all([
+      fetch(API).then((r) => {
         if (!r.ok) throw new Error("No se pudo cargar el calendario (HTTP " + r.status + ").");
         return r.json();
+      }),
+      fetch(API_CAMP).then((r) => {
+        if (!r.ok) throw new Error("No se pudo cargar la lista de campeonatos (HTTP " + r.status + ").");
+        return r.json();
+      }),
+    ])
+      .then(([cal, camp]) => {
+        setData(cal);
+        setCampeonatos(Array.isArray(camp?.nombres) ? camp.nombres : []);
       })
-      .then((json) => setData(json))
       .catch((e) => setLoadError(e.message || "Error al cargar el calendario."))
       .finally(() => setLoading(false));
   }, []);
@@ -122,7 +134,7 @@ export default function Calendario({ session }) {
       fecha: iso(d),
       hora: existing ? existing.hora : data.defaultHora,
       main: existing ? existing.main : false,
-      temporada: existing ? (existing.temporada || sugerirTemporada(data.torneos, iso(d))) : sugerirTemporada(data.torneos, iso(d)),
+      temporada: existing ? (existing.temporada || sugerirCampeonato(data.torneos, iso(d), campeonatos)) : sugerirCampeonato(data.torneos, iso(d), campeonatos),
       isNew: !existing,
     });
   }
@@ -160,7 +172,7 @@ export default function Calendario({ session }) {
       return;
     }
     if (!modal.temporada.trim()) {
-      setSaveError("Indica la temporada (por ejemplo 2026-I).");
+      setSaveError("Indica el campeonato del torneo.");
       return;
     }
     let torneos = data.torneos.filter((t) => t.fecha !== modal.fechaOriginal);
@@ -298,14 +310,17 @@ export default function Calendario({ session }) {
               />
             </div>
             <div className="login-field">
-              <label>Temporada</label>
-              <input
-                type="text"
+              <label>Campeonato</label>
+              <select
                 className="field"
-                placeholder="p. ej. 2026-I"
                 value={modal.temporada}
                 onChange={(e) => setModal({ ...modal, temporada: e.target.value })}
-              />
+              >
+                {campeonatos.length === 0 && <option value="">(sin campeonatos definidos)</option>}
+                {campeonatos.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
             <label className="chk-inline">
               <input

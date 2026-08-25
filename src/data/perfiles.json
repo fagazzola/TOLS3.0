@@ -22,6 +22,6 @@
     }
   ],
   "usuarios": [
-    { "nombre": "Federico", "usuario": "federico", "password": "cambia-esta-clave", "rol": "Administrador General" }
+    { "nombre": "Federico", "usuario": "federico", "correo": "fagazzola@gmail.com", "password": "cambia-esta-clave", "rol": "Administrador General" }
   ]
 }

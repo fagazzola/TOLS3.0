@@ -3,47 +3,16 @@ import { puedeEditar } from "../lib/permisos.js";
 import seed from "../data/tablero.json";
 
 const API = "/api/tablero";
+const API_CAMP = "/api/campeonatos";
+
+const PLANTILLA = Object.values(seed)[0];
 
 // ids antiguos que cambiaron de nombre entre versiones del esquema — se renombran en vez de
 // duplicarse cuando más abajo se asegura que los conceptos protegidos existan
 const RENOMBRAR_ID_COBRO = { "addon-1": "addon" };
 
-// red de seguridad del lado del navegador: si el backend devuelve algo incompleto (por ejemplo,
-// datos guardados con un esquema anterior), se completa con la semilla en vez de tronar la pantalla
-function normalizar(json) {
-  const d = json && typeof json === "object" ? { ...json } : {};
-  if (typeof d.nombreCampeonato !== "string") d.nombreCampeonato = seed.nombreCampeonato;
-  d.premios = d.premios || seed.premios;
-  d.premios.porTorneo = d.premios.porTorneo || seed.premios.porTorneo;
-  d.premios.porCampeonato = d.premios.porCampeonato || seed.premios.porCampeonato;
-  d.puntos = d.puntos || seed.puntos;
-  d.puntos.asistencia = d.puntos.asistencia || seed.puntos.asistencia;
-  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : seed.puntos.posiciones;
-  if (typeof d.recomprasMax !== "number") d.recomprasMax = seed.recomprasMax;
-  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = seed.cuotaInscripcion;
-  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : seed.gastosCampeonato;
-  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : seed.cobrosPorTorneo;
-  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : seed.pagosPorTorneo;
-
-  // migra ids viejos a los nuevos y quita duplicados por id (se queda con la primera aparición)
-  d.cobrosPorTorneo = d.cobrosPorTorneo.map((c) => (RENOMBRAR_ID_COBRO[c.id] ? { ...c, id: RENOMBRAR_ID_COBRO[c.id] } : c));
-  const idsVistos = new Set();
-  d.cobrosPorTorneo = d.cobrosPorTorneo.filter((c) => {
-    if (idsVistos.has(c.id)) return false;
-    idsVistos.add(c.id);
-    return true;
-  });
-
-  for (const req of seed.cobrosPorTorneo.filter((c) => c.protegido)) {
-    const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
-    if (!existente) d.cobrosPorTorneo.push({ ...req });
-    else existente.protegido = true;
-  }
-  return d;
-}
-
 function money(n) {
-  return "$" + Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 });
+  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
 }
 function pct(n) {
   return Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 }) + "%";
@@ -55,8 +24,45 @@ function nuevoId() {
   return "custom-" + Math.random().toString(36).slice(2, 9);
 }
 
-export default function Tablero({ session }) {
-  const editable = puedeEditar(session, "mod2");
+// red de seguridad del lado del navegador: si el backend devuelve algo incompleto (por ejemplo,
+// datos guardados con un esquema anterior), se completa con la plantilla en vez de tronar la pantalla
+function normalizar(datos, plantilla) {
+  const base = plantilla || PLANTILLA;
+  const d = datos && typeof datos === "object" ? structuredClone(datos) : {};
+  d.premios = d.premios || structuredClone(base.premios);
+  d.premios.porTorneo = d.premios.porTorneo || structuredClone(base.premios.porTorneo);
+  d.premios.porCampeonato = d.premios.porCampeonato || structuredClone(base.premios.porCampeonato);
+  d.puntos = d.puntos || structuredClone(base.puntos);
+  d.puntos.asistencia = d.puntos.asistencia || structuredClone(base.puntos.asistencia);
+  d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : structuredClone(base.puntos.posiciones);
+  if (typeof d.recomprasMax !== "number") d.recomprasMax = base.recomprasMax;
+  if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = base.cuotaInscripcion;
+  d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : structuredClone(base.gastosCampeonato);
+  d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : structuredClone(base.cobrosPorTorneo);
+  d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : structuredClone(base.pagosPorTorneo);
+
+  d.cobrosPorTorneo = d.cobrosPorTorneo.map((c) => (RENOMBRAR_ID_COBRO[c.id] ? { ...c, id: RENOMBRAR_ID_COBRO[c.id] } : c));
+  const idsVistos = new Set();
+  d.cobrosPorTorneo = d.cobrosPorTorneo.filter((c) => {
+    if (idsVistos.has(c.id)) return false;
+    idsVistos.add(c.id);
+    return true;
+  });
+  for (const req of (base.cobrosPorTorneo || []).filter((c) => c.protegido)) {
+    const existente = d.cobrosPorTorneo.find((c) => c.id === req.id);
+    if (!existente) d.cobrosPorTorneo.push({ ...req });
+    else existente.protegido = true;
+  }
+  delete d.nombreCampeonato;
+  return d;
+}
+
+export default function Tablero({ session, perfiles }) {
+  const editable = puedeEditar(perfiles, session, "mod2");
+
+  const [campeonatos, setCampeonatos] = useState([]);
+  const [campeonatoSel, setCampeonatoSel] = useState("");
+  const [tableroMap, setTableroMap] = useState(null);
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -65,14 +71,30 @@ export default function Tablero({ session }) {
   const [saveError, setSaveError] = useState("");
   const [saveOk, setSaveOk] = useState(false);
 
+  const [gestionAbierta, setGestionAbierta] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [renombres, setRenombres] = useState({});
+  const [campSaving, setCampSaving] = useState(false);
+  const [campActionError, setCampActionError] = useState("");
+
   useEffect(() => {
-    fetch(API)
-      .then((r) => {
+    Promise.all([
+      fetch(API_CAMP).then((r) => {
+        if (!r.ok) throw new Error("No se pudo cargar la lista de campeonatos (HTTP " + r.status + ").");
+        return r.json();
+      }),
+      fetch(API).then((r) => {
         if (!r.ok) throw new Error("No se pudo cargar el tablero (HTTP " + r.status + ").");
         return r.json();
-      })
-      .then((json) => {
-        const normalizado = normalizar(json);
+      }),
+    ])
+      .then(([camp, tab]) => {
+        const nombres = camp.nombres || [];
+        setCampeonatos(nombres);
+        setTableroMap(tab || {});
+        const primero = nombres[0] || Object.keys(tab || {})[0] || "";
+        setCampeonatoSel(primero);
+        const normalizado = normalizar(tab?.[primero], Object.values(tab || {})[0]);
         setData(normalizado);
         setDraft(normalizado);
       })
@@ -86,8 +108,8 @@ export default function Tablero({ session }) {
       <div>
         <p className="subtitle">No se pudo cargar el tablero: {loadError}</p>
         <p className="section-sub">
-          Si el sitio se acaba de desplegar, confirma que la función <code>/api/tablero</code> y el paquete{" "}
-          <code>@netlify/blobs</code> están publicados.
+          Si el sitio se acaba de desplegar, confirma que las funciones <code>/api/tablero</code> y{" "}
+          <code>/api/campeonatos</code>, y el paquete <code>@netlify/blobs</code>, están publicados.
         </p>
       </div>
     );
@@ -104,8 +126,16 @@ export default function Tablero({ session }) {
     });
   }
 
+  function seleccionarCampeonato(nombre) {
+    setCampeonatoSel(nombre);
+    const normalizado = normalizar(tableroMap?.[nombre], Object.values(tableroMap || {})[0]);
+    setData(normalizado);
+    setDraft(normalizado);
+    setSaveError("");
+    setSaveOk(false);
+  }
+
   function validarLocal(d) {
-    if (!d.nombreCampeonato || !d.nombreCampeonato.trim()) return "Falta el nombre del campeonato.";
     if (d.premios.porTorneo.lugares.length < 1) return "Premios por torneo: debe haber al menos 1 lugar.";
     if (Math.abs(sumPct(d.premios.porTorneo.lugares) - 100) > 0.01) return "Premios por torneo: los lugares deben sumar 100%.";
     if (d.premios.porCampeonato.lugares.length < 1) return "Premios por campeonato: debe haber al menos 1 lugar.";
@@ -131,12 +161,14 @@ export default function Tablero({ session }) {
       const r = await fetch(API, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ accion: "guardar", campeonato: campeonatoSel, data: draft }),
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
-      setData(json);
-      setDraft(json);
+      setTableroMap(json);
+      const normalizado = normalizar(json[campeonatoSel], Object.values(json)[0]);
+      setData(normalizado);
+      setDraft(normalizado);
       setSaveOk(true);
     } catch (e) {
       setSaveError(e.message || "No se pudo guardar.");
@@ -149,6 +181,130 @@ export default function Tablero({ session }) {
     setDraft(data);
     setSaveError("");
     setSaveOk(false);
+  }
+
+  async function agregarCampeonato() {
+    const nombre = nuevoNombre.trim();
+    if (!nombre) return;
+    if (campeonatos.includes(nombre)) {
+      setCampActionError(`Ya existe un campeonato "${nombre}".`);
+      return;
+    }
+    setCampSaving(true);
+    setCampActionError("");
+    try {
+      const r = await fetch(API_CAMP, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nombres: [...campeonatos, nombre] }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo agregar el campeonato.");
+      setCampeonatos(json.nombres);
+      setNuevoNombre("");
+      seleccionarCampeonato(nombre);
+    } catch (e) {
+      setCampActionError(e.message || "No se pudo agregar el campeonato.");
+    } finally {
+      setCampSaving(false);
+    }
+  }
+
+  async function renombrarCampeonato(de, aRaw) {
+    const a = aRaw.trim();
+    if (!a || a === de) {
+      setRenombres((r) => { const c = { ...r }; delete c[de]; return c; });
+      return;
+    }
+    if (campeonatos.includes(a)) {
+      setCampActionError(`Ya existe un campeonato "${a}".`);
+      return;
+    }
+    setCampSaving(true);
+    setCampActionError("");
+    try {
+      const nuevaLista = campeonatos.map((n) => (n === de ? a : n));
+      const rc = await fetch(API_CAMP, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nombres: nuevaLista }),
+      });
+      const jc = await rc.json();
+      if (!rc.ok) throw new Error(jc.error || "No se pudo renombrar el campeonato.");
+      setCampeonatos(jc.nombres);
+
+      const tieneDatos = tableroMap && Object.prototype.hasOwnProperty.call(tableroMap, de);
+      let nuevoMapa = tableroMap;
+      if (tieneDatos) {
+        const rt = await fetch(API, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ accion: "renombrar", de, a }),
+        });
+        const jt = await rt.json();
+        if (!rt.ok) throw new Error(jt.error || "No se pudo renombrar los datos del campeonato.");
+        nuevoMapa = jt;
+        setTableroMap(jt);
+      }
+
+      setRenombres((r) => { const c = { ...r }; delete c[de]; return c; });
+      if (campeonatoSel === de) {
+        setCampeonatoSel(a);
+        const normalizado = normalizar(nuevoMapa?.[a], Object.values(nuevoMapa || {})[0]);
+        setData(normalizado);
+        setDraft(normalizado);
+      }
+    } catch (e) {
+      setCampActionError(e.message || "No se pudo renombrar el campeonato.");
+    } finally {
+      setCampSaving(false);
+    }
+  }
+
+  async function eliminarCampeonato(nombre) {
+    if (campeonatos.length <= 1) {
+      setCampActionError("Debe quedar al menos un campeonato.");
+      return;
+    }
+    setCampSaving(true);
+    setCampActionError("");
+    try {
+      const nuevaLista = campeonatos.filter((n) => n !== nombre);
+      const rc = await fetch(API_CAMP, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nombres: nuevaLista }),
+      });
+      const jc = await rc.json();
+      if (!rc.ok) throw new Error(jc.error || "No se pudo eliminar el campeonato.");
+      setCampeonatos(jc.nombres);
+
+      const tieneDatos = tableroMap && Object.prototype.hasOwnProperty.call(tableroMap, nombre);
+      let nuevoMapa = tableroMap;
+      if (tieneDatos && Object.keys(tableroMap).length > 1) {
+        const rt = await fetch(API, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ accion: "eliminar", campeonato: nombre }),
+        });
+        const jt = await rt.json();
+        if (!rt.ok) throw new Error(jt.error || "No se pudo eliminar los datos del campeonato.");
+        nuevoMapa = jt;
+        setTableroMap(jt);
+      }
+
+      if (campeonatoSel === nombre) {
+        const siguiente = jc.nombres[0];
+        setCampeonatoSel(siguiente);
+        const normalizado = normalizar(nuevoMapa?.[siguiente], Object.values(nuevoMapa || {})[0]);
+        setData(normalizado);
+        setDraft(normalizado);
+      }
+    } catch (e) {
+      setCampActionError(e.message || "No se pudo eliminar el campeonato.");
+    } finally {
+      setCampSaving(false);
+    }
   }
 
   const sumTorneo = sumPct(draft.premios.porTorneo.lugares);
@@ -169,18 +325,78 @@ export default function Tablero({ session }) {
 
       <div className="section" style={{ marginTop: 24 }}>
         <div className="login-field" style={{ maxWidth: 320 }}>
-          <label>Nombre del campeonato</label>
-          <input
-            type="text" className="field" disabled={!editable}
-            placeholder="ej. 2026-I"
-            value={draft.nombreCampeonato}
-            onChange={(e) => set((d) => { d.nombreCampeonato = e.target.value; })}
-          />
+          <label>Campeonato</label>
+          <select
+            className="field"
+            value={campeonatoSel}
+            disabled={!editable || dirty || campSaving}
+            onChange={(e) => seleccionarCampeonato(e.target.value)}
+          >
+            {campeonatos.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
         </div>
+        {dirty && <div className="section-note" style={{ marginTop: 6 }}>Guarda o cancela tus cambios de abajo antes de cambiar de campeonato.</div>}
+
+        {editable && (
+          <>
+            <button
+              className="btn btn-secondary btn-add"
+              onClick={() => setGestionAbierta((v) => !v)}
+              disabled={dirty}
+            >
+              {gestionAbierta ? "Ocultar gestión de campeonatos" : "Agregar, renombrar o eliminar campeonatos"}
+            </button>
+
+            {gestionAbierta && (
+              <div className="tbl" style={{ marginTop: 10, maxWidth: 420 }}>
+                {campeonatos.map((n) => {
+                  const valorActual = renombres[n] ?? n;
+                  const cambiado = valorActual.trim() && valorActual.trim() !== n;
+                  return (
+                    <div className="trow" style={{ gridTemplateColumns: "1fr 34px 34px" }} key={n}>
+                      <input
+                        className="field"
+                        value={valorActual}
+                        disabled={campSaving}
+                        onChange={(e) => setRenombres((r) => ({ ...r, [n]: e.target.value }))}
+                      />
+                      <button
+                        className="btn-icon-confirm"
+                        title="Guardar nuevo nombre"
+                        disabled={campSaving || !cambiado}
+                        onClick={() => renombrarCampeonato(n, valorActual)}
+                      >✓</button>
+                      <button
+                        className="btn-icon-remove"
+                        title="Eliminar campeonato"
+                        disabled={campSaving || campeonatos.length <= 1}
+                        onClick={() => eliminarCampeonato(n)}
+                      >✕</button>
+                    </div>
+                  );
+                })}
+                <div className="trow" style={{ gridTemplateColumns: "1fr 76px" }}>
+                  <input
+                    className="field"
+                    placeholder="Nuevo campeonato (ej. 2027-I)"
+                    value={nuevoNombre}
+                    disabled={campSaving}
+                    onChange={(e) => setNuevoNombre(e.target.value)}
+                  />
+                  <button className="btn btn-primary" disabled={campSaving || !nuevoNombre.trim()} onClick={agregarCampeonato}>
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+            )}
+            {campActionError && <div className="login-error">{campActionError}</div>}
+          </>
+        )}
+
         <div className="section-sub">
-          Los premios, puntos y costos de esta pantalla quedan guardados bajo este nombre de campeonato — ya que
-          pueden cambiar de un campeonato a otro, igual que las fechas del calendario. Usa el mismo identificador
-          que la temporada del Calendario (ej. <code>2026-I</code>) para que quede claro a cuál corresponden.
+          Los premios, puntos y costos de esta pantalla se guardan por campeonato — cambia el combo para ver o
+          editar otro. Usa el mismo nombre que la temporada del Calendario (ej. <code>2026-I</code>) para que quede
+          claro a cuál corresponde.
         </div>
       </div>
 
@@ -344,6 +560,7 @@ export default function Tablero({ session }) {
             <label>Cuota de inscripción (por jugador)</label>
             <input type="number" min="0" className="field" disabled={!editable} value={draft.cuotaInscripcion}
               onChange={(e) => set((d) => { d.cuotaInscripcion = Number(e.target.value); })} />
+            {!editable && <div className="section-note">{money(draft.cuotaInscripcion)}</div>}
           </div>
           <div className="login-field" style={{ maxWidth: 220 }}>
             <label>Recompras (Re-buys) máximas por jugador</label>

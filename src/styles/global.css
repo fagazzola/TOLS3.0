@@ -169,6 +169,23 @@ h1 {
 }
 .btn-icon-remove:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
 .btn-icon-remove:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-icon-confirm {
+  width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--good); cursor: pointer; font-size: 12px; line-height: 1; justify-self: end;
+}
+.btn-icon-confirm:hover:not(:disabled) { background: color-mix(in srgb, var(--good) 12%, var(--surface)); }
+.btn-icon-confirm:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Usuarios: campo de contraseña con ícono de ojo, y renglón para cambiarla */
+.pass-field { position: relative; display: flex; align-items: center; }
+.pass-field .field { padding-right: 32px; }
+.btn-icon-eye {
+  position: absolute; right: 4px; border: none; background: transparent; cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 4px; color: var(--ink-soft);
+}
+.btn-icon-eye:hover { color: var(--ink); }
+.pass-change-row { display: flex; gap: 8px; align-items: center; padding: 6px 0 10px; flex-wrap: wrap; }
+.pass-change-row .field { max-width: 220px; }
 .login-field-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .tablero-savebar {
   position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;

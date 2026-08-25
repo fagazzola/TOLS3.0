@@ -1,14 +1,13 @@
 import { useState } from "react";
-import perfiles from "../data/perfiles.json";
 
-export default function Login({ onLogin }) {
+export default function Login({ perfiles, onLogin }) {
   const [usuario, setUsuario] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   function handleSubmit(e) {
     e.preventDefault();
-    const match = perfiles.usuarios.find(
+    const match = (perfiles?.usuarios || []).find(
       (u) => u.usuario.toLowerCase() === usuario.trim().toLowerCase() && u.password === password
     );
     if (match) {

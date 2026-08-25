@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/perfiles.json";
+import { syncPerfiles } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const NIVELES = ["ninguno", "lectura", "escritura"];
@@ -80,6 +81,7 @@ export default async (req) => {
     const normalizado = normalizar(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
+      await syncPerfiles(normalizado);
     }
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
@@ -97,6 +99,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
     }
     await store.setJSON("data", normalizado);
+    await syncPerfiles(normalizado);
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
 

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/campeonatos.json";
+import { syncCampeonatos } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -56,6 +57,7 @@ export default async (req) => {
     normalizado = await conHuerfanosSanados(normalizado);
     if (!data || JSON.stringify(data) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
+      await syncCampeonatos(normalizado);
     }
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
@@ -73,6 +75,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
     }
     await store.setJSON("data", limpio);
+    await syncCampeonatos(limpio);
     return new Response(JSON.stringify(limpio), { headers: HEADERS });
   }
 

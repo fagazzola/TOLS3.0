@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/tablero.json";
+import { syncTablero } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const TOL = 0.01; // tolerancia para sumas de porcentaje por redondeo flotante
@@ -133,6 +134,7 @@ export default async (req) => {
     const normalizado = normalizarMapa(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
+      await syncTablero(normalizado);
     }
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
@@ -187,6 +189,7 @@ export default async (req) => {
     }
 
     await store.setJSON("data", mapa);
+    await syncTablero(mapa);
     return new Response(JSON.stringify(mapa), { headers: HEADERS });
   }
 

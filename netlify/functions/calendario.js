@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/calendario.json";
+import { syncCalendario } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -46,6 +47,7 @@ export default async (req) => {
     const completado = await conTemporadaCompletada(data);
     if (JSON.stringify(completado) !== JSON.stringify(data)) {
       await store.setJSON("data", completado);
+      await syncCalendario(completado);
     }
     return new Response(JSON.stringify(completado), { headers: HEADERS });
   }
@@ -68,6 +70,7 @@ export default async (req) => {
         .map((t, i) => ({ ...t, n: i + 1 })),
     };
     await store.setJSON("data", ordenado);
+    await syncCalendario(ordenado);
     return new Response(JSON.stringify(ordenado), { headers: HEADERS });
   }
 

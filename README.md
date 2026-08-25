@@ -19,6 +19,42 @@ Todas las pestañas del menú (`src/App.jsx` + `src/lib/permisos.js`) se muestra
 ## Cómo se actualizan los datos
 Campeonatos, Tablero, Calendario y Usuarios se editan directo en el sitio (con permiso de escritura) y se guardan en **Netlify Blobs** — los `.json` en `src/data/` son solo semillas iniciales para el primer arranque y ya no se vuelven a leer salvo que se borre el store de Blobs correspondiente.
 
+## Sincronización con Excel (OneDrive)
+El sitio escribe en vivo, directo en un Excel guardado en el OneDrive personal de Federico
+(`TOLS3.0-Base-de-Datos.xlsx`), cada vez que se guarda algo en el Tablero, el Calendario o Usuarios —
+usando la API de Microsoft Graph (OneDrive/Excel). El flujo es de un solo sentido automático: **sitio →
+Excel**. Para llevar cambios del Excel de regreso al sitio (**Excel → sitio**) sigue siendo un proceso
+manual, pidiéndoselo a Claude.
+
+Piezas del sistema:
+- `netlify/functions/lib/msgraph.js` — obtiene un access token fresco a partir de un refresh token
+  guardado en **Netlify Blobs** (`tols-ms-token`), y expone `syncCampeonatos`/`syncTablero`/
+  `syncCalendario`/`syncPerfiles`, cada una escribiendo las hojas correspondientes del Excel vía Graph
+  API (`PATCH .../workbook/worksheets('Hoja')/range(...)`). Cada sync es "best effort": si Graph API
+  falla (token vencido, sin conexión, etc.), el guardado en el sitio **no se ve afectado** — solo se
+  registra el error en los logs de Netlify.
+- `netlify/functions/auth-onedrive-start.js` (`/api/auth-onedrive-start`) — redirige a la pantalla de
+  login/consentimiento de Microsoft. Se visita **una sola vez** para autorizar.
+- `netlify/functions/auth-onedrive-callback.js` (`/api/auth-onedrive-callback`) — recibe el código de
+  autorización, lo cambia por un refresh token, y lo guarda en Blobs. Microsoft rota el refresh token en
+  cada uso, así que `msgraph.js` siempre guarda el más reciente después de usarlo.
+
+**Variables de entorno requeridas en Netlify** (Site settings → Environment variables):
+- `MS_CLIENT_ID` — el Application (client) ID del registro de app en Azure Portal.
+- `MS_CLIENT_SECRET` — el Client Secret generado en Azure Portal. **Nunca debe viajar por el chat con
+  Claude** — se agrega directo aquí.
+- `MS_EXCEL_PATH` (opcional) — ruta del archivo dentro del OneDrive, relativa a la raíz. Por defecto:
+  `Personal/MX/TOLS/TOLS 3.0/TOLS3.0-Base-de-Datos.xlsx`.
+
+**Registro de app en Azure Portal** (una sola vez): App registrations → New registration → cuenta
+personal de Microsoft soportada → plataforma **Web** con redirect URI
+`https://tolsv3.netlify.app/api/auth-onedrive-callback` → API permissions → Microsoft Graph →
+delegated → `Files.ReadWrite` + `offline_access` → Certificates & secrets → nuevo client secret.
+
+**Autorización** (una sola vez, después de desplegar con las variables de entorno ya configuradas):
+visitar `https://tolsv3.netlify.app/api/auth-onedrive-start`, iniciar sesión con la cuenta de Microsoft
+del OneDrive, aceptar los permisos. La página confirma "OneDrive conectado" cuando queda listo.
+
 ## Acceso
 Login simple de usuario/contraseña contra los datos de `/api/perfiles` (Netlify Blobs) — **no es seguridad de nivel bancario**, es una interfaz que pide usuario y contraseña y valida contra ese registro. Sirve para mantener el sitio fuera de curiosos casuales, no para proteger información sensible.
 

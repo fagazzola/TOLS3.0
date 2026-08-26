@@ -24,6 +24,31 @@ function nuevoId() {
   return "custom-" + Math.random().toString(36).slice(2, 9);
 }
 
+// un campeonato NUEVO arranca de cero — nunca hereda los valores de otro campeonato. Se conserva la
+// estructura mínima obligatoria (un lugar en cada reparto de premios, Rey Killer, y los 3 cobros
+// protegidos) para que la pantalla no se rompa, pero todos los montos/puntos empiezan en 0.
+function plantillaEnBlanco() {
+  return {
+    premios: {
+      porTorneo: { pctAcumulado: 0, lugares: [{ label: "Lugar 1", pct: 100 }] },
+      porCampeonato: { lugares: [{ label: "Rey Killer", pct: 100, reyKiller: true }] },
+    },
+    puntos: {
+      asistencia: { regular: 0, main: 0 },
+      posiciones: [{ pos: 1, regular: 0, main: 0 }],
+    },
+    recomprasMax: 0,
+    cuotaInscripcion: 0,
+    gastosCampeonato: [],
+    cobrosPorTorneo: [
+      { id: "buyin", nombre: "Buy-in", regular: 0, main: 0, protegido: true },
+      { id: "rebuy", nombre: "Re-buy (c/u)", regular: 0, main: 0, protegido: true },
+      { id: "addon", nombre: "Add-on", regular: 0, main: 0, protegido: true },
+    ],
+    pagosPorTorneo: [],
+  };
+}
+
 // red de seguridad del lado del navegador: si el backend devuelve algo incompleto (por ejemplo,
 // datos guardados con un esquema anterior), se completa con la plantilla en vez de tronar la pantalla
 function normalizar(datos, plantilla) {
@@ -76,6 +101,7 @@ export default function Tablero({ session, perfiles }) {
   const [renombres, setRenombres] = useState({});
   const [campSaving, setCampSaving] = useState(false);
   const [campActionError, setCampActionError] = useState("");
+  const [confirmModal, setConfirmModal] = useState(null); // { tipo: "nuevo" | "eliminar", nombre }
 
   useEffect(() => {
     Promise.all([
@@ -183,13 +209,18 @@ export default function Tablero({ session, perfiles }) {
     setSaveOk(false);
   }
 
-  async function agregarCampeonato() {
+  function pedirAgregarCampeonato() {
     const nombre = nuevoNombre.trim();
     if (!nombre) return;
     if (campeonatos.includes(nombre)) {
       setCampActionError(`Ya existe un campeonato "${nombre}".`);
       return;
     }
+    setCampActionError("");
+    setConfirmModal({ tipo: "nuevo", nombre });
+  }
+
+  async function agregarCampeonato(nombre) {
     setCampSaving(true);
     setCampActionError("");
     try {
@@ -202,11 +233,18 @@ export default function Tablero({ session, perfiles }) {
       if (!r.ok) throw new Error(json.error || "No se pudo agregar el campeonato.");
       setCampeonatos(json.nombres);
       setNuevoNombre("");
-      seleccionarCampeonato(nombre);
+      // arranca en blanco — NO hereda valores de otro campeonato (a diferencia de seleccionar uno existente)
+      setCampeonatoSel(nombre);
+      const enBlanco = normalizar(plantillaEnBlanco(), plantillaEnBlanco());
+      setData(enBlanco);
+      setDraft(enBlanco);
+      setSaveError("");
+      setSaveOk(false);
     } catch (e) {
       setCampActionError(e.message || "No se pudo agregar el campeonato.");
     } finally {
       setCampSaving(false);
+      setConfirmModal(null);
     }
   }
 
@@ -261,11 +299,16 @@ export default function Tablero({ session, perfiles }) {
     }
   }
 
-  async function eliminarCampeonato(nombre) {
+  function pedirEliminarCampeonato(nombre) {
     if (campeonatos.length <= 1) {
       setCampActionError("Debe quedar al menos un campeonato.");
       return;
     }
+    setCampActionError("");
+    setConfirmModal({ tipo: "eliminar", nombre });
+  }
+
+  async function eliminarCampeonato(nombre) {
     setCampSaving(true);
     setCampActionError("");
     try {
@@ -304,6 +347,7 @@ export default function Tablero({ session, perfiles }) {
       setCampActionError(e.message || "No se pudo eliminar el campeonato.");
     } finally {
       setCampSaving(false);
+      setConfirmModal(null);
     }
   }
 
@@ -334,6 +378,9 @@ export default function Tablero({ session, perfiles }) {
           >
             {campeonatos.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
+        </div>
+        <div className="campeonato-banner">
+          Estás viendo y editando: <strong>{campeonatoSel || "—"}</strong> — todo lo de esta pantalla (premios, puntos y costos) es específico de este campeonato.
         </div>
         {dirty && <div className="section-note" style={{ marginTop: 6 }}>Guarda o cancela tus cambios de abajo antes de cambiar de campeonato.</div>}
 
@@ -370,7 +417,7 @@ export default function Tablero({ session, perfiles }) {
                         className="btn-icon-remove"
                         title="Eliminar campeonato"
                         disabled={campSaving || campeonatos.length <= 1}
-                        onClick={() => eliminarCampeonato(n)}
+                        onClick={() => pedirEliminarCampeonato(n)}
                       >✕</button>
                     </div>
                   );
@@ -383,7 +430,7 @@ export default function Tablero({ session, perfiles }) {
                     disabled={campSaving}
                     onChange={(e) => setNuevoNombre(e.target.value)}
                   />
-                  <button className="btn btn-primary" disabled={campSaving || !nuevoNombre.trim()} onClick={agregarCampeonato}>
+                  <button className="btn btn-primary" disabled={campSaving || !nuevoNombre.trim()} onClick={pedirAgregarCampeonato}>
                     + Agregar
                   </button>
                 </div>
@@ -416,7 +463,7 @@ export default function Tablero({ session, perfiles }) {
 
       {/* ───────── Premios por torneo ───────── */}
       <div className="section">
-        <div className="section-head"><div className="section-title">Asignación de premios</div></div>
+        <div className="section-head"><div className="section-title">Asignación de premios <span className="section-title-campeonato">· {campeonatoSel}</span></div></div>
 
         <div className="subhead">
           Por torneo — % que va al fondo acumulado del campeonato
@@ -506,7 +553,7 @@ export default function Tablero({ session, perfiles }) {
 
       {/* ───────── Puntos ───────── */}
       <div className="section">
-        <div className="section-head"><div className="section-title">Asignación de puntos</div></div>
+        <div className="section-head"><div className="section-title">Asignación de puntos <span className="section-title-campeonato">· {campeonatoSel}</span></div></div>
         <div className="login-field-row">
           <div className="login-field" style={{ maxWidth: 180 }}>
             <label>Asistencia · Regular</label>
@@ -553,7 +600,7 @@ export default function Tablero({ session, perfiles }) {
 
       {/* ───────── Costos ───────── */}
       <div className="section">
-        <div className="section-head"><div className="section-title">Costos</div></div>
+        <div className="section-head"><div className="section-title">Costos <span className="section-title-campeonato">· {campeonatoSel}</span></div></div>
 
         <div className="login-field-row">
           <div className="login-field" style={{ maxWidth: 220 }}>
@@ -670,6 +717,49 @@ export default function Tablero({ session, perfiles }) {
           </button>
         )}
       </div>
+
+      {confirmModal && (
+        <div className="modal-backdrop" onClick={() => !campSaving && setConfirmModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            {confirmModal.tipo === "nuevo" ? (
+              <>
+                <div className="modal-title">⚠ Nuevo campeonato: {confirmModal.nombre}</div>
+                <p className="section-sub" style={{ marginTop: 0 }}>
+                  Vas a crear el campeonato <b>{confirmModal.nombre}</b>. Todos sus campos (premios, puntos,
+                  cuota de inscripción, gastos, cobros y pagos) van a empezar <b>en cero</b> — no va a heredar
+                  los valores de {campeonatoSel || "ningún otro campeonato"}. Vas a tener que definirlos desde
+                  aquí antes de poder guardar.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="modal-title">⚠ Eliminar campeonato: {confirmModal.nombre}</div>
+                <p className="section-sub" style={{ marginTop: 0 }}>
+                  Se va a borrar <b>TODA</b> la información asociada al campeonato <b>{confirmModal.nombre}</b> —
+                  premios, puntos, costos y, cuando existan, cobranza, estadísticas y sesiones de Game Night —
+                  de forma <b>permanente</b>. No se va a poder recuperar.
+                </p>
+              </>
+            )}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmModal(null)} disabled={campSaving}>
+                Cancelar
+              </button>
+              <button
+                className={confirmModal.tipo === "eliminar" ? "btn btn-danger" : "btn btn-primary"}
+                disabled={campSaving}
+                onClick={() =>
+                  confirmModal.tipo === "nuevo"
+                    ? agregarCampeonato(confirmModal.nombre)
+                    : eliminarCampeonato(confirmModal.nombre)
+                }
+              >
+                {campSaving ? "Un momento…" : confirmModal.tipo === "nuevo" ? "Crear campeonato" : "Eliminar definitivamente"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

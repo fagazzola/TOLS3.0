@@ -118,11 +118,22 @@ h1 {
 .btn:hover { opacity: 0.85; }
 .btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn-secondary { background: transparent; color: var(--ink-soft); border-color: var(--line); }
+.btn-danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 85%, black); }
 
 .section { margin-top: 48px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .section-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; }
 .section-title::before { content: "♠ "; color: var(--gold-strong); font-size: 15px; }
+.section-title-campeonato { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 13px; color: var(--gold-strong); }
+
+/* Tablero: banner que recuerda en todo momento a qué campeonato pertenece lo que se está viendo/editando */
+.campeonato-banner {
+  margin-top: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13.5px;
+  background: color-mix(in srgb, var(--gold) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--gold) 40%, var(--line));
+  color: var(--ink);
+}
+.campeonato-banner strong { color: var(--gold-strong); font-family: "IBM Plex Mono", monospace; }
 .section-note { font-size: 12.5px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace; }
 .section-sub { font-size: 13px; color: var(--ink-soft); margin: 10px 0 14px; line-height: 1.5; }
 .subhead { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 22px 0 10px; }

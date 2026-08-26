@@ -19,6 +19,14 @@ Todas las pestañas del menú (`src/App.jsx` + `src/lib/permisos.js`) se muestra
 ## Cómo se actualizan los datos
 Campeonatos, Tablero, Calendario y Usuarios se editan directo en el sitio (con permiso de escritura) y se guardan en **Netlify Blobs** — los `.json` en `src/data/` son solo semillas iniciales para el primer arranque y ya no se vuelven a leer salvo que se borre el store de Blobs correspondiente.
 
+## Campeonato activo en el Tablero de Control
+El combo de campeonato tiene un banner destacado debajo ("Estás viendo y editando: **X**...") y el nombre
+del campeonato acompaña cada título de sección (Premios, Puntos, Costos), para que nunca se pierda de
+vista cuál campeonato se está editando. Al crear uno nuevo aparece un modal ofreciendo **copiar los
+valores** del campeonato que estaba activo o **inicializar todos los parámetros en cero** — nunca hereda
+valores en silencio. Al eliminar uno aparece un modal de advertencia (borrado permanente, incluye lo que
+en el futuro viva en Cobranza/Game Night para ese campeonato) antes de ejecutar.
+
 ## Sincronización con Excel (OneDrive)
 El sitio escribe en vivo, directo en un Excel guardado en el OneDrive personal de Federico
 (`TOLS3.0-Base-de-Datos.xlsx`), cada vez que se guarda algo en el Tablero, el Calendario o Usuarios —

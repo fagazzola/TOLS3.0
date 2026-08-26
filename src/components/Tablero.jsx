@@ -217,10 +217,10 @@ export default function Tablero({ session, perfiles }) {
       return;
     }
     setCampActionError("");
-    setConfirmModal({ tipo: "nuevo", nombre });
+    setConfirmModal({ tipo: "nuevo", nombre, origen: campeonatoSel });
   }
 
-  async function agregarCampeonato(nombre) {
+  async function agregarCampeonato(nombre, modo) {
     setCampSaving(true);
     setCampActionError("");
     try {
@@ -233,11 +233,12 @@ export default function Tablero({ session, perfiles }) {
       if (!r.ok) throw new Error(json.error || "No se pudo agregar el campeonato.");
       setCampeonatos(json.nombres);
       setNuevoNombre("");
-      // arranca en blanco — NO hereda valores de otro campeonato (a diferencia de seleccionar uno existente)
       setCampeonatoSel(nombre);
-      const enBlanco = normalizar(plantillaEnBlanco(), plantillaEnBlanco());
-      setData(enBlanco);
-      setDraft(enBlanco);
+      // "copiar": parte de los valores del campeonato que estaba activo (mismo punto de partida, editable
+      // de ahí en adelante). "cero": arranca en blanco, sin heredar nada.
+      const inicial = modo === "copiar" && data ? normalizar(data, data) : normalizar(plantillaEnBlanco(), plantillaEnBlanco());
+      setData(inicial);
+      setDraft(inicial);
       setSaveError("");
       setSaveOk(false);
     } catch (e) {
@@ -718,43 +719,63 @@ export default function Tablero({ session, perfiles }) {
         )}
       </div>
 
-      {confirmModal && (
+      {confirmModal && confirmModal.tipo === "nuevo" && (
         <div className="modal-backdrop" onClick={() => !campSaving && setConfirmModal(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            {confirmModal.tipo === "nuevo" ? (
-              <>
-                <div className="modal-title">⚠ Nuevo campeonato: {confirmModal.nombre}</div>
-                <p className="section-sub" style={{ marginTop: 0 }}>
-                  Vas a crear el campeonato <b>{confirmModal.nombre}</b>. Todos sus campos (premios, puntos,
-                  cuota de inscripción, gastos, cobros y pagos) van a empezar <b>en cero</b> — no va a heredar
-                  los valores de {campeonatoSel || "ningún otro campeonato"}. Vas a tener que definirlos desde
-                  aquí antes de poder guardar.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="modal-title">⚠ Eliminar campeonato: {confirmModal.nombre}</div>
-                <p className="section-sub" style={{ marginTop: 0 }}>
-                  Se va a borrar <b>TODA</b> la información asociada al campeonato <b>{confirmModal.nombre}</b> —
-                  premios, puntos, costos y, cuando existan, cobranza, estadísticas y sesiones de Game Night —
-                  de forma <b>permanente</b>. No se va a poder recuperar.
-                </p>
-              </>
-            )}
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">⚠</div>
+            <div className="modal-title">Nuevo campeonato: {confirmModal.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Vas a crear el campeonato <b>{confirmModal.nombre}</b>. Todos sus campos (premios, puntos, cuota
+              de inscripción, gastos, cobros y pagos) van a inicializarse.
+              {confirmModal.origen
+                ? <> ¿Deseas copiar los valores del campeonato <b>{confirmModal.origen}</b> o prefieres inicializar todos los parámetros?</>
+                : " No hay otro campeonato del cual copiar valores, así que va a inicializar todos los parámetros."}
+            </p>
+            <div className="modal-choice-row">
+              {confirmModal.origen && (
+                <button
+                  className="modal-choice-btn"
+                  disabled={campSaving}
+                  onClick={() => agregarCampeonato(confirmModal.nombre, "copiar")}
+                >
+                  <span className="modal-choice-title">Copiar valores de {confirmModal.origen}</span>
+                  <span className="modal-choice-desc">Empieza con los mismos premios, puntos y costos de {confirmModal.origen} — los editas desde aquí si algo cambia.</span>
+                </button>
+              )}
+              <button
+                className="modal-choice-btn"
+                disabled={campSaving}
+                onClick={() => agregarCampeonato(confirmModal.nombre, "cero")}
+              >
+                <span className="modal-choice-title">Inicializar todos los parámetros</span>
+                <span className="modal-choice-desc">Empieza en cero — sin heredar nada, defines cada valor desde aquí antes de poder guardar.</span>
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmModal(null)} disabled={campSaving}>
+                {campSaving ? "Un momento…" : "Cancelar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && confirmModal.tipo === "eliminar" && (
+        <div className="modal-backdrop" onClick={() => !campSaving && setConfirmModal(null)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge danger">⚠</div>
+            <div className="modal-title">Eliminar campeonato: {confirmModal.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Se va a borrar <b>TODA</b> la información asociada al campeonato <b>{confirmModal.nombre}</b> —
+              premios, puntos, costos y, cuando existan, cobranza, estadísticas y sesiones de Game Night — de
+              forma <b>permanente</b>. No se va a poder recuperar.
+            </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConfirmModal(null)} disabled={campSaving}>
                 Cancelar
               </button>
-              <button
-                className={confirmModal.tipo === "eliminar" ? "btn btn-danger" : "btn btn-primary"}
-                disabled={campSaving}
-                onClick={() =>
-                  confirmModal.tipo === "nuevo"
-                    ? agregarCampeonato(confirmModal.nombre)
-                    : eliminarCampeonato(confirmModal.nombre)
-                }
-              >
-                {campSaving ? "Un momento…" : confirmModal.tipo === "nuevo" ? "Crear campeonato" : "Eliminar definitivamente"}
+              <button className="btn btn-danger" disabled={campSaving} onClick={() => eliminarCampeonato(confirmModal.nombre)}>
+                {campSaving ? "Un momento…" : "Eliminar definitivamente"}
               </button>
             </div>
           </div>

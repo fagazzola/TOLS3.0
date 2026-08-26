@@ -11,7 +11,27 @@ El orden fijo de pestañas es: **Tablero de Control, Calendario, Cobranza, Usuar
 - **Campeonatos** — registro compartido de nombres de campeonato (ej. `2026-I`), administrado desde el propio Tablero de Control y consumido también por el Calendario. Vive en **Netlify Blobs** (`tols-campeonatos`), servido por `netlify/functions/campeonatos.js` en `/api/campeonatos`. `src/data/campeonatos.json` es la semilla inicial.
 - **Calendario** (`src/components/Calendario.jsx`), vista mensual (domingo a sábado) con crear/editar/borrar torneo por día. Cada torneo se asocia a un **campeonato**, elegido con un combo que se llena desde el registro de Campeonatos (ya no es texto libre). El día de pago final se muestra directamente en la cuadrícula con una insignia $ y también se puede editar ahí. Los datos viven en **Netlify Blobs** (`tols-calendario`), servidos por `netlify/functions/calendario.js` en `/api/calendario`. `src/data/calendario.json` es solo la semilla inicial.
 - **Usuarios** (`src/components/Perfiles.jsx`) — visible y editable solo para Administrador General. Muestra primero la tabla de usuarios (Nombre, Usuario, Correo electrónico, Perfil, Contraseña enmascarada con ícono de ojo para mostrar/ocultar, y un botón para cambiar la contraseña directamente), y debajo la tabla de **Permisos por módulo**, con un combo por celda (`sin acceso` / `sólo lectura` / `lectura/escritura`) por cada rol × módulo. Los datos viven en **Netlify Blobs** (`tols-perfiles`), servidos por `netlify/functions/perfiles.js` en `/api/perfiles`. `src/data/perfiles.json` es solo la semilla inicial.
+- **Jugadores** (`src/components/Jugadores.jsx` + `src/components/Registro.jsx`) — directorio de jugadores dados de alta por autorregistro. Cualquier visitante puede entrar a `/registro` (sin necesidad de login) y llenar: Nombre y Apellido, Alias Jugador, Alias PokerStars, Teléfono (10 dígitos), Correo electrónico, Contraseña, Fecha de nacimiento y Emoticón. El **Id** lo asigna el sitio, la **Edad** se calcula sola a partir de la fecha de nacimiento (nunca se escribe a mano), el **Tipo de Usuario** siempre inicia como "Jugador", y el **Padrino** solo lo llena un administrador después, desde la pestaña Jugadores — nunca el propio jugador. Antes de crear el registro se valida el correo con un código de 6 dígitos (ver abajo). Al confirmarlo, el jugador queda dado de alta en dos lugares a la vez: la hoja de Jugadores (`tols-jugadores`) y como Usuario normal del sitio con rol "Jugador" (`tols-perfiles`) — inicia sesión después con su correo y la contraseña que eligió, igual que cualquier otro usuario. Los datos viven en **Netlify Blobs** (`tols-jugadores`), servidos por `netlify/functions/jugadores.js` en `/api/jugadores`. Desde la pestaña Jugadores del sitio, quien tenga permiso de escritura en `mod6` puede editar únicamente el Padrino y el Estatus (Activo/Inactivo) de cada jugador — el resto de los campos son de solo lectura ahí porque los llenó el propio jugador.
 - Cobranza y **Game Night** (antes "Game Day") — pendientes (permisos ya definidos en el esquema de Usuarios). La hora límite de la Mejor Mano vivirá en Game Night, ya no en el Calendario.
+
+## Validación de correo al autorregistrarse
+Al llenar el formulario de `/registro` y darle clic a "Continuar", el sitio genera un código aleatorio de 6
+dígitos, lo guarda en **Netlify Blobs** (`tols-verificacion-jugadores`) con una vigencia de **30 segundos**, y
+lo envía por correo (vía **Resend**) a la dirección que escribió el jugador. Aparece entonces una pantalla con
+6 casillas para ingresar el código. Si coincide y no ha expirado, se crea el registro (jugador + usuario). Si
+expira, se ofrece **Regenerar código** (pide uno nuevo) o **Cancelar** (regresa al formulario). Si el código
+no coincide, se muestra el error y se puede reintentar mientras siga vigente.
+
+Nota: 30 segundos es un margen ajustado — así lo pidió explícitamente Federico. Si en la práctica el correo
+tarda en llegar y da tiempo justo, se puede alargar la vigencia (`DURACION_MS` en
+`netlify/functions/jugadores-codigo.js`) con solo pedírselo a Claude.
+
+**Variables de entorno requeridas en Netlify** (Site settings → Environment variables):
+- `RESEND_API_KEY` — API key de [resend.com](https://resend.com). Crear una cuenta gratis, generar la key
+  desde su panel, y agregarla directo aquí. **Nunca debe viajar por el chat con Claude.**
+- `MAIL_FROM` (opcional) — remitente de los correos. Por defecto usa `onboarding@resend.dev`, que funciona sin
+  verificar dominio propio (limitado a envíos de prueba/bajo volumen); para un remitente con el dominio de la
+  liga (ej. `no-responde@tols.mx`) hay que verificar ese dominio en Resend primero.
 
 ## Permisos por módulo
 Todas las pestañas del menú (`src/App.jsx` + `src/lib/permisos.js`) se muestran siempre — las que el rol de la sesión no tiene permitidas aparecen **deshabilitadas** (atenuadas, no clicables) en vez de ocultarse, usando la matriz cargada de `/api/perfiles`. Dentro del Calendario y del Tablero, los controles de edición solo aparecen si el rol tiene "lectura/escritura" en `mod1` / `mod2` respectivamente. `accesoDe`/`puedeVer`/`puedeEditar` en `permisos.js` ahora reciben los datos de perfiles como primer parámetro (ya no se importan estáticos), porque viven en Blobs y pueden cambiar en caliente desde la pantalla de Usuarios sin volver a desplegar el sitio.
@@ -37,7 +57,7 @@ manual, pidiéndoselo a Claude.
 Piezas del sistema:
 - `netlify/functions/lib/msgraph.js` — obtiene un access token fresco a partir de un refresh token
   guardado en **Netlify Blobs** (`tols-ms-token`), y expone `syncCampeonatos`/`syncTablero`/
-  `syncCalendario`/`syncPerfiles`, cada una escribiendo las hojas correspondientes del Excel vía Graph
+  `syncCalendario`/`syncPerfiles`/`syncJugadores`, cada una escribiendo las hojas correspondientes del Excel vía Graph
   API (`PATCH .../workbook/worksheets('Hoja')/range(...)`). Cada sync es "best effort": si Graph API
   falla (token vencido, sin conexión, etc.), el guardado en el sitio **no se ve afectado** — solo se
   registra el error en los logs de Netlify.

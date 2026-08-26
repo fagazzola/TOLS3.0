@@ -144,12 +144,33 @@ export function syncCalendario(data) {
   });
 }
 
+export function syncJugadores(jugadores) {
+  return safe(async () => {
+    const filas = (jugadores || []).map((j) => [
+      j.id,
+      j.nombre,
+      j.aliasJugador,
+      j.aliasPokerStars,
+      j.padrino || "",
+      j.telefono,
+      j.correo,
+      j.tipoUsuario,
+      j.fecNac,
+      j.edad,
+      j.emoticon,
+      j.fechaRegistro || "",
+      j.estatus || "Activo",
+    ]);
+    await writeSheetTable("Jugadores", filas);
+  });
+}
+
 export function syncPerfiles(data) {
   return safe(async () => {
     const usuarios = (data.usuarios || []).map((u) => [u.nombre, u.usuario, u.correo || "", u.password, u.rol]);
     await writeSheetTable("Usuarios", usuarios);
 
-    // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night
+    // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores
     const permisos = (data.roles || []).map((r) => [
       r.tipo,
       NIVEL_LABEL[r.permisos?.mod2] || "Sin acceso",
@@ -157,6 +178,7 @@ export function syncPerfiles(data) {
       NIVEL_LABEL[r.permisos?.mod4] || "Sin acceso",
       NIVEL_LABEL[r.permisos?.mod3] || "Sin acceso",
       NIVEL_LABEL[r.permisos?.mod5] || "Sin acceso",
+      NIVEL_LABEL[r.permisos?.mod6] || "Sin acceso",
     ]);
     await writeSheetTable("Permisos", permisos, { maxRows: 30 });
   });

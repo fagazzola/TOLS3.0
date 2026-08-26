@@ -4,11 +4,12 @@ import { syncPerfiles } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const NIVELES = ["ninguno", "lectura", "escritura"];
-const MOD_KEYS = ["mod1", "mod2", "mod3", "mod4", "mod5"];
+const MOD_KEYS = ["mod1", "mod2", "mod3", "mod4", "mod5", "mod6"];
 
 // completa/corrige el documento con la semilla como respaldo — mismo patrón defensivo que
-// campeonatos.js y tablero.js: si Blobs trae algo viejo o incompleto, se rellena en vez de tronar
-function normalizar(data) {
+// campeonatos.js y tablero.js: si Blobs trae algo viejo o incompleto, se rellena en vez de tronar.
+// Exportadas para que jugadores-verificar.js pueda reutilizarlas al dar de alta un usuario nuevo.
+export function normalizar(data) {
   const base = seed;
   const d = data && typeof data === "object" ? { ...data } : {};
 
@@ -47,7 +48,7 @@ function structuredCloneSafe(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function validar(data) {
+export function validar(data) {
   if (!Array.isArray(data.roles) || data.roles.length === 0) return "Formato inválido: faltan los roles.";
   for (const r of data.roles) {
     if (!r.tipo || !String(r.tipo).trim()) return "Cada rol necesita un nombre.";

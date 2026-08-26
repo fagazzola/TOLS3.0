@@ -5,19 +5,23 @@ import Decor from "./components/Decor.jsx";
 import Calendario from "./components/Calendario.jsx";
 import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
+import Jugadores from "./components/Jugadores.jsx";
+import Registro from "./components/Registro.jsx";
 import { puedeVer } from "./lib/permisos.js";
 
 const SESSION_KEY = "tols-session";
 const API_PERFILES = "/api/perfiles";
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
-// (Tablero de Control, Calendario, Cobranza, Usuarios); Cobranza todavía no existe como
-// pantalla real, así que no aparece hasta que se construya. Game Night vive aparte, no aquí.
+// (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores); Cobranza todavía no existe
+// como pantalla real, así que no aparece hasta que se construya. Game Night vive aparte, no aquí.
 // La pestaña Usuarios (antes "Jugadores") solo la puede ver el Administrador General,
 // sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla.
+// Jugadores (mod6) sí sigue la matriz normal de permisos — es el directorio de autorregistro.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
+  { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
 ];
 
@@ -27,6 +31,14 @@ export default function App() {
   const [perfiles, setPerfiles] = useState(null);
   const [perfilesLoading, setPerfilesLoading] = useState(true);
   const [perfilesError, setPerfilesError] = useState("");
+  // ruta simple: /registro muestra el autorregistro sin necesidad de login, sin librería de routing
+  const [ruta, setRuta] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
+
+  useEffect(() => {
+    const onPop = () => setRuta(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     try {
@@ -72,6 +84,27 @@ export default function App() {
     try {
       localStorage.removeItem(SESSION_KEY);
     } catch (e) {}
+  }
+
+  function irARuta(nueva) {
+    setRuta(nueva);
+    try {
+      window.history.pushState({}, "", nueva);
+    } catch (e) {}
+  }
+
+  function handleRegistroExitoso(s) {
+    handleLogin(s);
+    irARuta("/");
+  }
+
+  if (ruta === "/registro" && !session) {
+    return (
+      <>
+        <Decor />
+        <Registro onRegistroExitoso={handleRegistroExitoso} onIrALogin={() => irARuta("/")} />
+      </>
+    );
   }
 
   if (perfilesLoading) {

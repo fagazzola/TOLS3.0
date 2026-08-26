@@ -4,6 +4,7 @@ export const MODULOS = [
   { key: "mod4", label: "Cobranza" },
   { key: "mod3", label: "Usuarios" },
   { key: "mod5", label: "Game Night" },
+  { key: "mod6", label: "Jugadores" },
 ];
 
 export const NIVEL_LABEL = {

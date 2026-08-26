@@ -326,6 +326,31 @@ h1 {
 }
 .modal-choice-desc { display: block; font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
 
+/* registro de jugadores: link tipo texto, selector de emoticón, casillas de código OTP */
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--gold-strong); font-family: inherit;
+  font-size: inherit; text-decoration: underline; cursor: pointer;
+}
+.link-btn:hover { opacity: 0.8; }
+
+.emoji-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.emoji-opt {
+  width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+  font-size: 19px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.emoji-opt:hover { border-color: var(--gold-strong); }
+.emoji-opt.selected { border-color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 20%, var(--surface)); }
+
+.otp-row { display: flex; justify-content: center; gap: 10px; margin: 18px 0 8px; }
+.otp-box {
+  width: 44px; height: 52px; text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 24px;
+  border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+.otp-box:focus { outline: 2px solid var(--gold-strong); outline-offset: 1px; }
+.otp-box:disabled { opacity: 0.4; }
+.otp-timer { text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 14px; }
+
 @media (max-width: 640px) {
   .wrap { margin: 0; border-radius: 0; box-shadow: none; border: none; padding: 28px 18px 56px; }
   .stats { grid-template-columns: 1fr; }
@@ -333,4 +358,5 @@ h1 {
   .headtop { flex-direction: column; }
   .cal-cell { min-height: 64px; padding: 5px; }
   .cal-month-label { min-width: 0; }
+  .otp-box { width: 38px; height: 46px; font-size: 20px; }
 }

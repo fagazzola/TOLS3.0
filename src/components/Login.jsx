@@ -50,7 +50,19 @@ export default function Login({ perfiles, onLogin }) {
           {error && <div className="login-error">{error}</div>}
         </form>
         <div className="login-hint">
-          Acceso restringido a TOLS 3.0. Si no tienes usuario, pídelo al administrador.
+          Acceso restringido a TOLS 3.0.
+          <br />
+          ¿Nuevo jugador?{" "}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              window.history.pushState({}, "", "/registro");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+          >
+            Regístrate aquí
+          </button>
         </div>
       </div>
     </div>

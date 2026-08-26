@@ -27,7 +27,7 @@ tarda en llegar y da tiempo justo, se puede alargar la vigencia (`DURACION_MS` e
 `netlify/functions/jugadores-codigo.js`) con solo pedírselo a Claude.
 
 **Variables de entorno requeridas en Netlify** (Site settings → Environment variables):
-- `RESEND_API_KEY` — API key de [resend.com](https://resend.com). Crear una cuenta gratis, generar la key
+- `EMAIL_RESEND_API` — API key de [resend.com](https://resend.com). Crear una cuenta gratis, generar la key
   desde su panel, y agregarla directo aquí. **Nunca debe viajar por el chat con Claude.**
 - `MAIL_FROM` (opcional) — remitente de los correos. Por defecto usa `onboarding@resend.dev`, que funciona sin
   verificar dominio propio (limitado a envíos de prueba/bajo volumen); para un remitente con el dominio de la
@@ -87,6 +87,20 @@ del OneDrive, aceptar los permisos. La página confirma "OneDrive conectado" cua
 Login simple de usuario/contraseña contra los datos de `/api/perfiles` (Netlify Blobs) — **no es seguridad de nivel bancario**, es una interfaz que pide usuario y contraseña y valida contra ese registro. Sirve para mantener el sitio fuera de curiosos casuales, no para proteger información sensible.
 
 Usuario semilla: `federico` / `cambia-esta-clave` (rol Administrador General) — cámbiala desde la pantalla de Usuarios en cuanto el sitio esté desplegado.
+
+**Importante: los usuarios se dan de alta desde el sitio, no editando el Excel directamente.** El Excel de
+OneDrive es un espejo de solo lectura (sitio → Excel automático, ver abajo); si agregas o editas un renglón
+de la hoja Usuarios directo en el Excel, ese cambio **no llega al sitio** y el login va a fallar con "Usuario
+o contraseña incorrectos" — el sitio solo conoce lo que está guardado en Netlify Blobs. Para dar de alta a
+alguien, hazlo desde la pantalla de Usuarios del sitio (o dile a esa persona que se autorregistre en
+`/registro`, ver el módulo de Jugadores más abajo).
+
+**Recuperar contraseña**: en la pantalla de Entrar hay un link "¿Olvidaste tu contraseña?". Pide el correo
+electrónico registrado, manda un código de 6 dígitos por correo (vía Resend, válido 5 minutos), y al
+confirmarlo junto con la nueva contraseña deja la cuenta actualizada e inicia sesión automáticamente. Piezas:
+`netlify/functions/reset-codigo.js` (`/api/reset-codigo`) y `netlify/functions/reset-confirmar.js`
+(`/api/reset-confirmar`), con los códigos pendientes en Blobs (`tols-verificacion-reset`, efímero). Solo
+funciona para usuarios que ya tienen un correo electrónico guardado en su registro.
 
 ## Desarrollo local
 ```bash

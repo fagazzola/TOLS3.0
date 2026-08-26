@@ -112,6 +112,7 @@ export default function Calendario({ session, perfiles }) {
 
   const weeks = buildGrid(viewMonth);
   const today = new Date();
+  const todayIso = iso(today);
 
   function torneosDe(d) {
     const key = iso(d);
@@ -231,61 +232,103 @@ export default function Calendario({ session, perfiles }) {
         </div>
       </div>
 
-      <div className="cal-toolbar">
-        <button className="btn btn-secondary" onClick={() => setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>
-          Hoy
-        </button>
-        <div className="cal-nav">
-          <button className="cal-nav-btn" aria-label="Mes anterior" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}>‹</button>
-          <div className="cal-month-label">{cap(mesesLargos[viewMonth.getMonth()])} {viewMonth.getFullYear()}</div>
-          <button className="cal-nav-btn" aria-label="Mes siguiente" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}>›</button>
-        </div>
-      </div>
+      {editable ? (
+        <>
+          <div className="cal-toolbar">
+            <button className="btn btn-secondary" onClick={() => setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>
+              Hoy
+            </button>
+            <div className="cal-nav">
+              <button className="cal-nav-btn" aria-label="Mes anterior" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}>‹</button>
+              <div className="cal-month-label">{cap(mesesLargos[viewMonth.getMonth()])} {viewMonth.getFullYear()}</div>
+              <button className="cal-nav-btn" aria-label="Mes siguiente" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}>›</button>
+            </div>
+          </div>
 
-      <div className="cal-grid">
-        <div className="cal-row cal-row-head">
-          {diasCortos.map((d) => <div className="cal-headcell" key={d}>{d}</div>)}
-        </div>
-        {weeks.map((week, wi) => (
-          <div className="cal-row" key={wi}>
-            {week.map((cell) => {
-              const eventos = torneosDe(cell.date);
-              const isToday = sameDay(cell.date, today);
-              const esPago = esPagoFinal(cell.date);
-              return (
-                <div
-                  key={iso(cell.date)}
-                  className={"cal-cell" + (cell.inMonth ? "" : " cal-cell-out") + (editable && (eventos.length || !esPago) ? " cal-cell-clickable" : "")}
-                  onClick={() => openModal(cell.date, eventos[0])}
-                >
-                  <div className={"cal-daynum" + (isToday ? " cal-daynum-today" : "")}>{cell.date.getDate()}</div>
-                  {eventos.map((ev) => (
-                    <div className="cal-chip" key={ev.fecha + ev.hora}>
-                      <div className="cal-chip-row">
-                        <span className="cal-chip-dot" aria-hidden="true" />
-                        <span className="cal-chip-hora">{ev.hora}</span>
-                        <span className={ev.main ? "cal-chip-tag cal-chip-tag-main" : "cal-chip-tag cal-chip-tag-regular"}>
-                          {ev.main ? "Main" : "Regular"}
-                        </span>
-                      </div>
-                      {ev.temporada && <div className="cal-chip-temporada">{ev.temporada}</div>}
-                    </div>
-                  ))}
-                  {esPago && (
+          <div className="cal-grid">
+            <div className="cal-row cal-row-head">
+              {diasCortos.map((d) => <div className="cal-headcell" key={d}>{d}</div>)}
+            </div>
+            {weeks.map((week, wi) => (
+              <div className="cal-row" key={wi}>
+                {week.map((cell) => {
+                  const eventos = torneosDe(cell.date);
+                  const isToday = sameDay(cell.date, today);
+                  const esPago = esPagoFinal(cell.date);
+                  return (
                     <div
-                      className="cal-chip cal-chip-pago"
-                      onClick={(e) => { e.stopPropagation(); openPagoModal(); }}
+                      key={iso(cell.date)}
+                      className={"cal-cell" + (cell.inMonth ? "" : " cal-cell-out") + (editable && (eventos.length || !esPago) ? " cal-cell-clickable" : "")}
+                      onClick={() => openModal(cell.date, eventos[0])}
                     >
-                      <MoneyBadge size={14} />
-                      <span>Pago final</span>
+                      <div className={"cal-daynum" + (isToday ? " cal-daynum-today" : "")}>{cell.date.getDate()}</div>
+                      {eventos.map((ev) => (
+                        <div className="cal-chip" key={ev.fecha + ev.hora}>
+                          <div className="cal-chip-row">
+                            <span className="cal-chip-dot" aria-hidden="true" />
+                            <span className="cal-chip-hora">{ev.hora}</span>
+                            <span className={ev.main ? "cal-chip-tag cal-chip-tag-main" : "cal-chip-tag cal-chip-tag-regular"}>
+                              {ev.main ? "Main" : "Regular"}
+                            </span>
+                          </div>
+                          {ev.temporada && <div className="cal-chip-temporada">{ev.temporada}</div>}
+                        </div>
+                      ))}
+                      {esPago && (
+                        <div
+                          className="cal-chip cal-chip-pago"
+                          onClick={(e) => { e.stopPropagation(); openPagoModal(); }}
+                        >
+                          <MoneyBadge size={14} />
+                          <span>Pago final</span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="cal-list">
+          {data.torneos
+            .slice()
+            .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
+            .map((t) => {
+              const d = new Date(t.fecha + "T00:00:00");
+              const pasado = t.fecha < todayIso;
+              const esHoy = t.fecha === todayIso;
+              return (
+                <div className={"cal-list-item" + (pasado ? " cal-list-item-pasado" : "") + (esHoy ? " cal-list-item-hoy" : "")} key={t.fecha + t.hora}>
+                  <div className="cal-list-date">
+                    <div className="cal-list-day">{diasCortos[d.getDay()]} {d.getDate()}</div>
+                    <div className="cal-list-mes">{mesesLargos[d.getMonth()].slice(0, 3)}</div>
+                  </div>
+                  <div className="cal-list-info">
+                    <div className="cal-list-hora">{t.hora}{esHoy && <span className="cal-list-hoy-tag">Hoy</span>}</div>
+                    <div className="cal-list-badges">
+                      <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
+                      {t.temporada && <span className="badge badge-nivel-lectura">{t.temporada}</span>}
+                    </div>
+                  </div>
                 </div>
               );
             })}
-          </div>
-        ))}
-      </div>
+          {data.pagoFinal?.fecha && (
+            <div className="cal-list-item cal-list-item-pago">
+              <div className="cal-list-date">
+                <MoneyBadge size={18} />
+              </div>
+              <div className="cal-list-info">
+                <div className="cal-list-hora">Pago final — {new Date(data.pagoFinal.fecha + "T00:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}</div>
+                {data.pagoFinal.nota && <div className="section-note">{data.pagoFinal.nota}</div>}
+              </div>
+            </div>
+          )}
+          {data.torneos.length === 0 && <p className="section-sub">Todavía no hay torneos programados.</p>}
+        </div>
+      )}
 
       {modal && (
         <div className="modal-backdrop" onClick={() => !saving && setModal(null)}>

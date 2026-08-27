@@ -88,6 +88,15 @@ Login simple de usuario/contraseña contra los datos de `/api/perfiles` (Netlify
 
 Usuario semilla: `federico` / `cambia-esta-clave` (rol Administrador General) — cámbiala desde la pantalla de Usuarios en cuanto el sitio esté desplegado.
 
+Todos los campos de contraseña (Entrar, autorregistro, recuperar contraseña) tienen un ícono de ojo para
+mostrar/ocultar lo que se escribió (`src/components/CampoPassword.jsx`, reutilizado en los tres lugares).
+
+**Cierre de sesión automático por inactividad**: si no hay ningún clic, tecla, scroll o movimiento del mouse
+durante **30 minutos** con una sesión abierta, el sitio la cierra solo y regresa a la pantalla de Entrar (que
+es siempre el punto de partida cuando no hay sesión activa o válida). Esto cubre el caso de una pestaña que
+se queda abierta y olvidada. La actividad se registra en `localStorage` (`tols-last-activity`) y se revisa
+cada minuto; usar el sitio con normalidad renueva el conteo, así que no interrumpe una sesión en uso.
+
 **Importante: los usuarios se dan de alta desde el sitio, no editando el Excel directamente.** El Excel de
 OneDrive es un espejo de solo lectura (sitio → Excel automático, ver abajo); si agregas o editas un renglón
 de la hoja Usuarios directo en el Excel, ese cambio **no llega al sitio** y el login va a fallar con "Usuario

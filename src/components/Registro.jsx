@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import CampoPassword from "./CampoPassword.jsx";
 
 const API_CODIGO = "/api/jugadores-codigo";
 const API_VERIFICAR = "/api/jugadores-verificar";
@@ -175,13 +176,11 @@ export default function Registro({ onRegistroExitoso, onIrALogin }) {
               <input className="field" type="email" value={datos.correo} onChange={(e) => setDatos({ ...datos, correo: e.target.value })} />
             </div>
             <div className="login-field-row">
-              <div className="login-field" style={{ flex: 1 }}>
-                <label>Contraseña</label>
-                <input className="field" type="password" value={datos.password} onChange={(e) => setDatos({ ...datos, password: e.target.value })} />
+              <div style={{ flex: 1 }}>
+                <CampoPassword label="Contraseña" value={datos.password} onChange={(e) => setDatos({ ...datos, password: e.target.value })} />
               </div>
-              <div className="login-field" style={{ flex: 1 }}>
-                <label>Confirmar contraseña</label>
-                <input className="field" type="password" value={datos.password2} onChange={(e) => setDatos({ ...datos, password2: e.target.value })} />
+              <div style={{ flex: 1 }}>
+                <CampoPassword label="Confirmar contraseña" value={datos.password2} onChange={(e) => setDatos({ ...datos, password2: e.target.value })} />
               </div>
             </div>
             <div className="login-field">

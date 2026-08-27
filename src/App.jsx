@@ -10,6 +10,8 @@ import Registro from "./components/Registro.jsx";
 import { puedeVer } from "./lib/permisos.js";
 
 const SESSION_KEY = "tols-session";
+const ACTIVITY_KEY = "tols-last-activity";
+const INACTIVIDAD_MS = 30 * 60 * 1000; // 30 minutos sin actividad → se cierra la sesión sola
 const API_PERFILES = "/api/perfiles";
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
@@ -43,12 +45,55 @@ export default function App() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) setSession(JSON.parse(raw));
+      if (raw) {
+        const ultima = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+        if (Date.now() - ultima > INACTIVIDAD_MS) {
+          // la sesión se quedó "colgada" más de 30 minutos sin actividad — se descarta sola
+          localStorage.removeItem(SESSION_KEY);
+          localStorage.removeItem(ACTIVITY_KEY);
+        } else {
+          setSession(JSON.parse(raw));
+          localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
+        }
+      }
     } catch (e) {
       // localStorage no disponible — se pedirá login normalmente
     }
     cargarPerfiles();
   }, []);
+
+  // mientras hay sesión activa, cualquier interacción del usuario marca actividad; cada minuto se
+  // revisa si ya pasaron 30 minutos sin ninguna — si es así, se cierra la sesión y regresa al login
+  useEffect(() => {
+    if (!session) return;
+    let ultimoRegistro = 0;
+    const marcarActividad = () => {
+      const ahora = Date.now();
+      if (ahora - ultimoRegistro < 5000) return; // evita escribir en cada mousemove
+      ultimoRegistro = ahora;
+      try {
+        localStorage.setItem(ACTIVITY_KEY, String(ahora));
+      } catch (e) {}
+    };
+    const eventos = ["click", "keydown", "mousemove", "scroll", "touchstart"];
+    eventos.forEach((ev) => window.addEventListener(ev, marcarActividad));
+    marcarActividad();
+
+    const intervalo = setInterval(() => {
+      try {
+        const ultima = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+        if (Date.now() - ultima > INACTIVIDAD_MS) {
+          handleLogout();
+        }
+      } catch (e) {}
+    }, 60 * 1000);
+
+    return () => {
+      eventos.forEach((ev) => window.removeEventListener(ev, marcarActividad));
+      clearInterval(intervalo);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   function cargarPerfiles() {
     setPerfilesLoading(true);
@@ -76,6 +121,7 @@ export default function App() {
     setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
     } catch (e) {}
   }
 
@@ -83,6 +129,7 @@ export default function App() {
     setSession(null);
     try {
       localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(ACTIVITY_KEY);
     } catch (e) {}
   }
 

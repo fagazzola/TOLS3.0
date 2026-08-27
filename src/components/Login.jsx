@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import CampoPassword from "./CampoPassword.jsx";
 
 const API_RESET_CODIGO = "/api/reset-codigo";
 const API_RESET_CONFIRMAR = "/api/reset-confirmar";
@@ -156,16 +157,12 @@ export default function Login({ perfiles, onLogin }) {
                   required
                 />
               </div>
-              <div className="login-field">
-                <label>Contraseña</label>
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
+              <CampoPassword
+                label="Contraseña"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
               <button type="submit" className="btn btn-primary login-submit">
                 Entrar
               </button>
@@ -235,14 +232,8 @@ export default function Login({ perfiles, onLogin }) {
 
             {!expirado && (
               <>
-                <div className="login-field">
-                  <label>Nueva contraseña</label>
-                  <input type="password" className="field" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} />
-                </div>
-                <div className="login-field">
-                  <label>Confirmar nueva contraseña</label>
-                  <input type="password" className="field" value={nuevaPassword2} onChange={(e) => setNuevaPassword2(e.target.value)} />
-                </div>
+                <CampoPassword label="Nueva contraseña" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} />
+                <CampoPassword label="Confirmar nueva contraseña" value={nuevaPassword2} onChange={(e) => setNuevaPassword2(e.target.value)} />
               </>
             )}
 

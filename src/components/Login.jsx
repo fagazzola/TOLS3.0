@@ -6,7 +6,7 @@ const API_RESET_CONFIRMAR = "/api/reset-confirmar";
 const DURACION_S = 300; // 5 minutos
 
 export default function Login({ perfiles, onLogin }) {
-  const [usuario, setUsuario] = useState("");
+  const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
@@ -35,14 +35,19 @@ export default function Login({ perfiles, onLogin }) {
 
   function handleSubmit(e) {
     e.preventDefault();
+    const escrito = correo.trim().toLowerCase();
+    // el correo es el usuario de acceso; se compara contra ambos campos por compatibilidad con
+    // cuentas viejas que todavía tengan un "usuario" distinto del correo guardado
     const match = (perfiles?.usuarios || []).find(
-      (u) => u.usuario.toLowerCase() === usuario.trim().toLowerCase() && u.password === password
+      (u) =>
+        ((u.correo && u.correo.trim().toLowerCase() === escrito) || u.usuario.trim().toLowerCase() === escrito) &&
+        u.password === password
     );
     if (match) {
       setError("");
       onLogin({ usuario: match.usuario, nombre: match.nombre, rol: match.rol });
     } else {
-      setError("Usuario o contraseña incorrectos.");
+      setError("Correo o contraseña incorrectos.");
     }
   }
 
@@ -148,12 +153,12 @@ export default function Login({ perfiles, onLogin }) {
           <>
             <form onSubmit={handleSubmit}>
               <div className="login-field">
-                <label>Usuario</label>
+                <label>Correo electrónico</label>
                 <input
-                  type="text"
+                  type="email"
                   autoComplete="username"
-                  value={usuario}
-                  onChange={(e) => setUsuario(e.target.value)}
+                  value={correo}
+                  onChange={(e) => setCorreo(e.target.value)}
                   required
                 />
               </div>

@@ -87,18 +87,21 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
         <div className="section">
           <div className="section-head"><div className="section-title">Usuarios</div></div>
           <div className="tbl">
-            <div className="trow thead" style={{ gridTemplateColumns: "1fr 1fr 1.4fr 1fr 1.2fr 40px" }}>
-              <div>Nombre</div><div>Usuario</div><div>Correo electrónico</div><div>Perfil</div><div>Contraseña</div><div />
+            <div className="trow thead" style={{ gridTemplateColumns: "1fr 1.6fr 1fr 1.2fr 40px" }}>
+              <div>Nombre</div><div>Correo electrónico</div><div>Perfil</div><div>Contraseña</div><div />
             </div>
             {draft.usuarios.map((u, i) => (
               <div key={i}>
-                <div className="trow" style={{ gridTemplateColumns: "1fr 1fr 1.4fr 1fr 1.2fr 40px" }}>
+                <div className="trow" style={{ gridTemplateColumns: "1fr 1.6fr 1fr 1.2fr 40px" }}>
                   <input className="field" value={u.nombre}
                     onChange={(e) => set((d) => { d.usuarios[i].nombre = e.target.value; })} />
-                  <input className="field" value={u.usuario}
-                    onChange={(e) => set((d) => { d.usuarios[i].usuario = e.target.value; })} />
                   <input className="field" type="email" value={u.correo}
-                    onChange={(e) => set((d) => { d.usuarios[i].correo = e.target.value; })} />
+                    onChange={(e) => set((d) => {
+                      // el correo es también el usuario de acceso — se guardan iguales para no
+                      // tener dos campos separados con el mismo valor
+                      d.usuarios[i].correo = e.target.value;
+                      d.usuarios[i].usuario = e.target.value;
+                    })} />
                   <select className="field" value={u.rol}
                     onChange={(e) => set((d) => { d.usuarios[i].rol = e.target.value; })}>
                     {draft.roles.map((r) => <option key={r.tipo} value={r.tipo}>{r.tipo}</option>)}

@@ -50,17 +50,29 @@ en el futuro viva en Cobranza/Game Night para ese campeonato) antes de ejecutar.
 ## Sincronización con Excel (OneDrive)
 El sitio escribe en vivo, directo en un Excel guardado en el OneDrive personal de Federico
 (`TOLS3.0-Base-de-Datos.xlsx`), cada vez que se guarda algo en el Tablero, el Calendario o Usuarios —
-usando la API de Microsoft Graph (OneDrive/Excel). El flujo es de un solo sentido automático: **sitio →
-Excel**. Para llevar cambios del Excel de regreso al sitio (**Excel → sitio**) sigue siendo un proceso
-manual, pidiéndoselo a Claude.
+usando la API de Microsoft Graph (OneDrive/Excel). Ese sentido (**sitio → Excel**) es automático, siempre.
+
+**Excel → sitio (solo para Usuarios, manual y explícito):** en la pantalla de Usuarios hay un botón
+**"Importar desde Excel"**, visible solo para Administrador General. Al oprimirlo (con una advertencia
+previa, porque **reemplaza** lo que hay guardado y no se puede deshacer), el sitio lee las hojas Usuarios y
+Permisos del Excel tal como estén en ese momento y sobrescribe `tols-perfiles` con eso — así el Excel puede
+ser la fuente de verdad cuando Federico prefiera editar ahí directo. Esto es intencionalmente manual (no
+automático ni periódico) para no arriesgar perder un autorregistro de un jugador (`/registro`) u otro cambio
+hecho en el sitio que todavía no esté reflejado en el Excel. Por ahora solo cubre Usuarios/Permisos — el
+resto de los módulos (Tablero, Calendario, Campeonatos, Jugadores) siguen siendo de un solo sentido
+(sitio → Excel); se puede extender el mismo botón a esos módulos si hace falta.
 
 Piezas del sistema:
 - `netlify/functions/lib/msgraph.js` — obtiene un access token fresco a partir de un refresh token
   guardado en **Netlify Blobs** (`tols-ms-token`), y expone `syncCampeonatos`/`syncTablero`/
-  `syncCalendario`/`syncPerfiles`/`syncJugadores`, cada una escribiendo las hojas correspondientes del Excel vía Graph
-  API (`PATCH .../workbook/worksheets('Hoja')/range(...)`). Cada sync es "best effort": si Graph API
+  `syncCalendario`/`syncPerfiles`/`syncJugadores` (sitio → Excel) y `leerUsuariosYPermisosDesdeExcel`
+  (Excel → sitio, solo para el botón de importar). Cada sync de escritura es "best effort": si Graph API
   falla (token vencido, sin conexión, etc.), el guardado en el sitio **no se ve afectado** — solo se
   registra el error en los logs de Netlify.
+- `netlify/functions/perfiles-importar-excel.js` (`/api/perfiles-importar-excel`, POST) — lee Usuarios y
+  Permisos del Excel, valida el resultado con las mismas reglas que el resto del sitio, y si todo está bien
+  sobrescribe `tols-perfiles`. Si el Excel queda con datos inválidos (ej. sin ningún Administrador General),
+  la importación se rechaza con un mensaje de error y no se aplica nada.
 - `netlify/functions/auth-onedrive-start.js` (`/api/auth-onedrive-start`) — redirige a la pantalla de
   login/consentimiento de Microsoft. Se visita **una sola vez** para autorizar.
 - `netlify/functions/auth-onedrive-callback.js` (`/api/auth-onedrive-callback`) — recibe el código de

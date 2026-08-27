@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MODULOS, NIVEL_LABEL } from "../lib/permisos.js";
 
 const API = "/api/perfiles";
+const API_IMPORTAR = "/api/perfiles-importar-excel";
 const NIVELES = ["ninguno", "lectura", "escritura"];
 
 function nuevoUsuario() {
@@ -16,6 +17,10 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
   const [saveOk, setSaveOk] = useState(false);
   const [mostrar, setMostrar] = useState({}); // { [usuario_index]: bool } — ojo mostrar/ocultar contraseña
   const [cambiarPass, setCambiarPass] = useState(null); // { index, valor }
+  const [importando, setImportando] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importOk, setImportOk] = useState(false);
+  const [confirmarImportar, setConfirmarImportar] = useState(false);
 
   const dirty = JSON.stringify(perfiles) !== JSON.stringify(draft);
 
@@ -56,6 +61,26 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
     setCambiarPass(null);
   }
 
+  async function handleImportarExcel() {
+    setImportando(true);
+    setImportError("");
+    setImportOk(false);
+    try {
+      const r = await fetch(API_IMPORTAR, { method: "POST" });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo importar desde el Excel.");
+      setDraft(json);
+      onPerfilesChange(json);
+      setImportOk(true);
+      setSaveOk(false);
+    } catch (e) {
+      setImportError(e.message || "No se pudo importar desde el Excel.");
+    } finally {
+      setImportando(false);
+      setConfirmarImportar(false);
+    }
+  }
+
   return (
     <div>
       <div className="headtop">
@@ -74,6 +99,9 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
           {saveError && <div className="login-error" style={{ margin: 0 }}>{saveError}</div>}
           {saveOk && !dirty && <div className="check-line check-ok" style={{ margin: 0 }}>✓ Cambios guardados.</div>}
           {dirty && !saveError && <div className="section-note">Tienes cambios sin guardar.</div>}
+          <button className="btn btn-secondary" onClick={() => setConfirmarImportar(true)} disabled={saving || importando}>
+            {importando ? "Importando…" : "Importar desde Excel"}
+          </button>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="btn btn-secondary" onClick={handleCancelar} disabled={saving || !dirty}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleGuardar} disabled={saving || !dirty}>
@@ -82,6 +110,8 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
           </div>
         </div>
       )}
+      {isAdminGeneral && importError && <div className="login-error">{importError}</div>}
+      {isAdminGeneral && importOk && <div className="check-line check-ok">✓ Usuarios y permisos actualizados desde el Excel.</div>}
 
       {isAdminGeneral ? (
         <div className="section">
@@ -196,6 +226,28 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
             ))}
           </div>
           <div className="section-sub">Cobranza y Game Night aún no están construidos — los permisos ya quedaron definidos para cuando existan.</div>
+        </div>
+      )}
+
+      {confirmarImportar && (
+        <div className="modal-backdrop" onClick={() => !importando && setConfirmarImportar(false)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge danger">📥</div>
+            <div className="modal-title">Importar desde Excel</div>
+            <p className="section-sub">
+              Vas a reemplazar los usuarios y permisos guardados en el sitio con lo que haya <b>ahora mismo</b>{" "}
+              en las hojas Usuarios y Permisos del Excel. Cualquier cambio hecho desde el sitio que no esté
+              también en el Excel se va a perder. Esta acción no se puede deshacer.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmarImportar(false)} disabled={importando}>
+                Cancelar
+              </button>
+              <button className="btn btn-danger" onClick={handleImportarExcel} disabled={importando}>
+                {importando ? "Importando…" : "Sí, importar y reemplazar"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

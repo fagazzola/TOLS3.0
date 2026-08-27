@@ -10,6 +10,9 @@ function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+// inverso de NIVEL_LABEL (ej. "Sólo lectura" → "lectura") para importar la hoja Permisos de vuelta
+const NIVEL_LABEL_INV = Object.fromEntries(Object.entries(NIVEL_LABEL).map(([k, v]) => [v, k]));
+
 function colLetter(n) {
   let s = "";
   while (n > 0) {
@@ -76,6 +79,53 @@ async function writeSheetTable(sheetName, values, { startRow = 2, maxRows = 400 
     method: "PATCH",
     body: JSON.stringify({ values }),
   });
+}
+
+// lee todos los valores usados de una hoja (incluye el encabezado en la fila 0) — usa usedRange en vez de
+// pedir un rango fijo porque no sabemos de antemano cuántas filas tiene lo que Federico haya escrito
+async function readSheetUsedRange(sheetName) {
+  const sheet = encodeURIComponent(sheetName);
+  const json = await graphFetch(`/workbook/worksheets('${sheet}')/usedRange`, { method: "GET" });
+  return json?.values || [];
+}
+
+// lee las hojas Usuarios y Permisos del Excel y arma el mismo objeto {roles, usuarios} que usa el sitio —
+// para cuando el Excel debe "mandar" sobre lo guardado (botón "Importar desde Excel" en Usuarios)
+export async function leerUsuariosYPermisosDesdeExcel() {
+  const [filasUsuarios, filasPermisos] = await Promise.all([
+    readSheetUsedRange("Usuarios"),
+    readSheetUsedRange("Permisos"),
+  ]);
+
+  // Usuarios: Nombre, Correo Electrónico, Contraseña, Perfil (fila 0 = encabezado)
+  const usuarios = filasUsuarios
+    .slice(1)
+    .filter((f) => f[0] || f[1])
+    .map((f) => ({
+      nombre: String(f[0] || "").trim(),
+      usuario: String(f[1] || "").trim(),
+      correo: String(f[1] || "").trim(),
+      password: String(f[2] || ""),
+      rol: String(f[3] || "").trim(),
+    }));
+
+  // Permisos: Perfil, Tablero de Control, Calendario, Cobranza, Usuarios, Game Night, Jugadores
+  const roles = filasPermisos
+    .slice(1)
+    .filter((f) => f[0])
+    .map((f) => ({
+      tipo: String(f[0] || "").trim(),
+      permisos: {
+        mod2: NIVEL_LABEL_INV[f[1]] || "ninguno",
+        mod1: NIVEL_LABEL_INV[f[2]] || "ninguno",
+        mod4: NIVEL_LABEL_INV[f[3]] || "ninguno",
+        mod3: NIVEL_LABEL_INV[f[4]] || "ninguno",
+        mod5: NIVEL_LABEL_INV[f[5]] || "ninguno",
+        mod6: NIVEL_LABEL_INV[f[6]] || "ninguno",
+      },
+    }));
+
+  return { roles, usuarios };
 }
 
 // nunca deja que un problema de sincronización con el Excel tumbe un guardado del sitio
@@ -167,7 +217,9 @@ export function syncJugadores(jugadores) {
 
 export function syncPerfiles(data) {
   return safe(async () => {
-    const usuarios = (data.usuarios || []).map((u) => [u.nombre, u.usuario, u.correo || "", u.password, u.rol]);
+    // 4 columnas — igual a la tabla de Usuarios del sitio (el correo ES el usuario de acceso, ya no hay
+    // una columna aparte); si algún registro viejo solo tiene `usuario` y no `correo`, se usa ese como respaldo
+    const usuarios = (data.usuarios || []).map((u) => [u.nombre, u.correo || u.usuario || "", u.password, u.rol]);
     await writeSheetTable("Usuarios", usuarios);
 
     // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores

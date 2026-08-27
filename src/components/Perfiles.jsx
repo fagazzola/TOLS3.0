@@ -4,9 +4,19 @@ import { MODULOS, NIVEL_LABEL } from "../lib/permisos.js";
 const API = "/api/perfiles";
 const API_IMPORTAR = "/api/perfiles-importar-excel";
 const NIVELES = ["ninguno", "lectura", "escritura"];
+const USUARIOS_COLS = "1fr 1.6fr 1fr 1.2fr 72px";
 
 function nuevoUsuario() {
   return { nombre: "", usuario: "", correo: "", password: "", rol: "" };
+}
+
+// búsqueda tolerante a mayúsculas/acentos — así "jose" encuentra "José" o "JOSÉ"
+const DIACRITICOS = new RegExp(String.fromCharCode(0x5b, 0x5c, 0x75, 0x30, 0x33, 0x30, 0x30, 0x2d, 0x5c, 0x75, 0x30, 0x33, 0x36, 0x66, 0x5d), "g");
+function normalizarBusqueda(s) {
+  return String(s || "")
+    .normalize("NFD")
+    .replace(DIACRITICOS, "")
+    .toLowerCase();
 }
 
 export default function Perfiles({ session, perfiles, onPerfilesChange }) {
@@ -21,6 +31,7 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
   const [importError, setImportError] = useState("");
   const [importOk, setImportOk] = useState(false);
   const [confirmarImportar, setConfirmarImportar] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
 
   const dirty = JSON.stringify(perfiles) !== JSON.stringify(draft);
 
@@ -116,78 +127,100 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
       {isAdminGeneral ? (
         <div className="section">
           <div className="section-head"><div className="section-title">Usuarios</div></div>
+          <input
+            className="field"
+            style={{ maxWidth: 320, marginBottom: 10 }}
+            type="text"
+            placeholder="Buscar por nombre o correo…"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+          />
           <div className="tbl">
-            <div className="trow thead" style={{ gridTemplateColumns: "1fr 1.6fr 1fr 1.2fr 40px" }}>
+            <div className="trow thead" style={{ gridTemplateColumns: USUARIOS_COLS }}>
               <div>Nombre</div><div>Correo electrónico</div><div>Perfil</div><div>Contraseña</div><div />
             </div>
-            {draft.usuarios.map((u, i) => (
-              <div key={i}>
-                <div className="trow" style={{ gridTemplateColumns: "1fr 1.6fr 1fr 1.2fr 40px" }}>
-                  <input className="field" value={u.nombre}
-                    onChange={(e) => set((d) => { d.usuarios[i].nombre = e.target.value; })} />
-                  <input className="field" type="email" value={u.correo}
-                    onChange={(e) => set((d) => {
-                      // el correo es también el usuario de acceso — se guardan iguales para no
-                      // tener dos campos separados con el mismo valor
-                      d.usuarios[i].correo = e.target.value;
-                      d.usuarios[i].usuario = e.target.value;
-                    })} />
-                  <select className="field" value={u.rol}
-                    onChange={(e) => set((d) => { d.usuarios[i].rol = e.target.value; })}>
-                    {draft.roles.map((r) => <option key={r.tipo} value={r.tipo}>{r.tipo}</option>)}
-                  </select>
-                  <div className="pass-field">
-                    <input
-                      className="field"
-                      type={mostrar[i] ? "text" : "password"}
-                      value={u.password}
-                      readOnly
-                    />
-                    <button
-                      type="button"
-                      className="btn-icon-eye"
-                      title={mostrar[i] ? "Ocultar contraseña" : "Mostrar contraseña"}
-                      onClick={() => setMostrar((m) => ({ ...m, [i]: !m[i] }))}
-                    >
-                      {mostrar[i] ? "🙈" : "👁"}
-                    </button>
-                  </div>
-                  <button className="btn-icon-remove" title="Quitar usuario" disabled={draft.usuarios.length <= 1}
-                    onClick={() => set((d) => { d.usuarios.splice(i, 1); })}>✕</button>
-                </div>
-                <div className="trow" style={{ gridTemplateColumns: "1fr", paddingTop: 0 }}>
-                  {cambiarPass?.index === i ? (
-                    <div className="pass-change-row">
+            {draft.usuarios
+              .map((u, i) => ({ u, i }))
+              .filter(({ u }) => {
+                const q = normalizarBusqueda(busqueda);
+                if (!q) return true;
+                return normalizarBusqueda(u.nombre).includes(q) || normalizarBusqueda(u.correo).includes(q);
+              })
+              .map(({ u, i }) => (
+                <div key={i}>
+                  <div className="trow" style={{ gridTemplateColumns: USUARIOS_COLS }}>
+                    <input className="field" value={u.nombre}
+                      onChange={(e) => set((d) => { d.usuarios[i].nombre = e.target.value; })} />
+                    <input className="field" type="email" value={u.correo}
+                      onChange={(e) => set((d) => {
+                        // el correo es también el usuario de acceso — se guardan iguales para no
+                        // tener dos campos separados con el mismo valor
+                        d.usuarios[i].correo = e.target.value;
+                        d.usuarios[i].usuario = e.target.value;
+                      })} />
+                    <select className="field" value={u.rol}
+                      onChange={(e) => set((d) => { d.usuarios[i].rol = e.target.value; })}>
+                      {draft.roles.map((r) => <option key={r.tipo} value={r.tipo}>{r.tipo}</option>)}
+                    </select>
+                    <div className="pass-field">
                       <input
                         className="field"
-                        type="text"
-                        placeholder="Nueva contraseña"
-                        value={cambiarPass.valor}
-                        onChange={(e) => setCambiarPass({ index: i, valor: e.target.value })}
+                        type={mostrar[i] ? "text" : "password"}
+                        value={u.password}
+                        readOnly
                       />
                       <button
-                        className="btn btn-primary btn-add"
-                        disabled={!cambiarPass.valor.trim()}
-                        onClick={() => {
-                          set((d) => { d.usuarios[i].password = cambiarPass.valor.trim(); });
-                          setCambiarPass(null);
-                        }}
+                        type="button"
+                        className="btn-icon-eye"
+                        title={mostrar[i] ? "Ocultar contraseña" : "Mostrar contraseña"}
+                        onClick={() => setMostrar((m) => ({ ...m, [i]: !m[i] }))}
                       >
-                        Confirmar
+                        {mostrar[i] ? "🙈" : "👁"}
                       </button>
-                      <button className="btn btn-secondary btn-add" onClick={() => setCambiarPass(null)}>Cancelar</button>
                     </div>
-                  ) : (
-                    <button
-                      className="btn btn-secondary btn-add"
-                      onClick={() => setCambiarPass({ index: i, valor: "" })}
-                    >
-                      Cambiar contraseña
-                    </button>
+                    <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        className="btn-icon-eye"
+                        title="Cambiar contraseña"
+                        onClick={() => setCambiarPass(cambiarPass?.index === i ? null : { index: i, valor: "" })}
+                      >
+                        🔑
+                      </button>
+                      <button className="btn-icon-remove" title="Quitar usuario" disabled={draft.usuarios.length <= 1}
+                        onClick={() => set((d) => { d.usuarios.splice(i, 1); })}>✕</button>
+                    </div>
+                  </div>
+                  {cambiarPass?.index === i && (
+                    <div className="trow" style={{ gridTemplateColumns: "1fr", paddingTop: 0 }}>
+                      <div className="pass-change-row">
+                        <input
+                          className="field"
+                          type="text"
+                          placeholder="Nueva contraseña"
+                          value={cambiarPass.valor}
+                          onChange={(e) => setCambiarPass({ index: i, valor: e.target.value })}
+                        />
+                        <button
+                          className="btn btn-primary btn-add"
+                          disabled={!cambiarPass.valor.trim()}
+                          onClick={() => {
+                            set((d) => { d.usuarios[i].password = cambiarPass.valor.trim(); });
+                            setCambiarPass(null);
+                          }}
+                        >
+                          Confirmar
+                        </button>
+                        <button className="btn btn-secondary btn-add" onClick={() => setCambiarPass(null)}>Cancelar</button>
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              ))}
+            {busqueda.trim() &&
+              !draft.usuarios.some(
+                (u) => normalizarBusqueda(u.nombre).includes(normalizarBusqueda(busqueda)) || normalizarBusqueda(u.correo).includes(normalizarBusqueda(busqueda))
+              ) && <div className="section-sub">No se encontraron usuarios con ese criterio.</div>}
           </div>
           <button
             className="btn btn-secondary btn-add"

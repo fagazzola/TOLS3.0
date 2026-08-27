@@ -39,6 +39,17 @@ Todas las pestañas del menú (`src/App.jsx` + `src/lib/permisos.js`) se muestra
 ## Cómo se actualizan los datos
 Campeonatos, Tablero, Calendario y Usuarios se editan directo en el sitio (con permiso de escritura) y se guardan en **Netlify Blobs** — los `.json` en `src/data/` son solo semillas iniciales para el primer arranque y ya no se vuelven a leer salvo que se borre el store de Blobs correspondiente.
 
+## Pantalla de Usuarios: búsqueda y botón de cambiar contraseña compacto
+Arriba de la tabla de Usuarios hay un campo de búsqueda ("Buscar por nombre o correo…") que filtra la
+lista en vivo — tolerante a mayúsculas/minúsculas y acentos (`normalizarBusqueda` en `Perfiles.jsx`), así
+que buscar "jose" encuentra tanto "José" como "JOSÉ". Si no hay resultados, muestra un aviso en vez de
+dejar la tabla vacía sin explicación. Es útil cuando la lista de jugadores crece.
+
+El botón "Cambiar contraseña" dejó de ser una fila completa siempre visible debajo de cada usuario: ahora
+es un ícono pequeño (🔑) al lado del botón de eliminar (✕) en la misma fila, y el campo para escribir la
+nueva contraseña solo aparece debajo cuando se oprime ese ícono en esa fila específica — así la lista
+ocupa mucho menos espacio vertical cuando hay varios usuarios.
+
 ## Campeonato activo en el Tablero de Control
 El combo de campeonato tiene un banner destacado debajo ("Estás viendo y editando: **X**...") y el nombre
 del campeonato acompaña cada título de sección (Premios, Puntos, Costos), para que nunca se pierda de

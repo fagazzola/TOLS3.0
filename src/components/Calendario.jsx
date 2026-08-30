@@ -197,40 +197,88 @@ export default function Calendario({ session, perfiles }) {
   const mainCount = data.torneos.filter((t) => t.main).length;
   const dPago = data.pagoFinal?.fecha ? new Date(data.pagoFinal.fecha + "T00:00:00") : null;
 
+  // campeonato que corresponde mostrar arriba, para el jugador: el del próximo torneo pendiente si hay
+  // alguno, o si no, el del último torneo jugado — así siempre refleja el torneo vigente/más reciente
+  function campeonatoVigente() {
+    const ordenados = data.torneos.slice().sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+    const futuro = ordenados.find((t) => t.fecha >= todayIso);
+    if (futuro) return futuro.temporada || "";
+    if (ordenados.length > 0) return ordenados[ordenados.length - 1].temporada || "";
+    return "";
+  }
+
+  const jugadosCount = data.torneos.filter((t) => t.fecha < todayIso).length;
+  const avancePct = data.torneos.length > 0 ? Math.round((jugadosCount / data.torneos.length) * 100) : 0;
+
   return (
     <div>
       <div className="headtop">
         <div>
           <div className="eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
           <h1>Calendario</h1>
-          <p className="subtitle">
-            {editable
-              ? "Haz clic en cualquier día para crear, editar o borrar un torneo."
-              : "Vista de solo lectura — tu perfil no tiene permiso para modificar el calendario."}
-          </p>
+          {editable && (
+            <p className="subtitle">Haz clic en cualquier día para crear, editar o borrar un torneo.</p>
+          )}
         </div>
       </div>
 
-      <div className="stats">
-        <div className="stat">
-          <div className="stat-label">Torneos</div>
-          <div className="stat-value">{data.torneos.length} <small>fechas</small></div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Main Events</div>
-          <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
-        </div>
-        <div
-          className={"stat" + (editable ? " cal-cell-clickable" : "")}
-          onClick={editable ? openPagoModal : undefined}
-          title={editable ? "Editar fecha de pago final" : undefined}
-        >
-          <div className="stat-label">Pago final</div>
-          <div className="stat-value">
-            {dPago ? `${dPago.getDate()} ${mesesLargos[dPago.getMonth()].slice(0, 3)}` : "–"} <small>{dPago?.getFullYear()}</small>
+      {editable && (
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-label">Torneos</div>
+            <div className="stat-value">{data.torneos.length} <small>fechas</small></div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Main Events</div>
+            <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
+          </div>
+          <div
+            className="stat cal-cell-clickable"
+            onClick={openPagoModal}
+            title="Editar fecha de pago final"
+          >
+            <div className="stat-label">Pago final</div>
+            <div className="stat-value">
+              {dPago ? `${dPago.getDate()} ${mesesLargos[dPago.getMonth()].slice(0, 3)}` : "–"} <small>{dPago?.getFullYear()}</small>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {!editable && (
+        <div className="campeonato-banner">
+          {campeonatoVigente() ? <>Campeonato: <strong>{campeonatoVigente()}</strong></> : "Todavía no hay un campeonato definido para estas fechas."}
+        </div>
+      )}
+
+      {!editable && (
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-label">Fechas</div>
+            <div className="stat-value">{data.torneos.length}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Main Events</div>
+            <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Jugadas</div>
+            <div className="stat-value">{jugadosCount} <small>de {data.torneos.length}</small></div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Avance del torneo</div>
+            <div className="stat-value">{avancePct}%</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Puntos en el torneo</div>
+            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Posición en la tabla</div>
+            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          </div>
+        </div>
+      )}
 
       {editable ? (
         <>
@@ -306,11 +354,23 @@ export default function Calendario({ session, perfiles }) {
                     <div className="cal-list-mes">{mesesLargos[d.getMonth()].slice(0, 3)}</div>
                   </div>
                   <div className="cal-list-info">
-                    <div className="cal-list-hora">{t.hora}{esHoy && <span className="cal-list-hoy-tag">Hoy</span>}</div>
-                    <div className="cal-list-badges">
-                      <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
-                      {t.temporada && <span className="badge badge-nivel-lectura">{t.temporada}</span>}
+                    <div className="cal-list-info-row">
+                      <div className="cal-list-hora">
+                        {t.hora}
+                        {esHoy && <span className="cal-list-hoy-tag">Hoy</span>}
+                      </div>
+                      <div className="cal-list-badges">
+                        <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
+                        {t.temporada && <span className="badge badge-nivel-lectura">{t.temporada}</span>}
+                        <span className={pasado ? "badge badge-efectuado" : "badge badge-pendiente"}>{pasado ? "Efectuado" : "Pendiente"}</span>
+                      </div>
                     </div>
+                    {pasado && (
+                      <div className="cal-list-resultado">
+                        <span>Posición: <span className="stat-value-proximamente">Próximamente</span></span>
+                        <span>Puntos: <span className="stat-value-proximamente">Próximamente</span></span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

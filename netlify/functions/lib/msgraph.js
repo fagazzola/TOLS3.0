@@ -210,6 +210,8 @@ export function syncJugadores(jugadores) {
       j.emoticon,
       j.fechaRegistro || "",
       j.estatus || "Activo",
+      j.host ? "Sí" : "No",
+      j.hostFecha || "",
     ]);
     await writeSheetTable("Jugadores", filas);
   });

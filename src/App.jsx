@@ -7,12 +7,20 @@ import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
 import Jugadores from "./components/Jugadores.jsx";
 import Registro from "./components/Registro.jsx";
-import { puedeVer } from "./lib/permisos.js";
+import { puedeVer, puedeEditar } from "./lib/permisos.js";
 
 const SESSION_KEY = "tols-session";
 const ACTIVITY_KEY = "tols-last-activity";
 const INACTIVIDAD_MS = 30 * 60 * 1000; // 30 minutos sin actividad → se cierra la sesión sola
 const API_PERFILES = "/api/perfiles";
+const API_JUGADORES = "/api/jugadores";
+const API_CALENDARIO = "/api/calendario";
+const API_CAMPEONATOS = "/api/campeonatos";
+
+function isoHoy() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
 // (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores); Cobranza todavía no existe
@@ -35,6 +43,10 @@ export default function App() {
   const [perfilesError, setPerfilesError] = useState("");
   // ruta simple: /registro muestra el autorregistro sin necesidad de login, sin librería de routing
   const [ruta, setRuta] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
+  // esHost: si el usuario en sesión es el Jugador asignado como Host del próximo Game Night (se
+  // recalcula cada vez que hay sesión — por eso hay que salir y volver a entrar para que se refleje un
+  // cambio reciente). faltaHost: si quien entró puede gestionar Jugadores y no hay Host asignado todavía.
+  const [hostInfo, setHostInfo] = useState({ esHost: false, faltaHost: false, proximaFecha: "" });
 
   useEffect(() => {
     const onPop = () => setRuta(window.location.pathname);
@@ -94,6 +106,33 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  // se recalcula "modo Host" y "falta asignar Host" cada vez que hay una sesión activa (y cuando ya
+  // están los perfiles, para saber si puede gestionar Jugadores) — a propósito no queda "en vivo": si el
+  // Host cambia mientras alguien tiene el sitio abierto, hay que salir y volver a entrar para verlo
+  useEffect(() => {
+    if (!session || !perfiles) return;
+    Promise.all([
+      fetch(API_JUGADORES).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API_CALENDARIO).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API_CAMPEONATOS).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([jug, cal, camp]) => {
+      const correo = (session.usuario || "").trim().toLowerCase();
+      const miJugador = (jug?.jugadores || []).find((j) => j.correo === correo);
+      const esHost = miJugador?.host === true;
+
+      const activo = camp?.activo || "";
+      const hoy = isoHoy();
+      const proximos = (cal?.torneos || [])
+        .filter((t) => (activo ? t.temporada === activo : true) && t.fecha >= hoy)
+        .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+      const hayHost = (jug?.jugadores || []).some((j) => j.host === true);
+      const puedeGestionarJugadores = puedeEditar(perfiles, session, "mod6") || session.rol === "Administrador General";
+      const faltaHost = puedeGestionarJugadores && proximos.length > 0 && !hayHost;
+
+      setHostInfo({ esHost, faltaHost, proximaFecha: proximos[0]?.fecha || "" });
+    });
+  }, [session, perfiles]);
 
   function cargarPerfiles() {
     setPerfilesLoading(true);
@@ -199,7 +238,13 @@ export default function App() {
     <>
       <Decor />
       <div className="wrap">
-        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
+        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} esHost={hostInfo.esHost} />
+        {hostInfo.faltaHost && (
+          <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
+            ⚠ No hay Host asignado para el próximo torneo ({hostInfo.proximaFecha}). Sin Host no se puede
+            iniciar el Game Night — ve a la pestaña Jugadores para asignarlo.
+          </div>
+        )}
         {active ? (
           <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} />
         ) : (

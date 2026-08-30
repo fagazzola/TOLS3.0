@@ -36,6 +36,31 @@ export function plantillaReset(codigo, nombre) {
   </div>`;
 }
 
+export function plantillaHost(nombre, fecha) {
+  const fechaTexto = fecha
+    ? new Date(fecha + "T00:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+    : "";
+  return `
+  <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
+    <div style="max-width:420px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
+      <div style="font-size:13px; letter-spacing:.06em; color:#8fd694; text-transform:uppercase; margin-bottom:8px;">♠ Torrente On Line Series - TOLS 3.0</div>
+      <h2 style="margin:0 0 12px; color:#fff;">¡Eres el Host del próximo Game Night!</h2>
+      <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
+        Hola${nombre ? " " + nombre : ""}, un administrador te asignó como <strong>Host</strong>
+        ${fechaTexto ? `del torneo del <strong>${fechaTexto}</strong>` : "del próximo torneo"} de la liga.
+      </p>
+      <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
+        Como Host eres responsable de la ejecución de ese Game Night. La próxima vez que entres al sitio
+        vas a ver una marca de "Modo Host" — si ya tenías una sesión abierta, sal y vuelve a entrar para
+        que se actualice.
+      </p>
+      <p style="margin:0; color:#7c8a97; font-size:12px;">
+        Si crees que esto es un error, contacta a un administrador de la liga.
+      </p>
+    </div>
+  </div>`;
+}
+
 export function plantillaCodigo(codigo, nombre) {
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">

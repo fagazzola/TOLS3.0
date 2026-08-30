@@ -4,15 +4,21 @@ import { syncCampeonatos } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
-// limpia la lista: quita espacios y duplicados, sin tronar si viene algo raro
+// limpia la lista: quita espacios y duplicados, sin tronar si viene algo raro. "activo" es el
+// campeonato que gobierna el sitio (el que se ve/edita en el Tablero de Control) — el mismo que debe
+// reflejarse en el Calendario y en cualquier otra pantalla que necesite saber "cuál es el torneo vigente".
 function normalizar(data) {
-  if (!data || !Array.isArray(data.nombres)) return { ...seed };
+  const base = data && typeof data === "object" ? data : {};
+  const origen = Array.isArray(base.nombres) ? base.nombres : Array.isArray(seed.nombres) ? seed.nombres : [];
   const limpios = [];
-  for (const n of data.nombres) {
+  for (const n of origen) {
     const t = String(n || "").trim();
     if (t && !limpios.includes(t)) limpios.push(t);
   }
-  return { nombres: limpios.length ? limpios : seed.nombres };
+  const nombres = limpios.length ? limpios : seed.nombres;
+  let activo = String(base.activo || "").trim();
+  if (!activo || !nombres.includes(activo)) activo = nombres[0] || "";
+  return { nombres, activo };
 }
 
 function validar(data) {
@@ -41,7 +47,7 @@ async function conHuerfanosSanados(normalizado) {
     if (!tablero || typeof tablero !== "object") return normalizado;
     const huerfanos = Object.keys(tablero).filter((n) => !normalizado.nombres.includes(n));
     if (huerfanos.length === 0) return normalizado;
-    return { nombres: [...normalizado.nombres, ...huerfanos] };
+    return { nombres: [...normalizado.nombres, ...huerfanos], activo: normalizado.activo };
   } catch (e) {
     // si el store del tablero no está disponible por lo que sea, no se bloquea el registro por eso
     return normalizado;
@@ -69,11 +75,17 @@ export default async (req) => {
     } catch (e) {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
-    const limpio = { nombres: (Array.isArray(body?.nombres) ? body.nombres : []).map((n) => String(n || "").trim()) };
-    const problema = validar(limpio);
+    const nombresLimpio = { nombres: (Array.isArray(body?.nombres) ? body.nombres : []).map((n) => String(n || "").trim()) };
+    const problema = validar(nombresLimpio);
     if (problema) {
       return new Response(JSON.stringify({ error: problema }), { status: 400, headers: HEADERS });
     }
+    // si el body trae "activo" explícito (ej. al cambiar el campeonato seleccionado en el Tablero) se
+    // respeta ese valor; si no, se conserva el que ya estaba guardado — normalizar() cae a nombres[0]
+    // si el activo actual ya no existe en la lista (ej. se acaba de eliminar ese campeonato)
+    const actual = await store.get("data", { type: "json" });
+    const activoDeseado = body?.activo !== undefined ? String(body.activo || "").trim() : normalizar(actual).activo;
+    const limpio = normalizar({ nombres: nombresLimpio.nombres, activo: activoDeseado });
     await store.setJSON("data", limpio);
     await syncCampeonatos(limpio);
     return new Response(JSON.stringify(limpio), { headers: HEADERS });

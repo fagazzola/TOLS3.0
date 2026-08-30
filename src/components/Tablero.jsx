@@ -118,9 +118,12 @@ export default function Tablero({ session, perfiles }) {
         const nombres = camp.nombres || [];
         setCampeonatos(nombres);
         setTableroMap(tab || {});
-        const primero = nombres[0] || Object.keys(tab || {})[0] || "";
-        setCampeonatoSel(primero);
-        const normalizado = normalizar(tab?.[primero], Object.values(tab || {})[0]);
+        // el campeonato que gobierna el sitio es "activo" (guardado en tols-campeonatos) — el Tablero
+        // arranca mostrando ese, no simplemente el primero de la lista, para que Calendario y cualquier
+        // otra pantalla que dependa de "cuál es el torneo vigente" siempre coincidan con esto
+        const inicial = camp.activo || nombres[0] || Object.keys(tab || {})[0] || "";
+        setCampeonatoSel(inicial);
+        const normalizado = normalizar(tab?.[inicial], Object.values(tab || {})[0]);
         setData(normalizado);
         setDraft(normalizado);
       })
@@ -159,6 +162,14 @@ export default function Tablero({ session, perfiles }) {
     setDraft(normalizado);
     setSaveError("");
     setSaveOk(false);
+    // el combo del Tablero es quien gobierna el sitio: cambiar aquí persiste el campeonato "activo" en
+    // tols-campeonatos, para que el Calendario (y a futuro cualquier otra pantalla) siempre muestren el
+    // mismo campeonato que este, en vez de cada uno adivinarlo por su cuenta
+    fetch(API_CAMP, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nombres: campeonatos, activo: nombre }),
+    }).catch(() => {});
   }
 
   function validarLocal(d) {
@@ -227,7 +238,7 @@ export default function Tablero({ session, perfiles }) {
       const r = await fetch(API_CAMP, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ nombres: [...campeonatos, nombre] }),
+        body: JSON.stringify({ nombres: [...campeonatos, nombre], activo: nombre }),
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error || "No se pudo agregar el campeonato.");
@@ -266,7 +277,9 @@ export default function Tablero({ session, perfiles }) {
       const rc = await fetch(API_CAMP, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ nombres: nuevaLista }),
+        // si se está renombrando el campeonato que gobierna el sitio, el "activo" cambia de nombre junto
+        // con él; si no, se omite y el servidor conserva el que ya estaba guardado
+        body: JSON.stringify(campeonatoSel === de ? { nombres: nuevaLista, activo: a } : { nombres: nuevaLista }),
       });
       const jc = await rc.json();
       if (!rc.ok) throw new Error(jc.error || "No se pudo renombrar el campeonato.");

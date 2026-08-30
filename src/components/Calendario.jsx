@@ -67,6 +67,9 @@ export default function Calendario({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod1");
   const [data, setData] = useState(null);
   const [campeonatos, setCampeonatos] = useState([]);
+  // el campeonato "activo" es el que gobierna el sitio — el mismo que se ve/edita en el Tablero de
+  // Control (tols-campeonatos). El Calendario ya no lo adivina por su cuenta a partir de las fechas.
+  const [campeonatoActivo, setCampeonatoActivo] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -92,6 +95,7 @@ export default function Calendario({ session, perfiles }) {
       .then(([cal, camp]) => {
         setData(cal);
         setCampeonatos(Array.isArray(camp?.nombres) ? camp.nombres : []);
+        setCampeonatoActivo(camp?.activo || "");
       })
       .catch((e) => setLoadError(e.message || "Error al cargar el calendario."))
       .finally(() => setLoading(false));
@@ -194,27 +198,21 @@ export default function Calendario({ session, perfiles }) {
     persist({ ...data, pagoFinal: { fecha: pagoModal.fecha, nota: pagoModal.nota } });
   }
 
-  const mainCount = data.torneos.filter((t) => t.main).length;
   const dPago = data.pagoFinal?.fecha ? new Date(data.pagoFinal.fecha + "T00:00:00") : null;
 
-  // campeonato que corresponde mostrar arriba, para el jugador: el del próximo torneo pendiente si hay
-  // alguno, o si no, el del último torneo jugado — así siempre refleja el torneo vigente/más reciente
-  function campeonatoVigente() {
-    const ordenados = data.torneos.slice().sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
-    const futuro = ordenados.find((t) => t.fecha >= todayIso);
-    if (futuro) return futuro.temporada || "";
-    if (ordenados.length > 0) return ordenados[ordenados.length - 1].temporada || "";
-    return "";
-  }
-
-  const jugadosCount = data.torneos.filter((t) => t.fecha < todayIso).length;
-  const avancePct = data.torneos.length > 0 ? Math.round((jugadosCount / data.torneos.length) * 100) : 0;
+  // todo el resumen (fechas, Main Events, jugadas, avance) se calcula solo sobre las fechas del
+  // campeonato activo — si por algo no hay ninguno definido, se cae a todas las fechas para no
+  // mostrar ceros por un problema de configuración
+  const torneosActivo = campeonatoActivo ? data.torneos.filter((t) => t.temporada === campeonatoActivo) : data.torneos;
+  const mainCount = torneosActivo.filter((t) => t.main).length;
+  const jugadosCount = torneosActivo.filter((t) => t.fecha < todayIso).length;
+  const avancePct = torneosActivo.length > 0 ? Math.round((jugadosCount / torneosActivo.length) * 100) : 0;
 
   // estatus del torneo, en función de cuántas fechas ya pasaron respecto al total
   function estatusTorneo() {
-    if (data.torneos.length === 0) return { texto: "Sin fechas", clase: "badge-pendiente" };
+    if (torneosActivo.length === 0) return { texto: "Sin fechas", clase: "badge-pendiente" };
     if (jugadosCount === 0) return { texto: "No iniciado", clase: "badge-pendiente" };
-    if (jugadosCount === data.torneos.length) return { texto: "Terminado", clase: "badge-efectuado" };
+    if (jugadosCount === torneosActivo.length) return { texto: "Terminado", clase: "badge-efectuado" };
     return { texto: "En curso", clase: "badge-nivel-lectura" };
   }
 
@@ -224,78 +222,53 @@ export default function Calendario({ session, perfiles }) {
         <div>
           <div className="eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
           <h1>Calendario</h1>
-          {editable && (
-            <p className="subtitle">Haz clic en cualquier día para crear, editar o borrar un torneo.</p>
-          )}
         </div>
       </div>
 
-      {editable && (
-        <div className="stats">
+      {/* mismo bloque para Administrador y Jugador — se asume que los administradores también son
+          jugadores de la liga; compacto a propósito para dejarle más espacio a la cuadrícula (modo
+          administrador) o a la lista de fechas (modo jugador) que vienen justo debajo */}
+      <div className="cal-resumen-sticky">
+        <div className="campeonato-banner campeonato-banner-row">
+          <div>
+            {campeonatoActivo ? <>Campeonato: <strong>{campeonatoActivo}</strong></> : "Todavía no hay un campeonato definido."}
+            {" "}
+            <span className={"badge " + estatusTorneo().clase}>{estatusTorneo().texto}</span>
+          </div>
+          <div className="campeonato-banner-jugador">{session.nombre}</div>
+        </div>
+
+        <div className="stats stats-compact">
           <div className="stat">
-            <div className="stat-label">Torneos</div>
-            <div className="stat-value">{data.torneos.length} <small>fechas</small></div>
+            <div className="stat-label">Fechas</div>
+            <div className="stat-value">{torneosActivo.length}</div>
           </div>
           <div className="stat">
             <div className="stat-label">Main Events</div>
-            <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
+            <div className="stat-value">{mainCount} <small>de {torneosActivo.length}</small></div>
           </div>
-          <div
-            className="stat cal-cell-clickable"
-            onClick={openPagoModal}
-            title="Editar fecha de pago final"
-          >
-            <div className="stat-label">Pago final</div>
-            <div className="stat-value">
-              {dPago ? `${dPago.getDate()} ${mesesLargos[dPago.getMonth()].slice(0, 3)}` : "–"} <small>{dPago?.getFullYear()}</small>
-            </div>
+          <div className="stat">
+            <div className="stat-label">Jugadas</div>
+            <div className="stat-value">{jugadosCount} <small>de {torneosActivo.length}</small></div>
           </div>
-        </div>
-      )}
-
-      {!editable && (
-        <div className="cal-resumen-sticky">
-          <div className="campeonato-banner campeonato-banner-row">
-            <div>
-              {campeonatoVigente() ? <>Campeonato: <strong>{campeonatoVigente()}</strong></> : "Todavía no hay un campeonato definido para estas fechas."}
-              {" "}
-              <span className={"badge " + estatusTorneo().clase}>{estatusTorneo().texto}</span>
-            </div>
-            <div className="campeonato-banner-jugador">{session.nombre}</div>
+          <div className="stat">
+            <div className="stat-label">Avance del torneo</div>
+            <div className="stat-value">{avancePct}%</div>
           </div>
-
-          <div className="stats stats-compact">
-            <div className="stat">
-              <div className="stat-label">Fechas</div>
-              <div className="stat-value">{data.torneos.length}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Main Events</div>
-              <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Jugadas</div>
-              <div className="stat-value">{jugadosCount} <small>de {data.torneos.length}</small></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Avance del torneo</div>
-              <div className="stat-value">{avancePct}%</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Puntos en el torneo</div>
-              <div className="stat-value stat-value-proximamente">Próximamente</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Posición en la tabla</div>
-              <div className="stat-value stat-value-proximamente">Próximamente</div>
-            </div>
+          <div className="stat">
+            <div className="stat-label">Puntos en el torneo</div>
+            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Posición en la tabla</div>
+            <div className="stat-value stat-value-proximamente">Próximamente</div>
           </div>
         </div>
-      )}
+      </div>
 
       {editable ? (
         <>
-          <div className="cal-toolbar">
+          <div className="cal-toolbar cal-toolbar-compact">
             <button className="btn btn-secondary" onClick={() => setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>
               Hoy
             </button>
@@ -304,6 +277,10 @@ export default function Calendario({ session, perfiles }) {
               <div className="cal-month-label">{cap(mesesLargos[viewMonth.getMonth()])} {viewMonth.getFullYear()}</div>
               <button className="cal-nav-btn" aria-label="Mes siguiente" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}>›</button>
             </div>
+            <button className="btn btn-secondary cal-toolbar-pago" onClick={openPagoModal} title="Editar fecha de pago final">
+              <MoneyBadge size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
+              Pago final: {dPago ? `${dPago.getDate()} ${mesesLargos[dPago.getMonth()].slice(0, 3)} ${dPago.getFullYear()}` : "sin definir"}
+            </button>
           </div>
 
           <div className="cal-grid">
@@ -353,7 +330,7 @@ export default function Calendario({ session, perfiles }) {
         </>
       ) : (
         <div className="cal-list">
-          {data.torneos
+          {torneosActivo
             .slice()
             .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
             .map((t) => {
@@ -377,12 +354,10 @@ export default function Calendario({ session, perfiles }) {
                         <span className={pasado ? "badge badge-efectuado" : "badge badge-pendiente"}>{pasado ? "Efectuado" : "Pendiente"}</span>
                       </div>
                     </div>
-                    {pasado && (
-                      <div className="cal-list-resultado">
-                        <span>Posición: <span className="stat-value-proximamente">Próximamente</span></span>
-                        <span>Puntos: <span className="stat-value-proximamente">Próximamente</span></span>
-                      </div>
-                    )}
+                    <div className="cal-list-resultado">
+                      <span>Posición: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
+                      <span>Puntos: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
+                    </div>
                   </div>
                 </div>
               );
@@ -398,7 +373,7 @@ export default function Calendario({ session, perfiles }) {
               </div>
             </div>
           )}
-          {data.torneos.length === 0 && <p className="section-sub">Todavía no hay torneos programados.</p>}
+          {torneosActivo.length === 0 && <p className="section-sub">Todavía no hay torneos programados para este campeonato.</p>}
         </div>
       )}
 

@@ -210,6 +210,14 @@ export default function Calendario({ session, perfiles }) {
   const jugadosCount = data.torneos.filter((t) => t.fecha < todayIso).length;
   const avancePct = data.torneos.length > 0 ? Math.round((jugadosCount / data.torneos.length) * 100) : 0;
 
+  // estatus del torneo, en función de cuántas fechas ya pasaron respecto al total
+  function estatusTorneo() {
+    if (data.torneos.length === 0) return { texto: "Sin fechas", clase: "badge-pendiente" };
+    if (jugadosCount === 0) return { texto: "No iniciado", clase: "badge-pendiente" };
+    if (jugadosCount === data.torneos.length) return { texto: "Terminado", clase: "badge-efectuado" };
+    return { texto: "En curso", clase: "badge-nivel-lectura" };
+  }
+
   return (
     <div>
       <div className="headtop">
@@ -246,36 +254,41 @@ export default function Calendario({ session, perfiles }) {
       )}
 
       {!editable && (
-        <div className="campeonato-banner">
-          {campeonatoVigente() ? <>Campeonato: <strong>{campeonatoVigente()}</strong></> : "Todavía no hay un campeonato definido para estas fechas."}
-        </div>
-      )}
+        <div className="cal-resumen-sticky">
+          <div className="campeonato-banner campeonato-banner-row">
+            <div>
+              {campeonatoVigente() ? <>Campeonato: <strong>{campeonatoVigente()}</strong></> : "Todavía no hay un campeonato definido para estas fechas."}
+              {" "}
+              <span className={"badge " + estatusTorneo().clase}>{estatusTorneo().texto}</span>
+            </div>
+            <div className="campeonato-banner-jugador">{session.nombre}</div>
+          </div>
 
-      {!editable && (
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-label">Fechas</div>
-            <div className="stat-value">{data.torneos.length}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Main Events</div>
-            <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Jugadas</div>
-            <div className="stat-value">{jugadosCount} <small>de {data.torneos.length}</small></div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Avance del torneo</div>
-            <div className="stat-value">{avancePct}%</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Puntos en el torneo</div>
-            <div className="stat-value stat-value-proximamente">Próximamente</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Posición en la tabla</div>
-            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          <div className="stats stats-compact">
+            <div className="stat">
+              <div className="stat-label">Fechas</div>
+              <div className="stat-value">{data.torneos.length}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Main Events</div>
+              <div className="stat-value">{mainCount} <small>de {data.torneos.length}</small></div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Jugadas</div>
+              <div className="stat-value">{jugadosCount} <small>de {data.torneos.length}</small></div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Avance del torneo</div>
+              <div className="stat-value">{avancePct}%</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Puntos en el torneo</div>
+              <div className="stat-value stat-value-proximamente">Próximamente</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Posición en la tabla</div>
+              <div className="stat-value stat-value-proximamente">Próximamente</div>
+            </div>
           </div>
         </div>
       )}
@@ -361,7 +374,6 @@ export default function Calendario({ session, perfiles }) {
                       </div>
                       <div className="cal-list-badges">
                         <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
-                        {t.temporada && <span className="badge badge-nivel-lectura">{t.temporada}</span>}
                         <span className={pasado ? "badge badge-efectuado" : "badge badge-pendiente"}>{pasado ? "Efectuado" : "Pendiente"}</span>
                       </div>
                     </div>

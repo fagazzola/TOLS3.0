@@ -19,6 +19,7 @@ export default function Jugadores({ session, perfiles }) {
   const [hostGuardando, setHostGuardando] = useState(null); // id del jugador en proceso
   const [hostAviso, setHostAviso] = useState("");
   const [confirmarHost, setConfirmarHost] = useState(null); // { id, nombre }
+  const [filtroEstatus, setFiltroEstatus] = useState("Todos"); // "Todos" | "Activo" | "Inactivo"
 
   const puedeEscribir = puedeEditar(perfiles, session, "mod6");
 
@@ -111,6 +112,9 @@ export default function Jugadores({ session, perfiles }) {
   }
 
   const hostActual = data?.jugadores?.find((j) => j.host);
+  const jugadoresFiltrados = (data?.jugadores || []).filter(
+    (j) => filtroEstatus === "Todos" || j.estatus === filtroEstatus
+  );
 
   return (
     <div>
@@ -131,28 +135,40 @@ export default function Jugadores({ session, perfiles }) {
         <p className="subtitle">Cargando…</p>
       ) : (
         <>
-          {puedeEscribir && (
-            <div className={"campeonato-banner" + (!hostActual && proximoTorneo ? " campeonato-banner-alerta" : "")}>
-              {proximoTorneo ? (
-                hostActual ? (
-                  <>Próximo torneo — {proximoTorneo.fecha} — Host asignado: <strong>{hostActual.nombre}</strong></>
-                ) : (
-                  <>⚠ No hay Host asignado para el próximo torneo ({proximoTorneo.fecha}). Sin Host no se puede iniciar el Game Night — asígnalo abajo.</>
-                )
+          {puedeEscribir && proximoTorneo && (
+            <div className={"campeonato-banner" + (!hostActual ? " campeonato-banner-alerta" : "")}>
+              {hostActual ? (
+                <>Próximo torneo — {proximoTorneo.fecha} — Host asignado: <strong>{hostActual.nombre}</strong></>
               ) : (
-                "No hay ningún torneo próximo programado en el Calendario todavía."
+                <>⚠ No hay Host asignado para el próximo torneo ({proximoTorneo.fecha}). Sin Host no se puede iniciar el Game Night — asígnalo abajo.</>
               )}
             </div>
           )}
           {hostAviso && <div className="login-error" style={{ marginTop: 10 }}>{hostAviso}</div>}
 
           <div className="section">
-            <div className="section-head"><div className="section-title">Jugadores registrados ({data?.jugadores?.length || 0})</div></div>
+            <div className="section-head">
+              <div className="section-title">Jugadores</div>
+              <div className="filtro-estatus" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                {["Activos", "Inactivos", "Todos"].map((op) => {
+                  const valor = op === "Activos" ? "Activo" : op === "Inactivos" ? "Inactivo" : "Todos";
+                  return (
+                    <button
+                      key={op}
+                      className={"btn btn-secondary btn-filtro" + (filtroEstatus === valor ? " active" : "")}
+                      onClick={() => setFiltroEstatus(valor)}
+                    >
+                      {op}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="tbl">
               <div className="trow thead" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px" }}>
                 <div /><div>Nombre</div><div>Alias</div><div>PokerStars</div><div>Correo</div><div>Padrino</div><div>Edad</div><div>Estatus</div><div>Host</div>
               </div>
-              {(data?.jugadores || []).map((j) => {
+              {jugadoresFiltrados.map((j) => {
                 const enEdicion = editando?.id === j.id;
                 return (
                   <div className="trow" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px" }} key={j.id}>
@@ -236,12 +252,9 @@ export default function Jugadores({ session, perfiles }) {
             {(!data?.jugadores || data.jugadores.length === 0) && (
               <div className="section-sub">Todavía no hay jugadores registrados. Compárteles la liga de autorregistro.</div>
             )}
-            <div className="section-sub">
-              El <b>Host</b> es responsable de la ejecución del Game Night del próximo torneo — solo puede haber uno a
-              la vez en toda la liga. Al asignarlo se le manda un correo avisándole. Un jugador puede repetir como
-              Host en varios torneos; la marca se desactiva sola al pasar la fecha de ese torneo. Si ya había iniciado
-              sesión cuando se le asigna, debe salir y volver a entrar para ver la marca de "Modo Host".
-            </div>
+            {data?.jugadores?.length > 0 && jugadoresFiltrados.length === 0 && (
+              <div className="section-sub">No hay jugadores que coincidan con este filtro.</div>
+            )}
           </div>
         </>
       )}

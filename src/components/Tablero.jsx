@@ -155,21 +155,37 @@ export default function Tablero({ session, perfiles }) {
     });
   }
 
-  function seleccionarCampeonato(nombre) {
+  async function seleccionarCampeonato(nombre) {
     setCampeonatoSel(nombre);
     const normalizado = normalizar(tableroMap?.[nombre], Object.values(tableroMap || {})[0]);
     setData(normalizado);
     setDraft(normalizado);
     setSaveError("");
     setSaveOk(false);
+    setCampActionError("");
     // el combo del Tablero es quien gobierna el sitio: cambiar aquí persiste el campeonato "activo" en
     // tols-campeonatos, para que el Calendario (y a futuro cualquier otra pantalla) siempre muestren el
-    // mismo campeonato que este, en vez de cada uno adivinarlo por su cuenta
-    fetch(API_CAMP, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nombres: campeonatos, activo: nombre }),
-    }).catch(() => {});
+    // mismo campeonato que este, en vez de cada uno adivinarlo por su cuenta. Se espera la respuesta (ya
+    // no es "dispara y olvida") y si falla se avisa claramente — antes un error aquí quedaba en silencio
+    // y el combo se veía cambiado en pantalla aunque el sitio siguiera gobernado por el campeonato viejo.
+    setCampSaving(true);
+    try {
+      const r = await fetch(API_CAMP, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nombres: campeonatos, activo: nombre }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo guardar el campeonato activo.");
+      setCampeonatos(json.nombres);
+    } catch (e) {
+      setCampActionError(
+        "No se pudo guardar \"" + nombre + "\" como campeonato activo del sitio (" + (e.message || e) +
+        "). El Calendario puede seguir mostrando el campeonato anterior hasta que esto se resuelva — vuelve a intentar cambiando el combo."
+      );
+    } finally {
+      setCampSaving(false);
+    }
   }
 
   function validarLocal(d) {

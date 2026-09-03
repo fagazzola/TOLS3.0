@@ -56,6 +56,12 @@ body {
   filter: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.5));
   opacity: 0.85;
 }
+.version-badge {
+  position: fixed; top: 8px; left: 10px; z-index: 40;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-soft);
+  background: color-mix(in srgb, var(--surface) 85%, transparent); padding: 2px 7px;
+  border-radius: 6px; border: 1px solid var(--line); pointer-events: none; user-select: none;
+}
 .decor-tl { top: 6%; left: -40px; }
 .decor-br { bottom: 4%; right: -20px; }
 @media (max-width: 720px) {

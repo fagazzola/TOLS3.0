@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Login from "./components/Login.jsx";
 import Nav from "./components/Nav.jsx";
 import Decor from "./components/Decor.jsx";
+import VersionBadge from "./components/VersionBadge.jsx";
 import Calendario from "./components/Calendario.jsx";
 import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
@@ -188,6 +189,7 @@ export default function App() {
     return (
       <>
         <Decor />
+        <VersionBadge />
         <Registro onRegistroExitoso={handleRegistroExitoso} onIrALogin={() => irARuta("/")} />
       </>
     );
@@ -197,6 +199,7 @@ export default function App() {
     return (
       <>
         <Decor />
+        <VersionBadge />
         <div className="wrap">
           <p className="subtitle">Cargando…</p>
         </div>
@@ -208,6 +211,7 @@ export default function App() {
     return (
       <>
         <Decor />
+        <VersionBadge />
         <div className="wrap">
           <p className="subtitle">No se pudo cargar la información de usuarios: {perfilesError}</p>
           <p className="section-sub">
@@ -223,6 +227,7 @@ export default function App() {
     return (
       <>
         <Decor />
+        <VersionBadge />
         <Login perfiles={perfiles} onLogin={handleLogin} />
       </>
     );

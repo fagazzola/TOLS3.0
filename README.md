@@ -2,6 +2,19 @@
 
 Sitio de la liga de póker en línea Torrente (Torrente On Line Series). React + Vite, pensado para desplegarse en Netlify conectado a este repo (build command `npm run build`, publish directory `dist` — ya configurado en `netlify.toml`).
 
+## Versión del sitio
+Se muestra un número de versión (`vX.XX.XXX`) fijo en la esquina superior izquierda de toda pantalla,
+con o sin sesión (`src/components/VersionBadge.jsx`). El número vive en `src/version.js` — **se actualiza a
+mano en cada entrega**, no es automático. Esquema acordado con Federico (2026-09-03):
+- **1er número** (1 dígito) — generación del sitio; se queda en `1` hasta una reescritura mayor.
+- **2º número** (2 dígitos) — sube solo con cambios a los módulos "núcleo" que gobiernan la operación de la
+  liga: **Tablero de Control, Calendario o Game Night**. El resto de los módulos no lo mueven.
+- **3er número** (3 dígitos) — contador total de **todas** las entregas, toquen núcleo o no; nunca baja,
+  nunca se reinicia, coincide con el número de "entrega" que se lleva en el mapa del proyecto.
+El 2º y el 3er número son independientes entre sí (uno no vive "dentro" del otro) — el 2º cuenta solo cambios
+de núcleo, el 3ero cuenta absolutamente todo. Como las primeras 26 entregas no llevaron el conteo de
+"solo núcleo" por separado, el esquema arrancó desde la 27ª entrega en `1.02.027` (a petición de Federico).
+
 ## Módulos
 Los nombres "MOD 1", "MOD 2", etc. son solo referencia interna de trabajo — no aparecen en ninguna pantalla del sitio. Esta pantalla (`App.jsx`) es la **administración de toda la liga**; **Game Night** es una pantalla aparte (pendiente de definir) y no vive en este menú.
 

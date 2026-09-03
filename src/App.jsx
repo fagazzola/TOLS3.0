@@ -242,6 +242,7 @@ export default function App() {
   return (
     <>
       <Decor />
+      <VersionBadge />
       <div className="wrap">
         <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} esHost={hostInfo.esHost} />
         {hostInfo.faltaHost && (

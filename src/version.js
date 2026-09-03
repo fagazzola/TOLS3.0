@@ -8,4 +8,4 @@
 // Para la próxima entrega: incrementa VERSION aquí a mano.
 // - ¿Tocaste Tablero de Control, Calendario o Game Night? sube el 2º número (ej. "02" → "03").
 // - Sube siempre el 3er número en +1, toques núcleo o no.
-export const VERSION = "1.02.027";
+export const VERSION = "1.02.028";

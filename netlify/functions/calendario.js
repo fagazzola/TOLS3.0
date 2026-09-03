@@ -5,18 +5,20 @@ import { syncCalendario } from "./lib/msgraph.js";
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
 // los torneos guardados antes de que existiera el campo "temporada" (campeonato) por torneo no lo
-// tienen — se completan con el primer campeonato del registro para que no se queden huérfanos.
-// Mismo patrón defensivo que ya se usa en tablero.js y campeonatos.js: leer, completar lo que falte,
-// y volver a guardar la versión corregida.
+// tienen — se completan con el campeonato "activo" (el que gobierna el sitio desde el Tablero de
+// Control), no con el primero de la lista, para que coincidan con lo que ya se ve arriba en el
+// Calendario. Mismo patrón defensivo que ya se usa en tablero.js y campeonatos.js: leer, completar
+// lo que falte, y volver a guardar la versión corregida.
 async function conTemporadaCompletada(data) {
   const faltantes = (data.torneos || []).some((t) => !t.temporada);
   if (!faltantes) return data;
   try {
     const campStore = getStore("tols-campeonatos");
     const camp = await campStore.get("data", { type: "json" });
-    const primero = Array.isArray(camp?.nombres) && camp.nombres.length ? camp.nombres[0] : "";
-    if (!primero) return data;
-    return { ...data, torneos: data.torneos.map((t) => (t.temporada ? t : { ...t, temporada: primero })) };
+    const nombres = Array.isArray(camp?.nombres) ? camp.nombres : [];
+    const relleno = (camp?.activo && nombres.includes(camp.activo)) ? camp.activo : (nombres[0] || "");
+    if (!relleno) return data;
+    return { ...data, torneos: data.torneos.map((t) => (t.temporada ? t : { ...t, temporada: relleno })) };
   } catch (e) {
     // si el registro de campeonatos no está disponible, se deja tal cual en vez de bloquear el calendario
     return data;

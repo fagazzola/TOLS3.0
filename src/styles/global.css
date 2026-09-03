@@ -249,6 +249,7 @@ h1 {
 /* generic form field, reused by the calendar's create/edit modal */
 .field { font-family: "IBM Plex Mono", monospace; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
 .field:focus { outline: 2px solid var(--gold-strong); outline-offset: 1px; }
+.field-readonly { box-sizing: border-box; background: var(--surface-2); color: var(--ink-soft); cursor: default; }
 .chk-inline { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); margin: 4px 0 18px; }
 .chk-inline input { width: 16px; height: 16px; accent-color: var(--burgundy); }
 

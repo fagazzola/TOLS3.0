@@ -21,25 +21,6 @@ function cap(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// sugiere el campeonato por defecto para un torneo nuevo: el del torneo existente más cercano en
-// fecha, o si no hay ninguno, el primero de la lista de campeonatos registrados
-function sugerirCampeonato(torneos, fechaRef, campeonatos) {
-  if (torneos.length > 0) {
-    const ref = new Date(fechaRef + "T00:00:00").getTime();
-    let mejor = torneos[0];
-    let mejorDist = Infinity;
-    for (const t of torneos) {
-      const dist = Math.abs(new Date(t.fecha + "T00:00:00").getTime() - ref);
-      if (dist < mejorDist) {
-        mejorDist = dist;
-        mejor = t;
-      }
-    }
-    if (mejor.temporada) return mejor.temporada;
-  }
-  return campeonatos[0] || "";
-}
-
 // arma la cuadrícula completa del mes: semanas de domingo a sábado, incluyendo
 // los días de relleno de los meses anterior/siguiente, como en una vista mensual normal
 function buildGrid(viewMonth) {
@@ -93,9 +74,30 @@ export default function Calendario({ session, perfiles }) {
       }),
     ])
       .then(([cal, camp]) => {
-        setData(cal);
-        setCampeonatos(Array.isArray(camp?.nombres) ? camp.nombres : []);
-        setCampeonatoActivo(camp?.activo || "");
+        const nombres = Array.isArray(camp?.nombres) ? camp.nombres : [];
+        const activo = camp?.activo || nombres[0] || "";
+        setCampeonatos(nombres);
+        setCampeonatoActivo(activo);
+        // fechas guardadas antes de que existiera el campo "temporada" (o que por algún motivo se
+        // quedaron sin campeonato asignado) se completan aquí mismo, en el navegador, con el
+        // campeonato activo — y se guardan de una vez, para que no se sigan viendo "huérfanas" cada
+        // vez que alguien entre al Calendario como Administrador. No depende de que el auto-completado
+        // del servidor (`conTemporadaCompletada` en calendario.js) se dispare correctamente.
+        const faltan = editable && activo && (cal?.torneos || []).some((t) => !t.temporada);
+        if (faltan) {
+          const corregido = { ...cal, torneos: cal.torneos.map((t) => (t.temporada ? t : { ...t, temporada: activo })) };
+          setData(corregido);
+          fetch(API, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(corregido),
+          })
+            .then((r) => r.json())
+            .then((json) => { if (!json.error) setData(json); })
+            .catch(() => {});
+        } else {
+          setData(cal);
+        }
       })
       .catch((e) => setLoadError(e.message || "Error al cargar el calendario."))
       .finally(() => setLoading(false));
@@ -134,12 +136,15 @@ export default function Calendario({ session, perfiles }) {
       return;
     }
     setSaveError("");
+    // el campeonato de cualquier fecha, nueva o existente, siempre es el "activo" que gobierna el
+    // sitio (definido en el Tablero de Control) — ya no se elige por torneo desde aquí, para que no
+    // haya manera de que una fecha quede "desincronizada" del campeonato vigente.
     setModal({
       fechaOriginal: existing ? existing.fecha : null,
       fecha: iso(d),
       hora: existing ? existing.hora : data.defaultHora,
       main: existing ? existing.main : false,
-      temporada: existing ? (existing.temporada || sugerirCampeonato(data.torneos, iso(d), campeonatos)) : sugerirCampeonato(data.torneos, iso(d), campeonatos),
+      temporada: campeonatoActivo,
       isNew: !existing,
     });
   }
@@ -177,7 +182,7 @@ export default function Calendario({ session, perfiles }) {
       return;
     }
     if (!modal.temporada.trim()) {
-      setSaveError("Indica el campeonato del torneo.");
+      setSaveError("No hay ningún campeonato activo definido en el Tablero de Control todavía — créalo ahí primero.");
       return;
     }
     let torneos = data.torneos.filter((t) => t.fecha !== modal.fechaOriginal);
@@ -401,16 +406,9 @@ export default function Calendario({ session, perfiles }) {
             </div>
             <div className="login-field">
               <label>Campeonato</label>
-              <select
-                className="field"
-                value={modal.temporada}
-                onChange={(e) => setModal({ ...modal, temporada: e.target.value })}
-              >
-                {campeonatos.length === 0 && <option value="">(sin campeonatos definidos)</option>}
-                {campeonatos.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <div className="field field-readonly" title="Lo define el combo del Tablero de Control — no se elige por fecha.">
+                {modal.temporada || "(sin campeonato activo — créalo en el Tablero de Control)"}
+              </div>
             </div>
             <label className="chk-inline">
               <input

@@ -4,6 +4,27 @@ import seed from "../data/tablero.json";
 
 const API = "/api/tablero";
 const API_CAMP = "/api/campeonatos";
+const API_CAL = "/api/calendario";
+
+function isoHoy() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// mismo criterio que usa el Calendario (estatusTorneo en Calendario.jsx) para saber si un campeonato
+// ya empezó a jugarse: "en-curso" si algunas fechas ya pasaron y otras no — mientras esté así, no se
+// permite cambiar cuál es el campeonato activo del sitio desde aquí, para no interrumpir una temporada
+// a medias.
+function estatusCampeonato(nombre, torneosCal) {
+  if (!nombre) return "sin-fechas";
+  const fechas = (torneosCal || []).filter((t) => t.temporada === nombre);
+  if (fechas.length === 0) return "sin-fechas";
+  const hoy = isoHoy();
+  const jugadas = fechas.filter((t) => t.fecha < hoy).length;
+  if (jugadas === 0) return "no-iniciado";
+  if (jugadas === fechas.length) return "terminado";
+  return "en-curso";
+}
 
 const PLANTILLA = Object.values(seed)[0];
 
@@ -87,6 +108,7 @@ export default function Tablero({ session, perfiles }) {
 
   const [campeonatos, setCampeonatos] = useState([]);
   const [campeonatoSel, setCampeonatoSel] = useState("");
+  const [torneosCal, setTorneosCal] = useState([]);
   const [tableroMap, setTableroMap] = useState(null);
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -101,7 +123,7 @@ export default function Tablero({ session, perfiles }) {
   const [renombres, setRenombres] = useState({});
   const [campSaving, setCampSaving] = useState(false);
   const [campActionError, setCampActionError] = useState("");
-  const [confirmModal, setConfirmModal] = useState(null); // { tipo: "nuevo" | "eliminar", nombre }
+  const [confirmModal, setConfirmModal] = useState(null); // { tipo: "nuevo" | "eliminar" | "cambiar", nombre }
 
   useEffect(() => {
     Promise.all([
@@ -113,11 +135,15 @@ export default function Tablero({ session, perfiles }) {
         if (!r.ok) throw new Error("No se pudo cargar el tablero (HTTP " + r.status + ").");
         return r.json();
       }),
+      // el Calendario es "best effort" aquí — solo se usa para saber si el campeonato activo ya está
+      // en curso (y por lo tanto bloquear el cambio); si falla, simplemente no se bloquea nada
+      fetch(API_CAL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ])
-      .then(([camp, tab]) => {
+      .then(([camp, tab, cal]) => {
         const nombres = camp.nombres || [];
         setCampeonatos(nombres);
         setTableroMap(tab || {});
+        setTorneosCal(Array.isArray(cal?.torneos) ? cal.torneos : []);
         // el campeonato que gobierna el sitio es "activo" (guardado en tols-campeonatos) — el Tablero
         // arranca mostrando ese, no simplemente el primero de la lista, para que Calendario y cualquier
         // otra pantalla que dependa de "cuál es el torneo vigente" siempre coincidan con esto
@@ -188,6 +214,28 @@ export default function Tablero({ session, perfiles }) {
     }
   }
 
+  // punto de entrada del combo de campeonato: nunca cambia el activo directamente — primero revisa si
+  // el campeonato que se está dejando ya está "en curso" (bloquea del todo) y si tiene fechas
+  // registradas en el Calendario (pide confirmación, porque esas fechas van a dejar de contarse como
+  // "vigentes" en el resto del sitio aunque no se borran).
+  function intentarSeleccionarCampeonato(nombre) {
+    if (nombre === campeonatoSel) return;
+    setCampActionError("");
+    const estatus = estatusCampeonato(campeonatoSel, torneosCal);
+    if (estatus === "en-curso") {
+      setCampActionError(
+        `No puedes cambiar el campeonato activo mientras "${campeonatoSel}" está en curso (ya tiene fechas jugadas y otras pendientes en el Calendario). Termina las fechas que faltan, o edítalas desde el Calendario, antes de cambiar de campeonato.`
+      );
+      return;
+    }
+    const hayFechas = torneosCal.some((t) => t.temporada === campeonatoSel);
+    if (hayFechas) {
+      setConfirmModal({ tipo: "cambiar", nombre, origen: campeonatoSel });
+      return;
+    }
+    seleccionarCampeonato(nombre);
+  }
+
   function validarLocal(d) {
     if (d.premios.porTorneo.lugares.length < 1) return "Premios por torneo: debe haber al menos 1 lugar.";
     if (Math.abs(sumPct(d.premios.porTorneo.lugares) - 100) > 0.01) return "Premios por torneo: los lugares deben sumar 100%.";
@@ -241,6 +289,14 @@ export default function Tablero({ session, perfiles }) {
     if (!nombre) return;
     if (campeonatos.includes(nombre)) {
       setCampActionError(`Ya existe un campeonato "${nombre}".`);
+      return;
+    }
+    // un campeonato nuevo se vuelve "activo" de inmediato (ver agregarCampeonato) — mismo bloqueo que
+    // al cambiar de campeonato existente: no se puede mientras el actual está en curso.
+    if (estatusCampeonato(campeonatoSel, torneosCal) === "en-curso") {
+      setCampActionError(
+        `No puedes crear un campeonato nuevo (se volvería el activo de inmediato) mientras "${campeonatoSel}" está en curso. Termina las fechas que faltan antes de crear uno nuevo.`
+      );
       return;
     }
     setCampActionError("");
@@ -334,6 +390,10 @@ export default function Tablero({ session, perfiles }) {
       setCampActionError("Debe quedar al menos un campeonato.");
       return;
     }
+    if (nombre === campeonatoSel && estatusCampeonato(campeonatoSel, torneosCal) === "en-curso") {
+      setCampActionError(`No puedes eliminar "${nombre}" mientras está en curso — es el campeonato activo del sitio.`);
+      return;
+    }
     setCampActionError("");
     setConfirmModal({ tipo: "eliminar", nombre });
   }
@@ -404,7 +464,7 @@ export default function Tablero({ session, perfiles }) {
             className="field"
             value={campeonatoSel}
             disabled={!editable || dirty || campSaving}
-            onChange={(e) => seleccionarCampeonato(e.target.value)}
+            onChange={(e) => intentarSeleccionarCampeonato(e.target.value)}
           >
             {campeonatos.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
@@ -760,6 +820,14 @@ export default function Tablero({ session, perfiles }) {
                 ? <> ¿Deseas copiar los valores del campeonato <b>{confirmModal.origen}</b> o prefieres inicializar todos los parámetros?</>
                 : " No hay otro campeonato del cual copiar valores, así que va a inicializar todos los parámetros."}
             </p>
+            {confirmModal.origen && torneosCal.some((t) => t.temporada === confirmModal.origen) && (
+              <p className="login-error" style={{ marginTop: 0 }}>
+                ⚠ Además, <b>{confirmModal.nombre}</b> se va a volver el campeonato activo del sitio de inmediato.
+                Las fechas que ya tienes en el Calendario bajo <b>{confirmModal.origen}</b> van a dejar de aparecer
+                en las vistas normales del sitio (resumen del Calendario, Jugadores, Host, etc.) — siguen guardadas
+                y visibles en la cuadrícula completa del Administrador, pero el sitio deja de operar sobre ellas.
+              </p>
+            )}
             <div className="modal-choice-row">
               {confirmModal.origen && (
                 <button
@@ -783,6 +851,37 @@ export default function Tablero({ session, perfiles }) {
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConfirmModal(null)} disabled={campSaving}>
                 {campSaving ? "Un momento…" : "Cancelar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && confirmModal.tipo === "cambiar" && (
+        <div className="modal-backdrop" onClick={() => !campSaving && setConfirmModal(null)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">⚠</div>
+            <div className="modal-title">Cambiar campeonato activo a: {confirmModal.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Vas a hacer que <b>{confirmModal.nombre}</b> sea el campeonato que gobierna todo el sitio, en vez de{" "}
+              <b>{confirmModal.origen}</b>.
+            </p>
+            <p className="login-error" style={{ marginTop: 0 }}>
+              ⚠ Las fechas que ya tienes en el Calendario bajo <b>{confirmModal.origen}</b> van a dejar de
+              aparecer en las vistas normales del sitio (resumen del Calendario, Jugadores, asignación de Host,
+              etc.) — no se borran, siguen guardadas y visibles en la cuadrícula completa del Administrador, pero
+              el sitio deja de operar sobre ellas. Esto puede afectar la operación en curso de la liga.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmModal(null)} disabled={campSaving}>
+                Cancelar
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={campSaving}
+                onClick={() => { seleccionarCampeonato(confirmModal.nombre); setConfirmModal(null); }}
+              >
+                {campSaving ? "Un momento…" : "Sí, cambiar de campeonato"}
               </button>
             </div>
           </div>

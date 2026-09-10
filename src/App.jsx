@@ -8,6 +8,7 @@ import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
 import Jugadores from "./components/Jugadores.jsx";
 import Cobranza from "./components/Cobranza.jsx";
+import MiPerfil from "./components/MiPerfil.jsx";
 import Registro from "./components/Registro.jsx";
 import { puedeVer, puedeEditar } from "./lib/permisos.js";
 
@@ -28,6 +29,8 @@ function isoHoy() {
 // (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores). Game Night vive aparte, no aquí.
 // La pestaña Usuarios (antes "Jugadores") solo la puede ver el Administrador General,
 // sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla.
+// "Mi Perfil" es otro caso especial: solo la ve quien tiene rol "Jugador" (autoservicio de sus
+// propios datos), sin importar la matriz de permisos tampoco — no es una pantalla de administración.
 // Jugadores (mod6) y Cobranza (mod4) sí siguen la matriz normal de permisos.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
@@ -35,6 +38,7 @@ const TABS = [
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
+  { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, soloJugador: true },
 ];
 
 export default function App() {
@@ -151,13 +155,14 @@ export default function App() {
 
   function puedeVerTab(t) {
     if (t.soloAdminGeneral) return session?.rol === "Administrador General";
+    if (t.soloJugador) return session?.rol === "Jugador";
     return puedeVer(perfiles, session, t.modKey);
   }
 
   function handleLogin(s) {
     setSession(s);
     const firstAllowed = TABS.find((t) =>
-      t.soloAdminGeneral ? s.rol === "Administrador General" : puedeVer(perfiles, s, t.modKey)
+      t.soloAdminGeneral ? s.rol === "Administrador General" : t.soloJugador ? s.rol === "Jugador" : puedeVer(perfiles, s, t.modKey)
     );
     setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {

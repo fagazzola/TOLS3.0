@@ -49,6 +49,19 @@ function conHostExpirado(data) {
   return { cambio, data: { jugadores } };
 }
 
+// calcula edad a partir de la fecha de nacimiento (YYYY-MM-DD) — se usa cuando el propio jugador
+// edita su FecNac desde "Mi Perfil", para que Edad nunca quede desincronizada de lo que escribió
+function edadDesdeFecNac(fecNac) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecNac || "")) return null;
+  const nacimiento = new Date(fecNac + "T00:00:00");
+  if (Number.isNaN(nacimiento.getTime())) return null;
+  const hoy = new Date();
+  let edad = hoy.getFullYear() - nacimiento.getFullYear();
+  const noHaCumplido = hoy.getMonth() < nacimiento.getMonth() || (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate());
+  if (noHaCumplido) edad -= 1;
+  return edad >= 0 ? edad : null;
+}
+
 export default async (req) => {
   const store = getStore("tols-jugadores");
 
@@ -107,6 +120,33 @@ export default async (req) => {
           return new Response(JSON.stringify({ ...actual, avisoCorreo: "Se asignó el Host, pero no se pudo enviar el correo: " + (e.message || e) }), { headers: HEADERS });
         }
       }
+      return new Response(JSON.stringify(actual), { headers: HEADERS });
+    }
+
+    // accion "autoeditar": el propio jugador actualiza su registro desde "Mi Perfil" (rol Jugador).
+    // Se busca por correo (no por id, para no depender de que el jugador conozca su id interno).
+    // Campos que NUNCA se tocan por esta vía: id, nombre, correo, tipoUsuario, fechaRegistro, estatus
+    // (esos son de solo administración). La Edad se recalcula sola si mandan FecNac nueva.
+    if (body?.accion === "autoeditar") {
+      const correo = String(body.correo || "").trim().toLowerCase();
+      const idx = actual.jugadores.findIndex((j) => j.correo === correo);
+      if (idx === -1) {
+        return new Response(JSON.stringify({ error: "No se encontró un jugador con ese correo." }), { status: 404, headers: HEADERS });
+      }
+      const editable = { ...actual.jugadores[idx] };
+      if (body.aliasJugador !== undefined) editable.aliasJugador = String(body.aliasJugador || "").trim();
+      if (body.aliasPokerStars !== undefined) editable.aliasPokerStars = String(body.aliasPokerStars || "").trim();
+      if (body.padrino !== undefined) editable.padrino = String(body.padrino || "").trim();
+      if (body.telefono !== undefined) editable.telefono = String(body.telefono || "").trim();
+      if (body.emoticon !== undefined) editable.emoticon = String(body.emoticon || "🎲").trim();
+      if (body.fecNac !== undefined) {
+        editable.fecNac = String(body.fecNac || "").trim();
+        const edadCalc = edadDesdeFecNac(editable.fecNac);
+        if (edadCalc !== null) editable.edad = edadCalc;
+      }
+      actual.jugadores[idx] = editable;
+      await store.setJSON("data", actual);
+      await syncJugadores(actual.jugadores);
       return new Response(JSON.stringify(actual), { headers: HEADERS });
     }
 

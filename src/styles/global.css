@@ -192,6 +192,7 @@ h1 {
 .badge-nivel-escritura { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); border-color: color-mix(in srgb, var(--good) 32%, transparent); }
 .badge-nivel-lectura { color: var(--gold-strong); background: color-mix(in srgb, var(--gold) 18%, transparent); border-color: color-mix(in srgb, var(--gold) 34%, transparent); }
 .badge-nivel-ninguno { color: var(--ink-soft); background: var(--surface-2); opacity: 0.7; }
+.badge-deuda { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); border-color: color-mix(in srgb, var(--bad) 32%, transparent); font-weight: 600; }
 
 .check-line { margin-top: 10px; font-size: 12.5px; font-family: "IBM Plex Mono", monospace; }
 .check-ok { color: var(--good); }

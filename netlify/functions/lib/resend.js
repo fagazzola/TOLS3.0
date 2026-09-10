@@ -61,6 +61,27 @@ export function plantillaHost(nombre, fecha) {
   </div>`;
 }
 
+// envuelve el mensaje que el Tesorero ya redactó y aprobó (texto plano, con saltos de línea en
+// blanco entre párrafos) en el mismo diseño de correo del resto del sitio — no es una plantilla fija
+// de texto, es solo el "sobre" visual alrededor de lo que el Tesorero escribió
+export function plantillaEstadoCuenta(asunto, cuerpoTexto) {
+  const parrafos = String(cuerpoTexto || "")
+    .split(/\n\s*\n/)
+    .map((p) => `<p style="margin:0 0 14px; color:#b6c2cd; font-size:14px; white-space:pre-line;">${p}</p>`)
+    .join("");
+  return `
+  <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
+    <div style="max-width:480px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
+      <div style="font-size:13px; letter-spacing:.06em; color:#8fd694; text-transform:uppercase; margin-bottom:8px;">♦ Torrente On Line Series - TOLS 3.0</div>
+      <h2 style="margin:0 0 16px; color:#fff;">${asunto}</h2>
+      ${parrafos}
+      <p style="margin:20px 0 0; color:#7c8a97; font-size:12px;">
+        Si ya realizaste este pago o tienes dudas, contacta directamente al Tesorero de la liga.
+      </p>
+    </div>
+  </div>`;
+}
+
 export function plantillaCodigo(codigo, nombre) {
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">

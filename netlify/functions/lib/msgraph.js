@@ -217,6 +217,17 @@ export function syncJugadores(jugadores) {
   });
 }
 
+// espeja el módulo de Cobranza en las mismas 2 hojas que ya se armaron a mano en el Excel maestro
+// (Cobranza_Resumen y Cobranza) — a partir de esta entrega esas hojas dejan de tener fórmulas propias
+// y pasan a ser un espejo de solo lectura como el resto del sitio: cada guardado desde el Tesorero
+// las vuelve a escribir completas con los valores ya calculados.
+export function syncCobranza({ resumenRows, movimientoRows }) {
+  return safe(async () => {
+    await writeSheetTable("Cobranza_Resumen", resumenRows);
+    await writeSheetTable("Cobranza", movimientoRows);
+  });
+}
+
 export function syncPerfiles(data) {
   return safe(async () => {
     // 4 columnas — igual a la tabla de Usuarios del sitio (el correo ES el usuario de acceso, ya no hay

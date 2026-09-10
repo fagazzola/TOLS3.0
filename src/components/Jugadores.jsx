@@ -4,6 +4,7 @@ import { puedeEditar } from "../lib/permisos.js";
 const API = "/api/jugadores";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
+const API_COBRANZA = "/api/cobranza";
 
 function iso(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -20,8 +21,15 @@ export default function Jugadores({ session, perfiles }) {
   const [hostAviso, setHostAviso] = useState("");
   const [confirmarHost, setConfirmarHost] = useState(null); // { id, nombre }
   const [filtroEstatus, setFiltroEstatus] = useState("Todos"); // "Todos" | "Activo" | "Inactivo"
+  const [cobranza, setCobranza] = useState(null); // { adeudos, proximaFecha } — quién no puede jugar el próximo torneo por adeudo
+  const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
+  const [motivoExcepcion, setMotivoExcepcion] = useState("");
+  const [excepcionGuardando, setExcepcionGuardando] = useState(false);
 
   const puedeEscribir = puedeEditar(perfiles, session, "mod6");
+  // aprobar excepciones de adeudo es una decisión financiera — se rige por el permiso de Cobranza
+  // (mod4), no por el de Jugadores, aunque el botón viva en esta pantalla
+  const puedeAprobarExcepcion = puedeEditar(perfiles, session, "mod4");
 
   useEffect(() => {
     cargar();
@@ -37,9 +45,11 @@ export default function Jugadores({ session, perfiles }) {
       }),
       fetch(API_CAL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(API_CAMP).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API_COBRANZA).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ])
-      .then(([jugadores, cal, camp]) => {
+      .then(([jugadores, cal, camp, cob]) => {
         setData(jugadores);
+        setCobranza(cob);
         // el "próximo torneo" es la fecha más cercana (hoy o después) del campeonato activo — es la fecha
         // para la que se necesita un Host asignado
         const activo = camp?.activo || "";
@@ -111,6 +121,27 @@ export default function Jugadores({ session, perfiles }) {
     }
   }
 
+  async function aprobarExcepcion() {
+    if (!excepcionModal || !cobranza?.proximaFecha) return;
+    setExcepcionGuardando(true);
+    try {
+      const r = await fetch(API_COBRANZA, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion: "excepcion", correo: excepcionModal.correo, fecha: cobranza.proximaFecha, motivo: motivoExcepcion }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo aprobar la excepción.");
+      setCobranza(json);
+      setExcepcionModal(null);
+      setMotivoExcepcion("");
+    } catch (e) {
+      setError(e.message || "No se pudo aprobar la excepción.");
+    } finally {
+      setExcepcionGuardando(false);
+    }
+  }
+
   const hostActual = data?.jugadores?.find((j) => j.host);
   const jugadoresFiltrados = (data?.jugadores || []).filter(
     (j) => filtroEstatus === "Todos" || j.estatus === filtroEstatus
@@ -165,13 +196,14 @@ export default function Jugadores({ session, perfiles }) {
               </div>
             </div>
             <div className="tbl">
-              <div className="trow thead" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px" }}>
-                <div /><div>Nombre</div><div>Alias</div><div>PokerStars</div><div>Correo</div><div>Padrino</div><div>Edad</div><div>Estatus</div><div>Host</div>
+              <div className="trow thead" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px 140px" }}>
+                <div /><div>Nombre</div><div>Alias</div><div>PokerStars</div><div>Correo</div><div>Padrino</div><div>Edad</div><div>Estatus</div><div>Host</div><div>Cobranza</div>
               </div>
               {jugadoresFiltrados.map((j) => {
                 const enEdicion = editando?.id === j.id;
+                const adeuda = cobranza?.adeudos?.[j.correo];
                 return (
-                  <div className="trow" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px" }} key={j.id}>
+                  <div className="trow" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px 140px" }} key={j.id}>
                     <div style={{ fontSize: 18 }}>{j.emoticon}</div>
                     <div>{j.nombre}</div>
                     <div>{j.aliasJugador}</div>
@@ -245,6 +277,24 @@ export default function Jugadores({ session, perfiles }) {
                         )
                       )}
                     </div>
+                    <div>
+                      {adeuda ? (
+                        <>
+                          <span className="badge badge-deuda" title={`No habilitado para el torneo del ${cobranza?.proximaFecha}`}>⚠ Adeuda</span>
+                          {puedeAprobarExcepcion && (
+                            <button
+                              className="btn btn-secondary btn-filtro"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => setExcepcionModal({ correo: j.correo, nombre: j.nombre })}
+                            >
+                              Excepción
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -274,6 +324,31 @@ export default function Jugadores({ session, perfiles }) {
               </button>
               <button className="btn btn-primary" disabled={hostGuardando !== null} onClick={() => asignarHost(confirmarHost.id)}>
                 {hostGuardando !== null ? "Un momento…" : "Sí, asignar y avisarle"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {excepcionModal && (
+        <div className="modal-backdrop" onClick={() => !excepcionGuardando && setExcepcionModal(null)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">⚠</div>
+            <div className="modal-title">Aprobar excepción: {excepcionModal.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              <b>{excepcionModal.nombre}</b> tiene un adeudo pendiente en Cobranza. Esto lo habilita solo para el
+              torneo del <b>{cobranza?.proximaFecha}</b> — la deuda no se borra, solo queda exceptuada para esa fecha.
+            </p>
+            <div className="login-field">
+              <label>Motivo (opcional, para el registro)</label>
+              <input className="field" value={motivoExcepcion} onChange={(e) => setMotivoExcepcion(e.target.value)} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setExcepcionModal(null)} disabled={excepcionGuardando}>
+                Cancelar
+              </button>
+              <button className="btn btn-primary" disabled={excepcionGuardando} onClick={aprobarExcepcion}>
+                {excepcionGuardando ? "Un momento…" : "Aprobar excepción"}
               </button>
             </div>
           </div>

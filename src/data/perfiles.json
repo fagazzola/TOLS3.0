@@ -9,11 +9,11 @@
       "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "ninguno", "mod4": "escritura", "mod5": "escritura", "mod6": "escritura" }
     },
     {
-      "tipo": "Anfitrión",
+      "tipo": "Host",
       "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "ninguno", "mod5": "escritura", "mod6": "lectura" }
     },
     {
-      "tipo": "Cobranza",
+      "tipo": "Tesorero",
       "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "escritura", "mod5": "lectura", "mod6": "lectura" }
     },
     {

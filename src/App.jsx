@@ -7,6 +7,7 @@ import Calendario from "./components/Calendario.jsx";
 import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
 import Jugadores from "./components/Jugadores.jsx";
+import Cobranza from "./components/Cobranza.jsx";
 import Registro from "./components/Registro.jsx";
 import { puedeVer, puedeEditar } from "./lib/permisos.js";
 
@@ -24,14 +25,14 @@ function isoHoy() {
 }
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
-// (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores); Cobranza todavía no existe
-// como pantalla real, así que no aparece hasta que se construya. Game Night vive aparte, no aquí.
+// (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores). Game Night vive aparte, no aquí.
 // La pestaña Usuarios (antes "Jugadores") solo la puede ver el Administrador General,
 // sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla.
-// Jugadores (mod6) sí sigue la matriz normal de permisos — es el directorio de autorregistro.
+// Jugadores (mod6) y Cobranza (mod4) sí siguen la matriz normal de permisos.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
+  { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
 ];

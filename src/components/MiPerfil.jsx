@@ -42,7 +42,6 @@ export default function MiPerfil({ session }) {
           aliasJugador: mio.aliasJugador || "",
           aliasPokerStars: mio.aliasPokerStars || "",
           telefono: mio.telefono || "",
-          padrino: mio.padrino || "",
           fecNac: mio.fecNac || "",
           emoticon: mio.emoticon || "🎲",
           cuenta: fin.cuenta || "",
@@ -69,7 +68,6 @@ export default function MiPerfil({ session }) {
           aliasJugador: form.aliasJugador,
           aliasPokerStars: form.aliasPokerStars,
           telefono: form.telefono,
-          padrino: form.padrino,
           fecNac: form.fecNac,
           emoticon: form.emoticon,
         }),
@@ -142,10 +140,6 @@ export default function MiPerfil({ session }) {
             </div>
           </div>
           <div className="login-field-row">
-            <div className="login-field" style={{ maxWidth: 200 }}>
-              <label>Padrino</label>
-              <input className="field" value={form.padrino} onChange={(e) => setForm({ ...form, padrino: e.target.value })} />
-            </div>
             <div className="login-field" style={{ maxWidth: 180 }}>
               <label>Fecha de nacimiento</label>
               <input className="field" type="date" value={form.fecNac} onChange={(e) => setForm({ ...form, fecNac: e.target.value })} />

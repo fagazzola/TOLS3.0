@@ -89,24 +89,82 @@ async function readSheetUsedRange(sheetName) {
   return json?.values || [];
 }
 
-// lee las hojas Usuarios y Permisos del Excel y arma el mismo objeto {roles, usuarios} que usa el sitio —
-// para cuando el Excel debe "mandar" sobre lo guardado (botón "Importar desde Excel" en Usuarios)
+// aplica un formato de número que oculta el valor real de una columna de texto (muestra siempre
+// asteriscos) sin borrar el valor — al seleccionar la celda, Excel sigue mostrando el valor real en
+// la barra de fórmulas. Solo sirve para columnas de texto (contraseñas), no para números.
+async function ocultarColumnaTexto(sheetName, columna, startRow, endRow) {
+  if (endRow < startRow) return;
+  const filas = endRow - startRow + 1;
+  const range = `${columna}${startRow}:${columna}${endRow}`;
+  const sheet = encodeURIComponent(sheetName);
+  await graphFetch(`/workbook/worksheets('${sheet}')/range(address='${range}')`, {
+    method: "PATCH",
+    body: JSON.stringify({ numberFormat: Array.from({ length: filas }, () => [';;;"********"']) }),
+  });
+}
+
+// arma las filas de la hoja única "Jugadores" del Excel — combina el directorio de jugadores
+// (tols-jugadores) con las cuentas de acceso (tols-perfiles) por Correo Electrónico. En la app siguen
+// siendo 2 pantallas separadas (Jugadores y Usuarios), pero en el Excel es una sola tabla, como pidió
+// Federico ("finalmente aplica como base de datos"). Una cuenta de acceso que no es de ningún jugador
+// (ej. un administrador que nunca se autorregistró) se agrega igual, como fila aparte con los campos
+// de jugador vacíos.
+function filasJugadoresUnificadas(jugadores, perfilesData) {
+  const usuarios = perfilesData?.usuarios || [];
+  const porCorreo = new Map();
+  for (const u of usuarios) {
+    const correo = String(u.correo || u.usuario || "").trim().toLowerCase();
+    if (correo) porCorreo.set(correo, u);
+  }
+  const filas = [];
+  const correosConJugador = new Set();
+  for (const j of jugadores || []) {
+    const correo = String(j.correo || "").trim().toLowerCase();
+    correosConJugador.add(correo);
+    const u = porCorreo.get(correo);
+    filas.push([
+      j.id, j.nombre, j.aliasJugador, j.aliasPokerStars, j.padrino || "", j.telefono,
+      j.correo, j.tipoUsuario, j.fecNac, j.edad, j.emoticon, j.fechaRegistro || "",
+      j.estatus || "Activo", j.host ? "Sí" : "No", j.hostFecha || "",
+      u ? u.password : "", u ? u.rol : "",
+    ]);
+  }
+  for (const u of usuarios) {
+    const correo = String(u.correo || u.usuario || "").trim().toLowerCase();
+    if (correo && !correosConJugador.has(correo)) {
+      filas.push(["", u.nombre || "", "", "", "", "", u.correo || u.usuario || "", "", "", "", "", "", "", "", "", u.password, u.rol]);
+    }
+  }
+  return filas;
+}
+
+async function escribirJugadoresUnificado(jugadores, perfilesData) {
+  const filas = filasJugadoresUnificadas(jugadores, perfilesData);
+  await writeSheetTable("Jugadores", filas);
+  await ocultarColumnaTexto("Jugadores", "P", 2, 1 + filas.length); // P = Contraseña (columna 16)
+}
+
+// lee la hoja única "Jugadores" (Correo Electrónico + Contraseña + Perfil) y la hoja Permisos del
+// Excel y arma el mismo objeto {roles, usuarios} que usa el sitio — para cuando el Excel debe
+// "mandar" sobre lo guardado (botón "Importar desde Excel" en Usuarios). Solo cuentan como cuenta de
+// acceso las filas que tengan Correo Electrónico Y Perfil llenos — un jugador sin cuenta para entrar
+// al sitio no genera un usuario.
 export async function leerUsuariosYPermisosDesdeExcel() {
-  const [filasUsuarios, filasPermisos] = await Promise.all([
-    readSheetUsedRange("Usuarios"),
+  const [filasJugadores, filasPermisos] = await Promise.all([
+    readSheetUsedRange("Jugadores"),
     readSheetUsedRange("Permisos"),
   ]);
 
-  // Usuarios: Nombre, Correo Electrónico, Contraseña, Perfil (fila 0 = encabezado)
-  const usuarios = filasUsuarios
+  // columnas (0-indexed): 1=Nombre y Apellido, 6=Correo Electrónico, 15=Contraseña, 16=Perfil
+  const usuarios = filasJugadores
     .slice(1)
-    .filter((f) => f[0] || f[1])
+    .filter((f) => f[6] && f[16])
     .map((f) => ({
-      nombre: String(f[0] || "").trim(),
-      usuario: String(f[1] || "").trim(),
-      correo: String(f[1] || "").trim(),
-      password: String(f[2] || ""),
-      rol: String(f[3] || "").trim(),
+      nombre: String(f[1] || "").trim(),
+      usuario: String(f[6] || "").trim(),
+      correo: String(f[6] || "").trim(),
+      password: String(f[15] || ""),
+      rol: String(f[16] || "").trim(),
     }));
 
   // Permisos: Perfil, Tablero de Control, Calendario, Cobranza, Usuarios, Game Night, Jugadores
@@ -196,24 +254,9 @@ export function syncCalendario(data) {
 
 export function syncJugadores(jugadores) {
   return safe(async () => {
-    const filas = (jugadores || []).map((j) => [
-      j.id,
-      j.nombre,
-      j.aliasJugador,
-      j.aliasPokerStars,
-      j.padrino || "",
-      j.telefono,
-      j.correo,
-      j.tipoUsuario,
-      j.fecNac,
-      j.edad,
-      j.emoticon,
-      j.fechaRegistro || "",
-      j.estatus || "Activo",
-      j.host ? "Sí" : "No",
-      j.hostFecha || "",
-    ]);
-    await writeSheetTable("Jugadores", filas);
+    const perfilesStore = getStore("tols-perfiles");
+    const perfilesData = await perfilesStore.get("data", { type: "json" }).catch(() => null);
+    await escribirJugadoresUnificado(jugadores, perfilesData);
   });
 }
 
@@ -230,10 +273,11 @@ export function syncCobranza({ resumenRows, movimientoRows }) {
 
 export function syncPerfiles(data) {
   return safe(async () => {
-    // 4 columnas — igual a la tabla de Usuarios del sitio (el correo ES el usuario de acceso, ya no hay
-    // una columna aparte); si algún registro viejo solo tiene `usuario` y no `correo`, se usa ese como respaldo
-    const usuarios = (data.usuarios || []).map((u) => [u.nombre, u.correo || u.usuario || "", u.password, u.rol]);
-    await writeSheetTable("Usuarios", usuarios);
+    // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el
+    // directorio de jugadores en la hoja única "Jugadores" (ver escribirJugadoresUnificado arriba)
+    const jugadoresStore = getStore("tols-jugadores");
+    const jugadoresData = await jugadoresStore.get("data", { type: "json" }).catch(() => null);
+    await escribirJugadoresUnificado(jugadoresData?.jugadores || [], data);
 
     // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores
     const permisos = (data.roles || []).map((r) => [

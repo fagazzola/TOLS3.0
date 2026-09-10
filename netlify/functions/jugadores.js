@@ -126,7 +126,8 @@ export default async (req) => {
     // accion "autoeditar": el propio jugador actualiza su registro desde "Mi Perfil" (rol Jugador).
     // Se busca por correo (no por id, para no depender de que el jugador conozca su id interno).
     // Campos que NUNCA se tocan por esta vía: id, nombre, correo, tipoUsuario, fechaRegistro, estatus
-    // (esos son de solo administración). La Edad se recalcula sola si mandan FecNac nueva.
+    // (de solo administración) y Padrino (lo asigna el administrador, no se autodeclara). La Edad se
+    // recalcula sola si mandan FecNac nueva.
     if (body?.accion === "autoeditar") {
       const correo = String(body.correo || "").trim().toLowerCase();
       const idx = actual.jugadores.findIndex((j) => j.correo === correo);
@@ -136,7 +137,6 @@ export default async (req) => {
       const editable = { ...actual.jugadores[idx] };
       if (body.aliasJugador !== undefined) editable.aliasJugador = String(body.aliasJugador || "").trim();
       if (body.aliasPokerStars !== undefined) editable.aliasPokerStars = String(body.aliasPokerStars || "").trim();
-      if (body.padrino !== undefined) editable.padrino = String(body.padrino || "").trim();
       if (body.telefono !== undefined) editable.telefono = String(body.telefono || "").trim();
       if (body.emoticon !== undefined) editable.emoticon = String(body.emoticon || "🎲").trim();
       if (body.fecNac !== undefined) {

@@ -60,6 +60,7 @@ function plantillaEnBlanco() {
     },
     recomprasMax: 0,
     cuotaInscripcion: 0,
+    toleranciaCheckinMin: 10,
     gastosCampeonato: [],
     cobrosPorTorneo: [
       { id: "buyin", nombre: "Buy-in", regular: 0, main: 0, protegido: true },
@@ -83,6 +84,7 @@ function normalizar(datos, plantilla) {
   d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : structuredClone(base.puntos.posiciones);
   if (typeof d.recomprasMax !== "number") d.recomprasMax = base.recomprasMax;
   if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = base.cuotaInscripcion;
+  if (typeof d.toleranciaCheckinMin !== "number") d.toleranciaCheckinMin = base.toleranciaCheckinMin;
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : structuredClone(base.gastosCampeonato);
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : structuredClone(base.cobrosPorTorneo);
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : structuredClone(base.pagosPorTorneo);
@@ -704,10 +706,18 @@ export default function Tablero({ session, perfiles }) {
             <input type="number" min="0" className="field" disabled={!editable} value={draft.recomprasMax}
               onChange={(e) => set((d) => { d.recomprasMax = Number(e.target.value); })} />
           </div>
+          <div className="login-field" style={{ maxWidth: 260 }}>
+            <label>Tolerancia de check-in (minutos) — Game Night</label>
+            <input type="number" min="0" className="field" disabled={!editable} value={draft.toleranciaCheckinMin}
+              onChange={(e) => set((d) => { d.toleranciaCheckinMin = Number(e.target.value); })} />
+          </div>
         </div>
         <div className="section-sub">
-          Ambos se definen una sola vez por campeonato. La cuota de inscripción se le cobra a cada jugador
-          (una vez, no es un gasto del acumulado); las recompras máximas no son un costo, solo un límite.
+          La cuota de inscripción y las recompras máximas se definen una sola vez por campeonato. La cuota de
+          inscripción se le cobra a cada jugador (una vez, no es un gasto del acumulado); las recompras máximas
+          no son un costo, solo un límite. La tolerancia de check-in es el tiempo, en minutos desde que el Host
+          inicia el torneo en Game Night, dentro del cual el Host todavía puede activar manualmente a un
+          jugador que no hizo su check-in sin que se le genere una amonestación.
         </div>
 
         <div className="subhead">Gastos del campeonato — se extraen del acumulado y se descuentan del monto a repartir</div>

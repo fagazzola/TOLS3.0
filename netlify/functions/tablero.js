@@ -27,6 +27,10 @@ function normalizarUno(datos, plantilla) {
   d.puntos.posiciones = Array.isArray(d.puntos.posiciones) ? d.puntos.posiciones : base.puntos.posiciones;
   if (typeof d.recomprasMax !== "number") d.recomprasMax = base.recomprasMax;
   if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = base.cuotaInscripcion;
+  // minutos de tolerancia, desde que se "inicia" el torneo en Game Night, antes de que activar
+  // manualmente a un jugador (que no hizo check-in) le genere una amonestación — parámetro que pidió
+  // Federico que viviera en el Tablero de Control, no fijo en el código
+  if (typeof d.toleranciaCheckinMin !== "number") d.toleranciaCheckinMin = typeof base.toleranciaCheckinMin === "number" ? base.toleranciaCheckinMin : 10;
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : base.gastosCampeonato;
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : base.cobrosPorTorneo;
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : base.pagosPorTorneo;
@@ -105,6 +109,9 @@ function validarUno(data) {
   }
   if (typeof data.cuotaInscripcion !== "number" || data.cuotaInscripcion < 0) {
     return "Falta la cuota de inscripción por jugador.";
+  }
+  if (typeof data.toleranciaCheckinMin !== "number" || data.toleranciaCheckinMin < 0) {
+    return "Falta el tiempo de tolerancia de check-in (minutos) para Game Night.";
   }
 
   if (!Array.isArray(data.gastosCampeonato) || data.gastosCampeonato.length > 10) {

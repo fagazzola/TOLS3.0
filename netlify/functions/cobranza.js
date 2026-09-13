@@ -99,6 +99,50 @@ function filasParaExcel({ movimientos, resumen }) {
   return { resumenRows, movimientoRows };
 }
 
+// Punto de integración con Game Night (MOD 5): cada torneo en vivo llama a esto para reflejar en
+// Cobranza, de una sola vez, el estado financiero de todos sus jugadores (buy-in, re-buys, add-on,
+// lugar de salida y premio ganado) — un solo movimiento por jugador+torneo, identificado con el id
+// estable `gn-{campeonato}-{fecha}-{correo}` para que actualizar el mismo torneo nunca duplique filas.
+// Se hace en una sola lectura/escritura del store (no una por jugador) para no pisarse entre sí ni
+// disparar una sincronización a Excel por cada jugador.
+export async function upsertVariosDesdeGameNight(campeonato, fecha, lista) {
+  const store = getStore("tols-cobranza");
+  const raw = await store.get("data", { type: "json" });
+  const actual = normalizar(raw);
+
+  for (const it of lista || []) {
+    const correo = String(it.correo || "").trim().toLowerCase();
+    if (!correo) continue;
+    if (!actual.jugadores[correo]) {
+      actual.jugadores[correo] = normalizarJugador({ nombre: it.nombre || "" });
+    } else if (!actual.jugadores[correo].nombre && it.nombre) {
+      actual.jugadores[correo] = { ...actual.jugadores[correo], nombre: it.nombre };
+    }
+    const id = `gn-${campeonato}-${fecha}-${correo}`;
+    const idx = actual.movimientos.findIndex((m) => m.id === id);
+    const previo = idx === -1 ? {} : actual.movimientos[idx];
+    const mov = normalizarMovimiento({
+      ...previo,
+      id,
+      campeonato,
+      fecha,
+      correo,
+      buyInPagado: it.buyInPagado,
+      rebuys: it.rebuys,
+      addonComprado: it.addonComprado,
+      lugar: it.lugar,
+      premioPartida: it.premioPartida,
+    });
+    if (idx === -1) actual.movimientos.push(mov);
+    else actual.movimientos[idx] = mov;
+  }
+
+  await store.setJSON("data", actual);
+  const completa = await respuestaCompleta(actual);
+  await syncCobranza(filasParaExcel(completa));
+  return completa;
+}
+
 export default async (req) => {
   const store = getStore("tols-cobranza");
 

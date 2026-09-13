@@ -8,6 +8,7 @@ import Tablero from "./components/Tablero.jsx";
 import Perfiles from "./components/Perfiles.jsx";
 import Jugadores from "./components/Jugadores.jsx";
 import Cobranza from "./components/Cobranza.jsx";
+import GameNight from "./components/GameNight.jsx";
 import MiPerfil from "./components/MiPerfil.jsx";
 import Registro from "./components/Registro.jsx";
 import { puedeVer, puedeEditar } from "./lib/permisos.js";
@@ -26,17 +27,22 @@ function isoHoy() {
 }
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
-// (Tablero de Control, Calendario, Cobranza, Usuarios, Jugadores). Game Night vive aparte, no aquí.
+// (Tablero de Control, Calendario, Cobranza, Jugadores, Game Night, Usuarios).
 // La pestaña Usuarios (antes "Jugadores") solo la puede ver el Administrador General,
 // sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla.
 // "Mi Perfil" es otro caso especial: solo la ve quien tiene rol "Jugador" (autoservicio de sus
 // propios datos), sin importar la matriz de permisos tampoco — no es una pantalla de administración.
 // Jugadores (mod6) y Cobranza (mod4) sí siguen la matriz normal de permisos.
+// Game Night (mod5) es un caso especial más de visibilidad: además de la matriz normal de permisos,
+// el Host asignado al próximo torneo SIEMPRE puede entrar a administrar esa partida, tenga o no su rol
+// acceso de escritura a mod5 — por eso puedeVerTab() de abajo también revisa hostInfo.esHost para esta
+// pestaña puntual.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
+  { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, permiteHost: true },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, soloJugador: true },
 ];
@@ -156,6 +162,7 @@ export default function App() {
   function puedeVerTab(t) {
     if (t.soloAdminGeneral) return session?.rol === "Administrador General";
     if (t.soloJugador) return session?.rol === "Jugador";
+    if (t.permiteHost && hostInfo.esHost) return true;
     return puedeVer(perfiles, session, t.modKey);
   }
 
@@ -258,7 +265,7 @@ export default function App() {
           </div>
         )}
         {active ? (
-          <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} />
+          <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} esHost={hostInfo.esHost} />
         ) : (
           <p className="subtitle">Tu perfil no tiene acceso a ningún módulo todavía. Pídele a un administrador que revise tus permisos.</p>
         )}

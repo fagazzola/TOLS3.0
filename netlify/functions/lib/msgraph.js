@@ -89,6 +89,23 @@ async function readSheetUsedRange(sheetName) {
   return json?.values || [];
 }
 
+// crea la hoja si todavía no existe en el Excel maestro y le escribe el encabezado — usado por Game
+// Night (MOD 5), que es el primer módulo cuyas hojas no se arman a mano de antemano. El resto de los
+// módulos (Cobranza, Tablero, etc.) siguen esperando que la hoja ya exista, como hasta ahora.
+async function asegurarHoja(sheetName, headers) {
+  const existentes = await graphFetch(`/workbook/worksheets`, { method: "GET" });
+  const yaExiste = (existentes?.value || []).some((h) => h.name === sheetName);
+  if (!yaExiste) {
+    await graphFetch(`/workbook/worksheets/add`, { method: "POST", body: JSON.stringify({ name: sheetName }) });
+    const lastCol = colLetter(headers.length);
+    const sheet = encodeURIComponent(sheetName);
+    await graphFetch(`/workbook/worksheets('${sheet}')/range(address='A1:${lastCol}1')`, {
+      method: "PATCH",
+      body: JSON.stringify({ values: [headers] }),
+    });
+  }
+}
+
 // aplica un formato de número que oculta el valor real de una columna de texto (muestra siempre
 // asteriscos) sin borrar el valor — al seleccionar la celda, Excel sigue mostrando el valor real en
 // la barra de fórmulas. Solo sirve para columnas de texto (contraseñas), no para números.
@@ -268,6 +285,40 @@ export function syncCobranza({ resumenRows, movimientoRows }) {
   return safe(async () => {
     await writeSheetTable("Cobranza_Resumen", resumenRows);
     await writeSheetTable("Cobranza", movimientoRows);
+  });
+}
+
+// Game Night (MOD 5): a diferencia del resto de los módulos, sus 2 hojas se crean solas la primera
+// vez que hay algo que sincronizar (ver asegurarHoja arriba) — no dependen de que Federico las arme a
+// mano en el Excel maestro de antemano. "GameNight_Sesiones" es una fila por torneo (campeonato+fecha)
+// con su hora de inicio; "GameNight_Jugadores" es una fila por jugador+torneo con todo el detalle en
+// vivo (check-in, amonestación, buy-in/re-buys/add-on, killer, lugar, mejor mano) y su timestamp de
+// última actualización — la columna que permite reconciliar después contra lo que se vivió en la mesa.
+export function syncGameNight(mapa) {
+  return safe(async () => {
+    const sesiones = [];
+    const jugadores = [];
+    for (const [campeonato, fechas] of Object.entries(mapa || {})) {
+      for (const [fecha, torneo] of Object.entries(fechas || {})) {
+        sesiones.push([campeonato, fecha, torneo.horaInicio || ""]);
+        for (const [correo, j] of Object.entries(torneo.jugadores || {})) {
+          jugadores.push([
+            campeonato, fecha, correo, j.nombre || "",
+            j.checkin ? "Sí" : "No", j.manual ? "Sí" : "No", j.amonestado ? "Sí" : "No", j.horaCheckin || "",
+            j.buyIn ? "Sí" : "No", j.rebuys || 0, j.addon ? "Sí" : "No",
+            j.eliminadoPor || "", j.horaEliminacion || "", j.mejorMano ? "Sí" : "No",
+            j.actualizado || "",
+          ]);
+        }
+      }
+    }
+    await asegurarHoja("GameNight_Sesiones", ["Campeonato", "Fecha", "Hora de Inicio"]);
+    await writeSheetTable("GameNight_Sesiones", sesiones);
+    await asegurarHoja("GameNight_Jugadores", [
+      "Campeonato", "Fecha", "Correo", "Nombre", "Check-in", "Manual", "Amonestado", "Hora Check-in",
+      "Buy-in", "Re-buys", "Add-on", "Eliminado Por", "Hora Eliminación", "Mejor Mano", "Actualizado",
+    ]);
+    await writeSheetTable("GameNight_Jugadores", jugadores, { maxRows: 600 });
   });
 }
 

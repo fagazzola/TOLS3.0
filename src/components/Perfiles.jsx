@@ -6,10 +6,6 @@ const API_IMPORTAR = "/api/perfiles-importar-excel";
 const NIVELES = ["ninguno", "lectura", "escritura"];
 const USUARIOS_COLS = "1fr 1.6fr 1fr 1.2fr 72px";
 
-function nuevoUsuario() {
-  return { nombre: "", usuario: "", correo: "", password: "", rol: "" };
-}
-
 // búsqueda tolerante a mayúsculas/acentos — así "jose" encuentra "José" o "JOSÉ"
 const DIACRITICOS = new RegExp(String.fromCharCode(0x5b, 0x5c, 0x75, 0x30, 0x33, 0x30, 0x30, 0x2d, 0x5c, 0x75, 0x30, 0x33, 0x36, 0x66, 0x5d), "g");
 function normalizarBusqueda(s) {
@@ -32,6 +28,9 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
   const [importOk, setImportOk] = useState(false);
   const [confirmarImportar, setConfirmarImportar] = useState(false);
   const [busqueda, setBusqueda] = useState("");
+  const [confirmarEliminar, setConfirmarEliminar] = useState(null); // { index, nombre }
+  const [eliminando, setEliminando] = useState(false);
+  const [eliminarError, setEliminarError] = useState("");
 
   const dirty = JSON.stringify(perfiles) !== JSON.stringify(draft);
 
@@ -89,6 +88,34 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
     } finally {
       setImportando(false);
       setConfirmarImportar(false);
+    }
+  }
+
+  // elimina al usuario directamente de la base de datos (no pasa por "Guardar cambios" ni por el
+  // draft en edición) — se pide confirmación antes porque no se puede deshacer
+  async function handleEliminarUsuario() {
+    if (!confirmarEliminar) return;
+    setEliminando(true);
+    setEliminarError("");
+    try {
+      const payload = structuredClone(perfiles);
+      const idx = payload.usuarios.findIndex((u) => u.usuario === confirmarEliminar.usuario);
+      if (idx === -1) throw new Error("Ese usuario ya no existe (puede que alguien más lo haya editado).");
+      payload.usuarios.splice(idx, 1);
+      const r = await fetch(API, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo eliminar el usuario.");
+      setDraft(json);
+      onPerfilesChange(json);
+      setConfirmarEliminar(null);
+    } catch (e) {
+      setEliminarError(e.message || "No se pudo eliminar el usuario.");
+    } finally {
+      setEliminando(false);
     }
   }
 
@@ -187,8 +214,8 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
                       >
                         🔑
                       </button>
-                      <button className="btn-icon-remove" title="Quitar usuario" disabled={draft.usuarios.length <= 1}
-                        onClick={() => set((d) => { d.usuarios.splice(i, 1); })}>✕</button>
+                      <button className="btn-icon-remove" title="Eliminar usuario" disabled={draft.usuarios.length <= 1}
+                        onClick={() => { setEliminarError(""); setConfirmarEliminar({ usuario: u.usuario, nombre: u.nombre || u.correo }); }}>✕</button>
                     </div>
                   </div>
                   {cambiarPass?.index === i && (
@@ -222,12 +249,6 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
                 (u) => normalizarBusqueda(u.nombre).includes(normalizarBusqueda(busqueda)) || normalizarBusqueda(u.correo).includes(normalizarBusqueda(busqueda))
               ) && <div className="section-sub">No se encontraron usuarios con ese criterio.</div>}
           </div>
-          <button
-            className="btn btn-secondary btn-add"
-            onClick={() => set((d) => { d.usuarios.push({ ...nuevoUsuario(), rol: d.roles[0]?.tipo || "" }); })}
-          >
-            + Agregar usuario
-          </button>
         </div>
       ) : (
         <p className="subtitle">Solo el Administrador General puede ver y administrar los usuarios de la liga.</p>
@@ -258,7 +279,29 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
               </div>
             ))}
           </div>
-          <div className="section-sub">Cobranza y Game Night aún no están construidos — los permisos ya quedaron definidos para cuando existan.</div>
+          <div className="section-sub">Cobranza (mod4) y Game Night (mod5) usan estos mismos permisos.</div>
+        </div>
+      )}
+
+      {confirmarEliminar && (
+        <div className="modal-backdrop" onClick={() => !eliminando && setConfirmarEliminar(null)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge danger">🗑</div>
+            <div className="modal-title">Eliminar usuario: {confirmarEliminar.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Se va a eliminar la cuenta de <b>{confirmarEliminar.nombre}</b> de la base de datos. Esta acción no
+              se puede deshacer.
+            </p>
+            {eliminarError && <div className="login-error">{eliminarError}</div>}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmarEliminar(null)} disabled={eliminando}>
+                Cancelar
+              </button>
+              <button className="btn btn-danger" onClick={handleEliminarUsuario} disabled={eliminando}>
+                {eliminando ? "Eliminando…" : "Sí, eliminar"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -269,7 +312,7 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
             <div className="modal-title">Importar desde Excel</div>
             <p className="section-sub">
               Vas a reemplazar los usuarios y permisos guardados en el sitio con lo que haya <b>ahora mismo</b>{" "}
-              en las hojas Usuarios y Permisos del Excel. Cualquier cambio hecho desde el sitio que no esté
+              en las hojas Jugadores y Permisos del Excel. Cualquier cambio hecho desde el sitio que no esté
               también en el Excel se va a perder. Esta acción no se puede deshacer.
             </p>
             <div className="modal-actions">

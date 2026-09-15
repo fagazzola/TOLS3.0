@@ -88,6 +88,24 @@ async function espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo) {
   return upsertVariosDesdeGameNight(campeonato, fecha, lista);
 }
 
+// usada por campeonatos.js al renombrar un campeonato: mueve la clave del mapa de "de" a "a" —
+// tols-gamenight está indexado como { [campeonato]: { [fecha]: {...} } }.
+export async function renombrarCampeonatoEnGameNight(de, a) {
+  const store = getStore("tols-gamenight");
+  const raw = await store.get("data", { type: "json" });
+  const mapa = normalizarMapa(raw);
+  if (!mapa[de]) return;
+  if (mapa[a]) {
+    // ya había datos bajo el nombre nuevo (caso raro) — se fusionan por fecha en vez de perder alguno
+    mapa[a] = { ...mapa[de], ...mapa[a] };
+  } else {
+    mapa[a] = mapa[de];
+  }
+  delete mapa[de];
+  await store.setJSON("data", mapa);
+  await syncGameNight(mapa);
+}
+
 export default async (req) => {
   const store = getStore("tols-gamenight");
 

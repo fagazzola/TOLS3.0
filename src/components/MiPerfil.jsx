@@ -3,8 +3,6 @@ import { useEffect, useState } from "react";
 const API_JUG = "/api/jugadores";
 const API_COBRANZA = "/api/cobranza";
 
-const EMOTICONES = ["🎲", "♠️", "♥️", "♦️", "♣️", "🃏", "🎯", "🐺", "🦅", "🐉"];
-
 // campos que el propio jugador puede editar desde acá. Deliberadamente NO incluye id, nombre,
 // correo, tipoUsuario, fechaRegistro ni estatus — esos son de solo administración y ni siquiera se
 // muestran en esta pantalla.
@@ -43,7 +41,6 @@ export default function MiPerfil({ session }) {
           aliasPokerStars: mio.aliasPokerStars || "",
           telefono: mio.telefono || "",
           fecNac: mio.fecNac || "",
-          emoticon: mio.emoticon || "🎲",
           cuenta: fin.cuenta || "",
           banco: fin.banco || "",
           tipoCuenta: fin.tipoCuenta || "",
@@ -69,7 +66,6 @@ export default function MiPerfil({ session }) {
           aliasPokerStars: form.aliasPokerStars,
           telefono: form.telefono,
           fecNac: form.fecNac,
-          emoticon: form.emoticon,
         }),
       });
       const j1 = await r1.json();
@@ -143,14 +139,6 @@ export default function MiPerfil({ session }) {
             <div className="login-field" style={{ maxWidth: 180 }}>
               <label>Fecha de nacimiento</label>
               <input className="field" type="date" value={form.fecNac} onChange={(e) => setForm({ ...form, fecNac: e.target.value })} />
-            </div>
-            <div className="login-field" style={{ maxWidth: 160 }}>
-              <label>Ícono</label>
-              <select className="field" value={form.emoticon} onChange={(e) => setForm({ ...form, emoticon: e.target.value })}>
-                {EMOTICONES.map((e) => (
-                  <option key={e} value={e}>{e}</option>
-                ))}
-              </select>
             </div>
           </div>
 

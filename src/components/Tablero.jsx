@@ -344,36 +344,35 @@ export default function Tablero({ session, perfiles }) {
       setCampActionError(`Ya existe un campeonato "${a}".`);
       return;
     }
+    // no se permite renombrar un campeonato que ya está en curso (algunas fechas jugadas, otras no) —
+    // partiría en dos una temporada a medias en Calendario, Cobranza y Game Night
+    if (estatusCampeonato(de, torneosCal) === "en-curso") {
+      setCampActionError(`No puedes renombrar "${de}" mientras está en curso.`);
+      return;
+    }
     setCampSaving(true);
     setCampActionError("");
     try {
-      const nuevaLista = campeonatos.map((n) => (n === de ? a : n));
-      const rc = await fetch(API_CAMP, {
+      // un solo endpoint hace todo el trabajo: renombra en tols-campeonatos y en cascada en Tablero,
+      // Calendario, Cobranza y Game Night — antes esto se hacía en dos pasos (nombres + tablero) y las
+      // otras pantallas se quedaban con el nombre viejo
+      const r = await fetch(API_CAMP, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        // si se está renombrando el campeonato que gobierna el sitio, el "activo" cambia de nombre junto
-        // con él; si no, se omite y el servidor conserva el que ya estaba guardado
-        body: JSON.stringify(campeonatoSel === de ? { nombres: nuevaLista, activo: a } : { nombres: nuevaLista }),
+        body: JSON.stringify({ accion: "renombrar", de, a }),
       });
-      const jc = await rc.json();
-      if (!rc.ok) throw new Error(jc.error || "No se pudo renombrar el campeonato.");
-      setCampeonatos(jc.nombres);
-
-      const tieneDatos = tableroMap && Object.prototype.hasOwnProperty.call(tableroMap, de);
-      let nuevoMapa = tableroMap;
-      if (tieneDatos) {
-        const rt = await fetch(API, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ accion: "renombrar", de, a }),
-        });
-        const jt = await rt.json();
-        if (!rt.ok) throw new Error(jt.error || "No se pudo renombrar los datos del campeonato.");
-        nuevoMapa = jt;
-        setTableroMap(jt);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "No se pudo renombrar el campeonato.");
+      setCampeonatos(j.nombres);
+      if (j.avisos?.length) {
+        setCampActionError(`Se renombró, pero con avisos: ${j.avisos.join(" · ")}`);
       }
 
-      setRenombres((r) => { const c = { ...r }; delete c[de]; return c; });
+      const rt = await fetch(API);
+      const nuevoMapa = await rt.json();
+      setTableroMap(nuevoMapa);
+
+      setRenombres((r2) => { const c = { ...r2 }; delete c[de]; return c; });
       if (campeonatoSel === de) {
         setCampeonatoSel(a);
         const normalizado = normalizar(nuevoMapa?.[a], Object.values(nuevoMapa || {})[0]);
@@ -491,18 +490,20 @@ export default function Tablero({ session, perfiles }) {
                 {campeonatos.map((n) => {
                   const valorActual = renombres[n] ?? n;
                   const cambiado = valorActual.trim() && valorActual.trim() !== n;
+                  const enCurso = estatusCampeonato(n, torneosCal) === "en-curso";
                   return (
                     <div className="trow" style={{ gridTemplateColumns: "1fr 34px 34px" }} key={n}>
                       <input
                         className="field"
                         value={valorActual}
-                        disabled={campSaving}
+                        disabled={campSaving || enCurso}
+                        title={enCurso ? "No se puede renombrar: está en curso." : undefined}
                         onChange={(e) => setRenombres((r) => ({ ...r, [n]: e.target.value }))}
                       />
                       <button
                         className="btn-icon-confirm"
-                        title="Guardar nuevo nombre"
-                        disabled={campSaving || !cambiado}
+                        title={enCurso ? "No se puede renombrar mientras está en curso." : "Guardar nuevo nombre"}
+                        disabled={campSaving || !cambiado || enCurso}
                         onClick={() => renombrarCampeonato(n, valorActual)}
                       >✓</button>
                       <button

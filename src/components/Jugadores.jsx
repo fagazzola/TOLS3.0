@@ -4,12 +4,16 @@ import { puedeEditar } from "../lib/permisos.js";
 const API = "/api/jugadores";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
-const API_COBRANZA = "/api/cobranza";
+const API_IMPORTAR = "/api/jugadores-importar-excel";
+const COLS = "repeat(6, 1fr)";
 
 function iso(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Pantalla de solo consulta del directorio de jugadores (los datos personales los llena cada jugador
+// al autorregistrarse, o llegan importados desde la hoja Jugadores del Excel). Únicamente se pueden
+// editar Padrino, Estatus y Host desde aquí — el resto se muestra sin poder tocarse.
 export default function Jugadores({ session, perfiles }) {
   const [data, setData] = useState(null);
   const [proximoTorneo, setProximoTorneo] = useState(null); // { fecha, ... } | null
@@ -19,17 +23,14 @@ export default function Jugadores({ session, perfiles }) {
   const [guardando, setGuardando] = useState(false);
   const [hostGuardando, setHostGuardando] = useState(null); // id del jugador en proceso
   const [hostAviso, setHostAviso] = useState("");
-  const [confirmarHost, setConfirmarHost] = useState(null); // { id, nombre }
+  const [confirmarHost, setConfirmarHost] = useState(null); // { id, nombre, habiaOtro }
   const [filtroEstatus, setFiltroEstatus] = useState("Todos"); // "Todos" | "Activo" | "Inactivo"
-  const [cobranza, setCobranza] = useState(null); // { adeudos, proximaFecha } — quién no puede jugar el próximo torneo por adeudo
-  const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
-  const [motivoExcepcion, setMotivoExcepcion] = useState("");
-  const [excepcionGuardando, setExcepcionGuardando] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importOk, setImportOk] = useState(false);
+  const [confirmarImportar, setConfirmarImportar] = useState(false);
 
   const puedeEscribir = puedeEditar(perfiles, session, "mod6");
-  // aprobar excepciones de adeudo es una decisión financiera — se rige por el permiso de Cobranza
-  // (mod4), no por el de Jugadores, aunque el botón viva en esta pantalla
-  const puedeAprobarExcepcion = puedeEditar(perfiles, session, "mod4");
 
   useEffect(() => {
     cargar();
@@ -45,11 +46,9 @@ export default function Jugadores({ session, perfiles }) {
       }),
       fetch(API_CAL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(API_CAMP).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(API_COBRANZA).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ])
-      .then(([jugadores, cal, camp, cob]) => {
+      .then(([jugadores, cal, camp]) => {
         setData(jugadores);
-        setCobranza(cob);
         // el "próximo torneo" es la fecha más cercana (hoy o después) del campeonato activo — es la fecha
         // para la que se necesita un Host asignado
         const activo = camp?.activo || "";
@@ -121,24 +120,21 @@ export default function Jugadores({ session, perfiles }) {
     }
   }
 
-  async function aprobarExcepcion() {
-    if (!excepcionModal || !cobranza?.proximaFecha) return;
-    setExcepcionGuardando(true);
+  async function handleImportarExcel() {
+    setImportando(true);
+    setImportError("");
+    setImportOk(false);
     try {
-      const r = await fetch(API_COBRANZA, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accion: "excepcion", correo: excepcionModal.correo, fecha: cobranza.proximaFecha, motivo: motivoExcepcion }),
-      });
+      const r = await fetch(API_IMPORTAR, { method: "POST" });
       const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo aprobar la excepción.");
-      setCobranza(json);
-      setExcepcionModal(null);
-      setMotivoExcepcion("");
+      if (!r.ok) throw new Error(json.error || "No se pudo importar desde el Excel.");
+      setData(json);
+      setImportOk(true);
     } catch (e) {
-      setError(e.message || "No se pudo aprobar la excepción.");
+      setImportError(e.message || "No se pudo importar desde el Excel.");
     } finally {
-      setExcepcionGuardando(false);
+      setImportando(false);
+      setConfirmarImportar(false);
     }
   }
 
@@ -154,13 +150,23 @@ export default function Jugadores({ session, perfiles }) {
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Jugadores</h1>
           <p className="subtitle">
-            Directorio de jugadores dados de alta desde la pantalla de autorregistro. Los datos personales los
-            llena cada jugador; aquí solo se administran el Padrino y el Estatus.
+            Directorio de jugadores. Solo se pueden editar Padrino, Estatus y Host — el resto de los datos los
+            llena cada jugador al autorregistrarse, o se importan desde la hoja Jugadores del Excel.
           </p>
         </div>
       </div>
 
       {error && <div className="login-error">{error}</div>}
+
+      {puedeEscribir && (
+        <div className="tablero-savebar">
+          <button className="btn btn-secondary" onClick={() => setConfirmarImportar(true)} disabled={importando}>
+            {importando ? "Importando…" : "Importar desde Excel"}
+          </button>
+          {importOk && <div className="check-line check-ok" style={{ margin: 0 }}>✓ Jugadores actualizados desde el Excel.</div>}
+        </div>
+      )}
+      {puedeEscribir && importError && <div className="login-error">{importError}</div>}
 
       {loading ? (
         <p className="subtitle">Cargando…</p>
@@ -195,20 +201,17 @@ export default function Jugadores({ session, perfiles }) {
                 })}
               </div>
             </div>
-            <div className="tbl">
-              <div className="trow thead" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px 140px" }}>
-                <div /><div>Nombre</div><div>Alias</div><div>PokerStars</div><div>Correo</div><div>Padrino</div><div>Edad</div><div>Estatus</div><div>Host</div><div>Cobranza</div>
+            <div className="tbl tbl-compacta">
+              <div className="trow thead" style={{ gridTemplateColumns: COLS }}>
+                <div>Nombre</div><div>Alias PokerStars</div><div>Correo electrónico</div><div>Padrino</div><div>Estatus</div><div>Host</div>
               </div>
               {jugadoresFiltrados.map((j) => {
                 const enEdicion = editando?.id === j.id;
-                const adeuda = cobranza?.adeudos?.[j.correo];
                 return (
-                  <div className="trow" style={{ gridTemplateColumns: "40px 1.3fr 1fr 1fr 1fr 1fr 0.7fr 0.9fr 110px 140px" }} key={j.id}>
-                    <div style={{ fontSize: 18 }}>{j.emoticon}</div>
+                  <div className="trow" style={{ gridTemplateColumns: COLS }} key={j.id}>
                     <div>{j.nombre}</div>
-                    <div>{j.aliasJugador}</div>
                     <div>{j.aliasPokerStars}</div>
-                    <div style={{ fontSize: 12 }}>{j.correo}</div>
+                    <div>{j.correo}</div>
                     <div>
                       {puedeEscribir && enEdicion ? (
                         <input
@@ -220,7 +223,6 @@ export default function Jugadores({ session, perfiles }) {
                         j.padrino || "—"
                       )}
                     </div>
-                    <div>{j.edad}</div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       {puedeEscribir && enEdicion ? (
                         <>
@@ -270,29 +272,11 @@ export default function Jugadores({ session, perfiles }) {
                             className="btn btn-secondary btn-host-asignar"
                             disabled={hostGuardando === j.id || !proximoTorneo}
                             title={!proximoTorneo ? "No hay un próximo torneo programado" : "Asignar como Host del próximo torneo"}
-                            onClick={() => setConfirmarHost({ id: j.id, nombre: j.nombre })}
+                            onClick={() => setConfirmarHost({ id: j.id, nombre: j.nombre, habiaOtro: !!hostActual && hostActual.id !== j.id })}
                           >
                             Asignar
                           </button>
                         )
-                      )}
-                    </div>
-                    <div>
-                      {adeuda ? (
-                        <>
-                          <span className="badge badge-deuda" title={`No habilitado para el torneo del ${cobranza?.proximaFecha}`}>⚠ Adeuda</span>
-                          {puedeAprobarExcepcion && (
-                            <button
-                              className="btn btn-secondary btn-filtro"
-                              style={{ marginLeft: 6 }}
-                              onClick={() => setExcepcionModal({ correo: j.correo, nombre: j.nombre })}
-                            >
-                              Excepción
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <span className="muted">—</span>
                       )}
                     </div>
                   </div>
@@ -316,7 +300,10 @@ export default function Jugadores({ session, perfiles }) {
             <div className="modal-title">Asignar Host: {confirmarHost.nombre}</div>
             <p className="section-sub" style={{ marginTop: 0 }}>
               <b>{confirmarHost.nombre}</b> quedará como Host del torneo del <b>{proximoTorneo?.fecha}</b>. Se le va a
-              enviar un correo avisándole. Si alguien más ya era Host, se le quita automáticamente.
+              enviar un correo avisándole.{" "}
+              {confirmarHost.habiaOtro
+                ? <>El Host que estaba asignado antes se quita automáticamente.</>
+                : null}
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConfirmarHost(null)} disabled={hostGuardando !== null}>
@@ -330,25 +317,22 @@ export default function Jugadores({ session, perfiles }) {
         </div>
       )}
 
-      {excepcionModal && (
-        <div className="modal-backdrop" onClick={() => !excepcionGuardando && setExcepcionModal(null)}>
+      {confirmarImportar && (
+        <div className="modal-backdrop" onClick={() => !importando && setConfirmarImportar(false)}>
           <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon-badge">⚠</div>
-            <div className="modal-title">Aprobar excepción: {excepcionModal.nombre}</div>
-            <p className="section-sub" style={{ marginTop: 0 }}>
-              <b>{excepcionModal.nombre}</b> tiene un adeudo pendiente en Cobranza. Esto lo habilita solo para el
-              torneo del <b>{cobranza?.proximaFecha}</b> — la deuda no se borra, solo queda exceptuada para esa fecha.
+            <div className="modal-icon-badge danger">📥</div>
+            <div className="modal-title">Importar desde Excel</div>
+            <p className="section-sub">
+              Vas a reemplazar los jugadores guardados en el sitio con lo que haya <b>ahora mismo</b> en la hoja
+              Jugadores del Excel. Cualquier cambio hecho desde el sitio que no esté también en el Excel se va a
+              perder. Esta acción no se puede deshacer.
             </p>
-            <div className="login-field">
-              <label>Motivo (opcional, para el registro)</label>
-              <input className="field" value={motivoExcepcion} onChange={(e) => setMotivoExcepcion(e.target.value)} />
-            </div>
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setExcepcionModal(null)} disabled={excepcionGuardando}>
+              <button className="btn btn-secondary" onClick={() => setConfirmarImportar(false)} disabled={importando}>
                 Cancelar
               </button>
-              <button className="btn btn-primary" disabled={excepcionGuardando} onClick={aprobarExcepcion}>
-                {excepcionGuardando ? "Un momento…" : "Aprobar excepción"}
+              <button className="btn btn-danger" onClick={handleImportarExcel} disabled={importando}>
+                {importando ? "Importando…" : "Sí, importar y reemplazar"}
               </button>
             </div>
           </div>

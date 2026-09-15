@@ -143,6 +143,27 @@ export async function upsertVariosDesdeGameNight(campeonato, fecha, lista) {
   return completa;
 }
 
+// usada por campeonatos.js al renombrar un campeonato: remapea movimientos[].campeonato de "de" a "a".
+// También renombra el id de los movimientos generados por Game Night (`gn-{campeonato}-{fecha}-{correo}`)
+// para que sigan siendo el mismo registro la próxima vez que se guarde ese Game Night con el nombre nuevo
+// — si no se renombrara el id, upsertVariosDesdeGameNight generaría un id distinto y duplicaría la fila.
+export async function renombrarCampeonatoEnCobranza(de, a) {
+  const store = getStore("tols-cobranza");
+  const raw = await store.get("data", { type: "json" });
+  const actual = normalizar(raw);
+  const cambia = actual.movimientos.some((m) => m.campeonato === de);
+  if (!cambia) return;
+  const prefijoViejo = `gn-${de}-`;
+  actual.movimientos = actual.movimientos.map((m) => {
+    if (m.campeonato !== de) return m;
+    const nuevoId = m.id.startsWith(prefijoViejo) ? `gn-${a}-${m.id.slice(prefijoViejo.length)}` : m.id;
+    return { ...m, campeonato: a, id: nuevoId };
+  });
+  await store.setJSON("data", actual);
+  const completa = await respuestaCompleta(actual);
+  await syncCobranza(filasParaExcel(completa));
+}
+
 export default async (req) => {
   const store = getStore("tols-cobranza");
 

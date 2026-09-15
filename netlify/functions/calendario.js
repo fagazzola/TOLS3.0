@@ -25,6 +25,19 @@ async function conTemporadaCompletada(data) {
   }
 }
 
+// usada por campeonatos.js al renombrar un campeonato: remapea torneos[].temporada de "de" a "a" y
+// vuelve a guardar/sincronizar. Se llama server-a-server, nunca desde el cliente directamente.
+export async function renombrarCampeonatoEnCalendario(de, a) {
+  const store = getStore("tols-calendario");
+  const raw = await store.get("data", { type: "json" });
+  if (!raw || !Array.isArray(raw.torneos)) return;
+  const cambia = raw.torneos.some((t) => t.temporada === de);
+  if (!cambia) return;
+  const actualizado = { ...raw, torneos: raw.torneos.map((t) => (t.temporada === de ? { ...t, temporada: a } : t)) };
+  await store.setJSON("data", actualizado);
+  await syncCalendario(actualizado);
+}
+
 function validar(data) {
   if (!data || !Array.isArray(data.torneos)) return "Formato inválido: falta el arreglo de torneos.";
   for (const t of data.torneos) {

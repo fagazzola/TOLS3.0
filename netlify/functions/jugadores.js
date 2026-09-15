@@ -20,7 +20,6 @@ function normalizarUno(j) {
     tipoUsuario: String(j?.tipoUsuario || "Jugador").trim(),
     fecNac: String(j?.fecNac || "").trim(),
     edad: Number(j?.edad) || 0,
-    emoticon: String(j?.emoticon || "🎲"),
     fechaRegistro: String(j?.fechaRegistro || "").trim(),
     estatus: String(j?.estatus || "Activo").trim(),
     host: Boolean(j?.host),
@@ -28,7 +27,7 @@ function normalizarUno(j) {
   };
 }
 
-function normalizar(data) {
+export function normalizar(data) {
   const lista = Array.isArray(data?.jugadores) ? data.jugadores : Array.isArray(seed.jugadores) ? seed.jugadores : [];
   return { jugadores: lista.map(normalizarUno) };
 }
@@ -138,7 +137,6 @@ export default async (req) => {
       if (body.aliasJugador !== undefined) editable.aliasJugador = String(body.aliasJugador || "").trim();
       if (body.aliasPokerStars !== undefined) editable.aliasPokerStars = String(body.aliasPokerStars || "").trim();
       if (body.telefono !== undefined) editable.telefono = String(body.telefono || "").trim();
-      if (body.emoticon !== undefined) editable.emoticon = String(body.emoticon || "🎲").trim();
       if (body.fecNac !== undefined) {
         editable.fecNac = String(body.fecNac || "").trim();
         const edadCalc = edadDesdeFecNac(editable.fecNac);

@@ -1,8 +1,34 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/campeonatos.json";
 import { syncCampeonatos } from "./lib/msgraph.js";
+import { renombrarCampeonatoEnTablero } from "./tablero.js";
+import { renombrarCampeonatoEnCalendario } from "./calendario.js";
+import { renombrarCampeonatoEnCobranza } from "./cobranza.js";
+import { renombrarCampeonatoEnGameNight } from "./gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
+
+function isoHoy() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// mismo criterio que usa el Tablero de Control (estatusCampeonato en Tablero.jsx) para saber si un
+// campeonato ya empezó a jugarse — se reimplementa aquí porque esta validación tiene que vivir en el
+// servidor (el cliente puede tener datos desactualizados) y no se puede importar un componente .jsx.
+async function estaEnCurso(nombre) {
+  try {
+    const calStore = getStore("tols-calendario");
+    const cal = await calStore.get("data", { type: "json" });
+    const fechas = (cal?.torneos || []).filter((t) => t.temporada === nombre);
+    if (fechas.length === 0) return false;
+    const hoy = isoHoy();
+    const jugadas = fechas.filter((t) => t.fecha < hoy).length;
+    return jugadas > 0 && jugadas < fechas.length;
+  } catch (e) {
+    return false;
+  }
+}
 
 // limpia la lista: quita espacios y duplicados, sin tronar si viene algo raro. "activo" es el
 // campeonato que gobierna el sitio (el que se ve/edita en el Tablero de Control) — el mismo que debe
@@ -75,6 +101,59 @@ export default async (req) => {
     } catch (e) {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
+
+    // accion "renombrar": renombra un campeonato en un solo paso, en cascada a TODOS los módulos que
+    // guardan su nombre (Tablero, Calendario, Cobranza y Game Night) — antes cada pantalla lo hacía por
+    // su cuenta y Calendario/Cobranza/Game Night se quedaban con el nombre viejo. Bloqueado si el
+    // campeonato ya está "en curso" (algunas fechas jugadas y otras no) para no partir una temporada
+    // a medias.
+    if (body?.accion === "renombrar") {
+      const de = String(body.de || "").trim();
+      const a = String(body.a || "").trim();
+      if (!de || !a) {
+        return new Response(JSON.stringify({ error: "Faltan los nombres para renombrar." }), { status: 400, headers: HEADERS });
+      }
+      const actual = normalizar(await store.get("data", { type: "json" }));
+      if (!actual.nombres.includes(de)) {
+        return new Response(JSON.stringify({ error: `No existe el campeonato "${de}".` }), { status: 400, headers: HEADERS });
+      }
+      if (a !== de && actual.nombres.includes(a)) {
+        return new Response(JSON.stringify({ error: `Ya existe un campeonato "${a}".` }), { status: 400, headers: HEADERS });
+      }
+      if (a === de) {
+        return new Response(JSON.stringify(actual), { headers: HEADERS });
+      }
+      if (await estaEnCurso(de)) {
+        return new Response(JSON.stringify({ error: `No puedes renombrar "${de}" mientras está en curso.` }), { status: 400, headers: HEADERS });
+      }
+
+      const nuevo = normalizar({
+        nombres: actual.nombres.map((n) => (n === de ? a : n)),
+        activo: actual.activo === de ? a : actual.activo,
+      });
+      await store.setJSON("data", nuevo);
+      await syncCampeonatos(nuevo);
+
+      // cascada best-effort: si alguno de estos falla no se revierte el renombre principal (ya quedó
+      // guardado arriba), pero se informan las advertencias para que Federico sepa qué revisar a mano
+      const avisos = [];
+      const cascada = [
+        ["Tablero", () => renombrarCampeonatoEnTablero(de, a)],
+        ["Calendario", () => renombrarCampeonatoEnCalendario(de, a)],
+        ["Cobranza", () => renombrarCampeonatoEnCobranza(de, a)],
+        ["Game Night", () => renombrarCampeonatoEnGameNight(de, a)],
+      ];
+      for (const [nombreModulo, fn] of cascada) {
+        try {
+          await fn();
+        } catch (e) {
+          avisos.push(`${nombreModulo}: ${e.message || e}`);
+        }
+      }
+
+      return new Response(JSON.stringify({ ...nuevo, avisos }), { headers: HEADERS });
+    }
+
     const nombresLimpio = { nombres: (Array.isArray(body?.nombres) ? body.nombres : []).map((n) => String(n || "").trim()) };
     const problema = validar(nombresLimpio);
     if (problema) {

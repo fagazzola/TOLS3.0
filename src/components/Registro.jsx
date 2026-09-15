@@ -3,7 +3,6 @@ import CampoPassword from "./CampoPassword.jsx";
 
 const API_CODIGO = "/api/jugadores-codigo";
 const API_VERIFICAR = "/api/jugadores-verificar";
-const EMOTICONES = ["🃏", "♠️", "♣️", "♥️", "♦️", "🎲", "🍺", "🥃", "🍕", "🌮", "🔥", "💰"];
 const DURACION_S = 30;
 
 function vacio() {
@@ -16,7 +15,6 @@ function vacio() {
     password: "",
     password2: "",
     fecNac: "",
-    emoticon: EMOTICONES[0],
   };
 }
 
@@ -181,21 +179,6 @@ export default function Registro({ onRegistroExitoso, onIrALogin }) {
               </div>
               <div style={{ flex: 1 }}>
                 <CampoPassword label="Confirmar contraseña" value={datos.password2} onChange={(e) => setDatos({ ...datos, password2: e.target.value })} />
-              </div>
-            </div>
-            <div className="login-field">
-              <label>Emoticón</label>
-              <div className="emoji-picker">
-                {EMOTICONES.map((em) => (
-                  <button
-                    type="button"
-                    key={em}
-                    className={"emoji-opt" + (datos.emoticon === em ? " selected" : "")}
-                    onClick={() => setDatos({ ...datos, emoticon: em })}
-                  >
-                    {em}
-                  </button>
-                ))}
               </div>
             </div>
             <button className="btn btn-primary login-submit" disabled={enviando} onClick={pedirCodigo}>

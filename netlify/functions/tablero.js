@@ -133,6 +133,20 @@ function validarUno(data) {
   return null;
 }
 
+// usada por campeonatos.js al renombrar un campeonato: mueve la llave del mapa de "de" a "a" (si "de"
+// no tenía datos guardados en el Tablero, no hace nada — no todos los campeonatos tienen configuración
+// propia todavía). Comparte la misma lógica que la acción "renombrar" del endpoint HTTP de abajo.
+export async function renombrarCampeonatoEnTablero(de, a) {
+  const store = getStore("tols-tablero");
+  const raw = await store.get("data", { type: "json" });
+  const mapa = normalizarMapa(raw);
+  if (!mapa[de] || de === a) return;
+  if (!mapa[a]) mapa[a] = mapa[de];
+  delete mapa[de];
+  await store.setJSON("data", mapa);
+  await syncTablero(mapa);
+}
+
 export default async (req) => {
   const store = getStore("tols-tablero");
 

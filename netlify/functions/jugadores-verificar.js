@@ -4,7 +4,6 @@ import { normalizar as normalizarPerfiles, validar as validarPerfiles } from "./
 import { syncJugadores, syncPerfiles } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
-const EMOTICONES = ["🃏", "♠️", "♣️", "♥️", "♦️", "🎲", "🍺", "🥃", "🍕", "🌮", "🔥", "💰"];
 
 function calcularEdad(fecNac) {
   const nac = new Date(fecNac + "T00:00:00");
@@ -24,7 +23,6 @@ function validarDatos(d) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.correo || "").trim())) return "El correo electrónico no es válido.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.fecNac || "").trim())) return "La fecha de nacimiento no es válida.";
   if (!d.password || d.password.length < 6) return "La contraseña debe tener al menos 6 caracteres.";
-  if (!d.emoticon || !EMOTICONES.includes(d.emoticon)) return "Elige un emoticón de la lista.";
   return null;
 }
 
@@ -86,7 +84,6 @@ export default async (req) => {
     tipoUsuario: "Jugador",
     fecNac: String(body.fecNac).trim(),
     edad: calcularEdad(body.fecNac),
-    emoticon: body.emoticon,
     fechaRegistro: new Date().toISOString().slice(0, 10),
     estatus: "Activo",
   };

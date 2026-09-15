@@ -4,6 +4,11 @@ import { MoneyBadge } from "./PokerArt.jsx";
 
 const API = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
+const API_COBRANZA = "/api/cobranza";
+
+function money(n) {
+  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+}
 
 const diasCortos = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const mesesLargos = [
@@ -47,6 +52,7 @@ function buildGrid(viewMonth) {
 export default function Calendario({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod1");
   const [data, setData] = useState(null);
+  const [cobranza, setCobranza] = useState(null);
   const [campeonatos, setCampeonatos] = useState([]);
   // el campeonato "activo" es el que gobierna el sitio — el mismo que se ve/edita en el Tablero de
   // Control (tols-campeonatos). El Calendario ya no lo adivina por su cuenta a partir de las fechas.
@@ -101,6 +107,13 @@ export default function Calendario({ session, perfiles }) {
       })
       .catch((e) => setLoadError(e.message || "Error al cargar el calendario."))
       .finally(() => setLoading(false));
+
+    // ganancias (Cobranza/Game Night) — best-effort: si falla, el recuadro de ganancias simplemente
+    // no aparece, nunca bloquea la carga del calendario en sí
+    fetch(API_COBRANZA)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => setCobranza(json))
+      .catch(() => setCobranza(null));
   }, []);
 
   if (loading) return <p className="subtitle">Cargando calendario…</p>;
@@ -221,6 +234,22 @@ export default function Calendario({ session, perfiles }) {
     return { texto: "En curso", clase: "badge-nivel-lectura" };
   }
 
+  // Ganancias (Cobranza/Game Night) del jugador en sesión — mismo criterio que el resto del sitio para
+  // identificar al jugador (session.usuario, comparado contra el correo de Cobranza). Se asume que
+  // administradores también son jugadores de la liga (mismo supuesto que ya usa el resto de esta
+  // pantalla) y por eso ven sus propias ganancias igual que un Jugador.
+  const miCorreo = (session.usuario || "").trim().toLowerCase();
+  const misMovimientos = (cobranza?.movimientos || []).filter((m) => m.correo === miCorreo);
+  const misMovimientosCampeonato = misMovimientos.filter((m) => !campeonatoActivo || m.campeonato === campeonatoActivo);
+  const gananciasAcumuladas = misMovimientosCampeonato.reduce((a, m) => a + (Number(m.totalGanado) || 0), 0);
+
+  // premio ganado por el jugador en sesión en UNA fecha puntual — null si no hay registro de Cobranza
+  // para esa fecha (torneo futuro, o pasado pero todavía no capturado en Game Night)
+  function gananciaDeFecha(fechaIso) {
+    const m = misMovimientosCampeonato.find((x) => x.fecha === fechaIso);
+    return m ? Number(m.totalGanado) || 0 : null;
+  }
+
   return (
     <div>
       <div className="headtop">
@@ -234,39 +263,44 @@ export default function Calendario({ session, perfiles }) {
           jugadores de la liga; compacto a propósito para dejarle más espacio a la cuadrícula (modo
           administrador) o a la lista de fechas (modo jugador) que vienen justo debajo */}
       <div className="cal-resumen-sticky">
-        <div className="campeonato-banner campeonato-banner-row">
-          <div>
-            {campeonatoActivo ? <>Campeonato: <strong>{campeonatoActivo}</strong></> : "Todavía no hay un campeonato definido."}
-            {" "}
+        <div className="cal-top-card">
+          <div className="cal-top-main">
+            <span className="cal-top-campeonato">
+              {campeonatoActivo || "Sin campeonato definido"}
+            </span>
             <span className={"badge " + estatusTorneo().clase}>{estatusTorneo().texto}</span>
+            <span className="cal-top-jugador">{session.nombre}</span>
           </div>
-          <div className="campeonato-banner-jugador">{session.nombre}</div>
+          <div className="cal-ganancia-box">
+            <span className="cal-ganancia-label">Ganancias acumuladas</span>
+            <span className="cal-ganancia-value">{money(gananciasAcumuladas)}</span>
+          </div>
         </div>
 
-        <div className="stats stats-compact">
-          <div className="stat">
-            <div className="stat-label">Fechas</div>
-            <div className="stat-value">{torneosActivo.length}</div>
+        <div className="cal-mini-stats">
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Fechas</div>
+            <div className="cal-mini-stat-value">{torneosActivo.length}</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Main Events</div>
-            <div className="stat-value">{mainCount} <small>de {torneosActivo.length}</small></div>
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Main Events</div>
+            <div className="cal-mini-stat-value">{mainCount}/{torneosActivo.length}</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Jugadas</div>
-            <div className="stat-value">{jugadosCount} <small>de {torneosActivo.length}</small></div>
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Jugadas</div>
+            <div className="cal-mini-stat-value">{jugadosCount}/{torneosActivo.length}</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Avance del torneo</div>
-            <div className="stat-value">{avancePct}%</div>
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Avance</div>
+            <div className="cal-mini-stat-value">{avancePct}%</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Puntos en el torneo</div>
-            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Puntos</div>
+            <div className="cal-mini-stat-value cal-mini-stat-proximamente">Próx.</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Posición en la tabla</div>
-            <div className="stat-value stat-value-proximamente">Próximamente</div>
+          <div className="cal-mini-stat">
+            <div className="cal-mini-stat-label">Posición</div>
+            <div className="cal-mini-stat-value cal-mini-stat-proximamente">Próx.</div>
           </div>
         </div>
       </div>
@@ -317,6 +351,15 @@ export default function Calendario({ session, perfiles }) {
                           {ev.temporada && <div className="cal-chip-temporada">{ev.temporada}</div>}
                         </div>
                       ))}
+                      {(() => {
+                        const g = gananciaDeFecha(iso(cell.date));
+                        return g !== null ? (
+                          <div className="cal-chip cal-chip-ganancia">
+                            <MoneyBadge size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />
+                            {money(g)}
+                          </div>
+                        ) : null;
+                      })()}
                       {esPago && (
                         <div
                           className="cal-chip cal-chip-pago"
@@ -362,6 +405,14 @@ export default function Calendario({ session, perfiles }) {
                     <div className="cal-list-resultado">
                       <span>Posición: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
                       <span>Puntos: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
+                      <span>
+                        Ganancia:{" "}
+                        {(() => {
+                          const g = gananciaDeFecha(t.fecha);
+                          if (g !== null) return <span className="cal-ganancia-inline">{money(g)}</span>;
+                          return <span className="stat-value-proximamente">{pasado ? "Sin registro" : "Próximamente"}</span>;
+                        })()}
+                      </span>
                     </div>
                   </div>
                 </div>

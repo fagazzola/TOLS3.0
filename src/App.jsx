@@ -247,8 +247,14 @@ export default function App() {
   }
 
   // todas las pestañas se muestran siempre (para tener el panorama completo de la liga);
-  // las que el rol no tiene permitidas aparecen deshabilitadas en vez de ocultarse
-  const tabsConPermiso = TABS.map((t) => ({ ...t, permitido: puedeVerTab(t) }));
+  // las que el rol no tiene permitidas aparecen deshabilitadas en vez de ocultarse — EXCEPCIÓN: el
+  // rol "Jugador" tiene una experiencia reducida a propósito (pedido de Federico) y solo debe ver
+  // Calendario, Game Night y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
+  // no solo se deshabilita.
+  const SOLO_JUGADOR_TABS = ["calendario", "gamenight", "miperfil"];
+  const tabsConPermiso = TABS.map((t) => ({ ...t, permitido: puedeVerTab(t) })).filter(
+    (t) => session.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key)
+  );
   const permitidas = tabsConPermiso.filter((t) => t.permitido);
   const active = permitidas.find((t) => t.key === tab) || permitidas[0];
 

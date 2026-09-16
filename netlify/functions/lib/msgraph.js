@@ -13,6 +13,30 @@ function encodePath(path) {
 // inverso de NIVEL_LABEL (ej. "Sólo lectura" → "lectura") para importar la hoja Permisos de vuelta
 const NIVEL_LABEL_INV = Object.fromEntries(Object.entries(NIVEL_LABEL).map(([k, v]) => [v, k]));
 
+// 36ª entrega: Federico reportó que "Fecha de Nacimiento" nunca se recuperaba desde el Excel en Mi
+// Perfil, aunque "Teléfono" sí. Causa: en la hoja real, "Fecha de Nacimiento" es una celda con formato
+// de fecha de Excel (confirmado con openpyxl: `datetime.datetime(1973, 4, 14, 0, 0)`), y el endpoint de
+// Graph que se usa para leer rangos (`range().values`) devuelve esas celdas como el número serial de
+// Excel (días desde el 30/12/1899, arrastrando el bug del año bisiesto 1900 de Excel por compatibilidad
+// — la misma fórmula que usa el propio Excel), no como texto "AAAA-MM-DD". `String(valor)` sobre ese
+// número daba algo como "26768", que no calza con el formato que espera `<input type="date">` (por eso
+// el campo se veía vacío en el sitio) ni con la validación `/^\d{4}-\d{2}-\d{2}$/` de `edadDesdeFecNac`.
+// "Teléfono" sí se recuperaba porque esa columna es numérica simple (ej. 5555555555), no una fecha, así
+// que `String(valor)` ya daba el resultado correcto.
+function fechaExcelAISO(valor) {
+  if (valor === null || valor === undefined || valor === "") return "";
+  if (typeof valor === "string") {
+    const m = valor.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : "";
+  }
+  if (typeof valor === "number" && Number.isFinite(valor)) {
+    const ms = Date.UTC(1899, 11, 30) + Math.round(valor) * 86400000;
+    const fecha = new Date(ms);
+    return Number.isNaN(fecha.getTime()) ? "" : fecha.toISOString().slice(0, 10);
+  }
+  return "";
+}
+
 function colLetter(n) {
   let s = "";
   while (n > 0) {
@@ -240,13 +264,13 @@ export async function leerJugadoresDesdeExcel() {
       telefono: String(f[5] || "").trim(),
       correo: String(f[6] || "").trim().toLowerCase(),
       tipoUsuario: String(f[7] || "Jugador").trim() || "Jugador",
-      fecNac: String(f[8] || "").trim(),
+      fecNac: fechaExcelAISO(f[8]),
       edad: Number(f[9]) || 0,
       manoFavorita: String(f[10] || "").trim(),
-      fechaRegistro: String(f[11] || "").trim(),
+      fechaRegistro: fechaExcelAISO(f[11]) || String(f[11] || "").trim(),
       estatus: String(f[12] || "Activo").trim() || "Activo",
       host: String(f[13] || "").trim().toLowerCase() === "sí" || String(f[13] || "").trim().toLowerCase() === "si",
-      hostFecha: String(f[14] || "").trim(),
+      hostFecha: fechaExcelAISO(f[14]) || String(f[14] || "").trim(),
     }));
 }
 

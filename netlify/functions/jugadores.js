@@ -61,8 +61,16 @@ function conHostExpirado(data) {
 // pisa un dato que el jugador ya haya cargado desde el sitio. Si la lectura a Excel falla, no bloquea la
 // carga (mismo criterio de tolerancia a fallos que el resto del sitio). Una vez relleno, se guarda en
 // tols-jugadores para no tener que volver a leer el Excel en cada carga futura.
+// una fecha se considera "buena" solo si ya viene en formato AAAA-MM-DD — cualquier otra cosa (vacío,
+// o el número serial de Excel que se colaba antes del fix de fechaExcelAISO en msgraph.js) cuenta como
+// faltante, para que una fecha que haya quedado mal guardada por versiones anteriores se autocorrija
+// solo en el próximo GET, sin que Federico tenga que hacer nada.
+function fecEsValida(f) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(f || "");
+}
+
 function faltanDatosBasicos(jugadores) {
-  return jugadores.some((j) => !j.telefono || !j.fecNac || !j.aliasJugador || !j.aliasPokerStars);
+  return jugadores.some((j) => !j.telefono || !fecEsValida(j.fecNac) || !j.aliasJugador || !j.aliasPokerStars);
 }
 
 async function backfillDesdeExcel(jugadores) {
@@ -77,7 +85,7 @@ async function backfillDesdeExcel(jugadores) {
       if (!r.aliasJugador && ex.aliasJugador) { r.aliasJugador = ex.aliasJugador; cambio = true; }
       if (!r.aliasPokerStars && ex.aliasPokerStars) { r.aliasPokerStars = ex.aliasPokerStars; cambio = true; }
       if (!r.telefono && ex.telefono) { r.telefono = ex.telefono; cambio = true; }
-      if (!r.fecNac && ex.fecNac) {
+      if (!fecEsValida(r.fecNac) && fecEsValida(ex.fecNac)) {
         r.fecNac = ex.fecNac;
         if (!r.edad && ex.edad) r.edad = ex.edad;
         cambio = true;

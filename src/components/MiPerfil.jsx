@@ -8,6 +8,15 @@ const API_RESET_CODIGO = "/api/reset-codigo";
 const API_RESET_CONFIRMAR = "/api/reset-confirmar";
 const DURACION_S = 300; // 5 minutos — mismo código de un solo uso que ya usa "Olvidé mi contraseña" en Login
 
+// 36ª entrega: Federico pidió que el Teléfono se vea en pantalla como "## #### ####". El dato en sí se
+// sigue guardando como 10 dígitos sin espacios (mismo formato que ya valida Registro.jsx con
+// `/^\d{10}$/`) — el formato con espacios es solo para mostrarlo/tipearlo más cómodo, nunca lo que se
+// manda al servidor.
+function formatTelefono(v) {
+  const d = String(v || "").replace(/\D/g, "").slice(0, 10);
+  return [d.slice(0, 2), d.slice(2, 6), d.slice(6, 10)].filter(Boolean).join(" ");
+}
+
 // campos que el propio jugador puede editar desde acá. Deliberadamente NO incluye id, nombre,
 // correo, tipoUsuario, fechaRegistro ni estatus — esos son de solo administración y ni siquiera se
 // muestran en esta pantalla.
@@ -252,7 +261,13 @@ export default function MiPerfil({ session }) {
             </div>
             <div className="login-field" style={{ maxWidth: 180 }}>
               <label>Teléfono</label>
-              <input className="field" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
+              <input
+                className="field"
+                inputMode="numeric"
+                placeholder="## #### ####"
+                value={formatTelefono(form.telefono)}
+                onChange={(e) => setForm({ ...form, telefono: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+              />
             </div>
           </div>
           <div className="login-field-row">

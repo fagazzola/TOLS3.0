@@ -24,6 +24,10 @@ function normalizarUno(j) {
     estatus: String(j?.estatus || "Activo").trim(),
     host: Boolean(j?.host),
     hostFecha: String(j?.hostFecha || "").trim(),
+    // 34ª entrega: mano inicial de Texas Hold'em favorita del jugador (ej. "AKs", "77"), elegida desde
+    // "Mi Perfil" con el selector de rango de manos — puramente informativo/de perfil, no afecta ningún
+    // cálculo del sitio. Sync a Excel pendiente de confirmar la columna exacta con Federico.
+    manoFavorita: String(j?.manoFavorita || "").trim(),
   };
 }
 
@@ -142,6 +146,7 @@ export default async (req) => {
         const edadCalc = edadDesdeFecNac(editable.fecNac);
         if (edadCalc !== null) editable.edad = edadCalc;
       }
+      if (body.manoFavorita !== undefined) editable.manoFavorita = String(body.manoFavorita || "").trim();
       actual.jugadores[idx] = editable;
       await store.setJSON("data", actual);
       await syncJugadores(actual.jugadores);

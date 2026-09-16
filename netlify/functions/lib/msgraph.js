@@ -137,11 +137,13 @@ async function ocultarColumnaTexto(sheetName, columna, startRow, endRow) {
 // Federico ("finalmente aplica como base de datos"). Una cuenta de acceso que no es de ningún jugador
 // (ej. un administrador que nunca se autorregistró) se agrega igual, como fila aparte con los campos
 // de jugador vacíos.
-// Columnas de la hoja única "Jugadores" del Excel (0-indexed, desde la 33ª entrega — se quitó la
-// columna Emoticón que vivía antes en la posición 10):
+// Columnas de la hoja única "Jugadores" del Excel (0-indexed). Federico agregó a mano una columna
+// nueva "Mano Favorita" en K (34ª entrega, 2026-09-16), lo que corrió una posición a la derecha todo
+// lo que antes vivía de K en adelante (Fecha de Registro pasó de K a L, ... Contraseña de O a P,
+// Perfil de P a Q) — confirmado leyendo el encabezado real del Excel que subió Federico, no adivinado:
 // 0 Id, 1 Nombre y Apellido, 2 Alias Jugador, 3 Alias PokerStars, 4 Padrino, 5 Teléfono,
-// 6 Correo Electrónico, 7 Tipo de Usuario, 8 Fecha de Nacimiento, 9 Edad, 10 Fecha de Registro,
-// 11 Estatus, 12 Host, 13 Host Fecha, 14 Contraseña, 15 Perfil
+// 6 Correo Electrónico, 7 Tipo de Usuario, 8 Fecha de Nacimiento, 9 Edad, 10 Mano Favorita,
+// 11 Fecha de Registro, 12 Estatus, 13 Host, 14 Host Fecha, 15 Contraseña, 16 Perfil
 function filasJugadoresUnificadas(jugadores, perfilesData) {
   const usuarios = perfilesData?.usuarios || [];
   const porCorreo = new Map();
@@ -157,7 +159,7 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
     const u = porCorreo.get(correo);
     filas.push([
       j.id, j.nombre, j.aliasJugador, j.aliasPokerStars, j.padrino || "", j.telefono,
-      j.correo, j.tipoUsuario, j.fecNac, j.edad, j.fechaRegistro || "",
+      j.correo, j.tipoUsuario, j.fecNac, j.edad, j.manoFavorita || "", j.fechaRegistro || "",
       j.estatus || "Activo", j.host ? "Sí" : "No", j.hostFecha || "",
       u ? u.password : "", u ? u.rol : "",
     ]);
@@ -165,7 +167,7 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
   for (const u of usuarios) {
     const correo = String(u.correo || u.usuario || "").trim().toLowerCase();
     if (correo && !correosConJugador.has(correo)) {
-      filas.push(["", u.nombre || "", "", "", "", "", u.correo || u.usuario || "", "", "", "", "", "", "", "", u.password, u.rol]);
+      filas.push(["", u.nombre || "", "", "", "", "", u.correo || u.usuario || "", "", "", "", "", "", "", "", "", u.password, u.rol]);
     }
   }
   return filas;
@@ -174,14 +176,7 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
 async function escribirJugadoresUnificado(jugadores, perfilesData) {
   const filas = filasJugadoresUnificadas(jugadores, perfilesData);
   await writeSheetTable("Jugadores", filas);
-  await ocultarColumnaTexto("Jugadores", "O", 2, 1 + filas.length); // O = Contraseña (columna 15) — antes era P, con la columna Emoticón todavía adentro
-  // limpieza única (33ª entrega): la hoja tenía una columna más (Emoticón) antes de esta entrega, así
-  // que Perfil quedó una columna a la izquierda de donde estaba (de Q a P) — se limpia Q a mano una vez
-  // para que no se quede ahí el valor viejo de Perfil sin que nada lo vuelva a escribir ni a borrar
-  await graphFetch(`/workbook/worksheets('${encodeURIComponent("Jugadores")}')/range(address='Q2:Q401')/clear`, {
-    method: "POST",
-    body: JSON.stringify({ applyTo: "Contents" }),
-  }).catch(() => {});
+  await ocultarColumnaTexto("Jugadores", "P", 2, 1 + filas.length); // P = Contraseña (columna 16) — corrida una posición desde que Federico insertó "Mano Favorita" en K
 }
 
 // lee la hoja única "Jugadores" (Correo Electrónico + Contraseña + Perfil) y la hoja Permisos del
@@ -196,16 +191,16 @@ export async function leerUsuariosYPermisosDesdeExcel() {
   ]);
 
   // columnas (0-indexed, ver el mapa arriba): 1=Nombre y Apellido, 6=Correo Electrónico,
-  // 14=Contraseña, 15=Perfil
+  // 15=Contraseña, 16=Perfil
   const usuarios = filasJugadores
     .slice(1)
-    .filter((f) => f[6] && f[15])
+    .filter((f) => f[6] && f[16])
     .map((f) => ({
       nombre: String(f[1] || "").trim(),
       usuario: String(f[6] || "").trim(),
       correo: String(f[6] || "").trim(),
-      password: String(f[14] || ""),
-      rol: String(f[15] || "").trim(),
+      password: String(f[15] || ""),
+      rol: String(f[16] || "").trim(),
     }));
 
   // Permisos: Perfil, Tablero de Control, Calendario, Cobranza, Usuarios, Game Night, Jugadores
@@ -247,10 +242,11 @@ export async function leerJugadoresDesdeExcel() {
       tipoUsuario: String(f[7] || "Jugador").trim() || "Jugador",
       fecNac: String(f[8] || "").trim(),
       edad: Number(f[9]) || 0,
-      fechaRegistro: String(f[10] || "").trim(),
-      estatus: String(f[11] || "Activo").trim() || "Activo",
-      host: String(f[12] || "").trim().toLowerCase() === "sí" || String(f[12] || "").trim().toLowerCase() === "si",
-      hostFecha: String(f[13] || "").trim(),
+      manoFavorita: String(f[10] || "").trim(),
+      fechaRegistro: String(f[11] || "").trim(),
+      estatus: String(f[12] || "Activo").trim() || "Activo",
+      host: String(f[13] || "").trim().toLowerCase() === "sí" || String(f[13] || "").trim().toLowerCase() === "si",
+      hostFecha: String(f[14] || "").trim(),
     }));
 }
 

@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import CampoPassword from "./CampoPassword.jsx";
+import SelectorManoFavorita from "./SelectorManoFavorita.jsx";
 
 const API_JUG = "/api/jugadores";
 const API_COBRANZA = "/api/cobranza";
+const API_RESET_CODIGO = "/api/reset-codigo";
+const API_RESET_CONFIRMAR = "/api/reset-confirmar";
+const DURACION_S = 300; // 5 minutos — mismo código de un solo uso que ya usa "Olvidé mi contraseña" en Login
 
 // campos que el propio jugador puede editar desde acá. Deliberadamente NO incluye id, nombre,
 // correo, tipoUsuario, fechaRegistro ni estatus — esos son de solo administración y ni siquiera se
@@ -15,10 +20,35 @@ export default function MiPerfil({ session }) {
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [guardadoOk, setGuardadoOk] = useState(false);
+  const [manoModalAbierto, setManoModalAbierto] = useState(false);
+
+  // Cambiar contraseña: reutiliza el mismo flujo de código por correo + nueva contraseña que ya existe
+  // en Login ("¿Olvidaste tu contraseña?") — mismos endpoints (/api/reset-codigo, /api/reset-confirmar),
+  // que actualizan la cuenta en Usuarios (tols-perfiles) y de ahí sincronizan a la misma hoja "Jugadores"
+  // del Excel que ya manda sobre el resto de esta pantalla, así que no hace falta ningún dato nuevo.
+  const [cambioVista, setCambioVista] = useState("cerrado"); // "cerrado" | "codigo"
+  const [enviandoCodigo, setEnviandoCodigo] = useState(false);
+  const [errorCambio, setErrorCambio] = useState("");
+  const [cambioOk, setCambioOk] = useState(false);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [nuevaPassword, setNuevaPassword] = useState("");
+  const [nuevaPassword2, setNuevaPassword2] = useState("");
+  const [confirmandoPass, setConfirmandoPass] = useState(false);
+  const [segundosRestantes, setSegundosRestantes] = useState(DURACION_S);
+  const refs = useRef([]);
 
   useEffect(() => {
     cargar();
   }, []);
+
+  useEffect(() => {
+    if (cambioVista !== "codigo") return;
+    if (segundosRestantes <= 0) return;
+    const t = setTimeout(() => setSegundosRestantes((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cambioVista, segundosRestantes]);
+
+  const expiradoCambio = cambioVista === "codigo" && segundosRestantes <= 0;
 
   function cargar() {
     setLoading(true);
@@ -41,6 +71,7 @@ export default function MiPerfil({ session }) {
           aliasPokerStars: mio.aliasPokerStars || "",
           telefono: mio.telefono || "",
           fecNac: mio.fecNac || "",
+          manoFavorita: mio.manoFavorita || "",
           cuenta: fin.cuenta || "",
           banco: fin.banco || "",
           tipoCuenta: fin.tipoCuenta || "",
@@ -66,6 +97,7 @@ export default function MiPerfil({ session }) {
           aliasPokerStars: form.aliasPokerStars,
           telefono: form.telefono,
           fecNac: form.fecNac,
+          manoFavorita: form.manoFavorita,
         }),
       });
       const j1 = await r1.json();
@@ -93,6 +125,88 @@ export default function MiPerfil({ session }) {
       setError(e.message || "No se pudo guardar.");
     } finally {
       setGuardando(false);
+    }
+  }
+
+  function elegirManoFavorita(codigo) {
+    setForm({ ...form, manoFavorita: codigo });
+    setManoModalAbierto(false);
+  }
+
+  async function enviarCodigoCambio() {
+    setErrorCambio("");
+    setCambioOk(false);
+    setEnviandoCodigo(true);
+    try {
+      const r = await fetch(API_RESET_CODIGO, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ correo }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo enviar el código.");
+      setOtp(["", "", "", "", "", ""]);
+      setNuevaPassword("");
+      setNuevaPassword2("");
+      setSegundosRestantes(DURACION_S);
+      setCambioVista("codigo");
+      setTimeout(() => refs.current[0]?.focus(), 50);
+    } catch (e) {
+      setErrorCambio(e.message || "No se pudo enviar el código.");
+    } finally {
+      setEnviandoCodigo(false);
+    }
+  }
+
+  function handleOtpChange(i, valor) {
+    const v = valor.replace(/\D/g, "").slice(0, 1);
+    setOtp((prev) => {
+      const next = [...prev];
+      next[i] = v;
+      return next;
+    });
+    if (v && i < 5) refs.current[i + 1]?.focus();
+  }
+
+  function handleOtpKeyDown(i, e) {
+    if (e.key === "Backspace" && !otp[i] && i > 0) refs.current[i - 1]?.focus();
+  }
+
+  function cancelarCambioPassword() {
+    setCambioVista("cerrado");
+    setErrorCambio("");
+  }
+
+  async function confirmarCambioPassword() {
+    setErrorCambio("");
+    const codigo = otp.join("");
+    if (codigo.length !== 6) {
+      setErrorCambio("Ingresa los 6 dígitos del código.");
+      return;
+    }
+    if (nuevaPassword.length < 6) {
+      setErrorCambio("La nueva contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+    if (nuevaPassword !== nuevaPassword2) {
+      setErrorCambio("Las contraseñas no coinciden.");
+      return;
+    }
+    setConfirmandoPass(true);
+    try {
+      const r = await fetch(API_RESET_CONFIRMAR, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ correo, codigo, nuevaPassword }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo actualizar la contraseña.");
+      setCambioVista("cerrado");
+      setCambioOk(true);
+    } catch (e) {
+      setErrorCambio(e.message || "No se pudo actualizar la contraseña.");
+    } finally {
+      setConfirmandoPass(false);
     }
   }
 
@@ -140,9 +254,23 @@ export default function MiPerfil({ session }) {
               <label>Fecha de nacimiento</label>
               <input className="field" type="date" value={form.fecNac} onChange={(e) => setForm({ ...form, fecNac: e.target.value })} />
             </div>
+            <div className="login-field" style={{ maxWidth: 200 }}>
+              <label>Mano favorita</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="field field-readonly" style={{ maxWidth: 90, textAlign: "center", fontWeight: 600 }}>
+                  {form.manoFavorita || "—"}
+                </div>
+                <button type="button" className="btn btn-secondary btn-filtro" onClick={() => setManoModalAbierto(true)}>
+                  Elegir
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="subhead">Datos para cobros y depósitos</div>
+          <p className="section-sub" style={{ marginTop: 0 }}>
+            Sin estos datos no te podremos depositar en caso de que cobres en algún torneo.
+          </p>
           <div className="login-field-row">
             <div className="login-field" style={{ maxWidth: 200 }}>
               <label>Cuenta</label>
@@ -164,7 +292,87 @@ export default function MiPerfil({ session }) {
             </button>
           </div>
           {guardadoOk && <div className="check-line check-ok">Tus datos se guardaron correctamente.</div>}
+
+          <div className="subhead">Seguridad</div>
+          {cambioVista === "cerrado" && (
+            <>
+              <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+                <button className="btn btn-secondary" disabled={enviandoCodigo} onClick={enviarCodigoCambio}>
+                  {enviandoCodigo ? "Enviando código…" : "Cambiar contraseña"}
+                </button>
+              </div>
+              {errorCambio && <div className="login-error">{errorCambio}</div>}
+              {cambioOk && <div className="check-line check-ok">Tu contraseña se actualizó correctamente.</div>}
+            </>
+          )}
+
+          {cambioVista === "codigo" && (
+            <div className="note-box" style={{ maxWidth: 360 }}>
+              <p className="section-sub" style={{ marginTop: 0 }}>
+                Enviamos un código de 6 dígitos a <b>{correo}</b>. Tienes 5 minutos para usarlo.
+              </p>
+              <div className="otp-row">
+                {otp.map((v, i) => (
+                  <input
+                    key={i}
+                    ref={(el) => (refs.current[i] = el)}
+                    className="otp-box"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={v}
+                    disabled={expiradoCambio}
+                    onChange={(e) => handleOtpChange(i, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                  />
+                ))}
+              </div>
+              <div className="otp-timer">
+                {expiradoCambio ? (
+                  <span className="login-error">El código expiró.</span>
+                ) : (
+                  <span>Expira en {Math.floor(segundosRestantes / 60)}:{String(segundosRestantes % 60).padStart(2, "0")}</span>
+                )}
+              </div>
+
+              {!expiradoCambio && (
+                <>
+                  <CampoPassword label="Nueva contraseña" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} />
+                  <CampoPassword label="Confirmar nueva contraseña" value={nuevaPassword2} onChange={(e) => setNuevaPassword2(e.target.value)} />
+                </>
+              )}
+
+              {errorCambio && <div className="login-error">{errorCambio}</div>}
+
+              {!expiradoCambio ? (
+                <button className="btn btn-primary" disabled={confirmandoPass} onClick={confirmarCambioPassword}>
+                  {confirmandoPass ? "Guardando…" : "Confirmar"}
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button className="btn btn-secondary" style={{ flex: 1 }} onClick={enviarCodigoCambio} disabled={enviandoCodigo}>
+                    {enviandoCodigo ? "Reenviando…" : "Regenerar código"}
+                  </button>
+                  <button className="btn btn-secondary" style={{ flex: 1 }} onClick={cancelarCambioPassword}>
+                    Cancelar
+                  </button>
+                </div>
+              )}
+              {!expiradoCambio && (
+                <div className="login-hint">
+                  <button type="button" className="link-btn" onClick={cancelarCambioPassword}>Cancelar</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      )}
+
+      {manoModalAbierto && (
+        <SelectorManoFavorita
+          valorActual={form?.manoFavorita}
+          onCerrar={() => setManoModalAbierto(false)}
+          onSeleccionar={elegirManoFavorita}
+        />
       )}
     </div>
   );

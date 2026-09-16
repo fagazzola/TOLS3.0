@@ -95,6 +95,21 @@ export default function GameNight({ session, perfiles, esHost }) {
 
   const hostActual = jugadoresSitio.find((j) => j.host);
 
+  // Check-in de autoservicio: el propio jugador puede activarse a sí mismo (sin amonestación, nunca
+  // se manda manual:true) — pero SOLO el día de la jugada según la fecha del Calendario, para que no
+  // se pueda "adelantar" a una fecha futura ni reactivarse en una pasada. Los roles con permiso de
+  // escritura (Host/Administrador) ya tienen su propio botón "Activar (manual)" en la tabla de abajo,
+  // así que este banner solo aparece para quien NO tiene ese permiso — el caso normal de un Jugador.
+  const miCorreo = (session.usuario || "").trim().toLowerCase();
+  const miEntrada = jugadoresSitio.find((j) => j.correo === miCorreo);
+  const yaHiceCheckin = Boolean(torneoState.jugadores[miCorreo]?.checkin);
+  const puedoAutoCheckin = !editable && Boolean(miEntrada) && fechaSel === iso(new Date()) && !yaHiceCheckin;
+
+  function hacerMiCheckin() {
+    if (!miEntrada) return;
+    llamar({ accion: "checkin", correo: miCorreo, nombre: miEntrada.nombre, manual: false });
+  }
+
   const habilitados = jugadoresSitio
     .filter((j) => torneoState.jugadores[j.correo]?.checkin)
     .map((j) => ({ ...j, gn: estado.porJugador[j.correo] }))
@@ -200,18 +215,23 @@ export default function GameNight({ session, perfiles, esHost }) {
         <div>
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Game Night</h1>
-          <p className="subtitle">
-            Administración en vivo de la partida: check-in, buy-ins, re-buys, add-ons, eliminaciones y
-            mejor mano. Los montos y posiciones se calculan solos y se reflejan de inmediato en Cobranza.
-          </p>
         </div>
       </div>
 
-      {hostActual && <p className="gn-host-line">🎙 Host de la liga: <strong>{hostActual.nombre}</strong></p>}
+      {hostActual && <p className="gn-host-line">🎙 Host de la jugada: <strong>{hostActual.nombre}</strong></p>}
       {!hostActual && <p className="gn-host-line">⚠ Todavía no hay Host asignado en Jugadores.</p>}
 
       {error && <div className="login-error">{error}</div>}
       {aviso && <div className="campeonato-banner campeonato-banner-alerta" style={{ marginTop: 12 }}>⚠ {aviso}</div>}
+
+      {puedoAutoCheckin && (
+        <div className="campeonato-banner campeonato-banner-row" style={{ marginTop: 12 }}>
+          <span>Es el día de la jugada — puedes hacer tu propio check-in.</span>
+          <button className="btn btn-primary" disabled={guardando} onClick={hacerMiCheckin}>
+            {guardando ? "Un momento…" : "Hacer mi check-in"}
+          </button>
+        </div>
+      )}
 
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20, flexWrap: "wrap" }}>
         <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => { setCampeonatoSel(e.target.value); setFechaSel(""); }}>

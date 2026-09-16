@@ -433,6 +433,29 @@ h1 {
 }
 .modal-choice-desc { display: block; font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
 
+/* Selector de "Mano favorita" en Mi Perfil (34ª entrega) — matriz 13x13 de manos iniciales de poker,
+   adaptada del artefacto "Rango de Manos". Colores de "tier" propios (no las variables del tema claro
+   de la mesa) porque replican exactamente la referencia con la que Federico ya está familiarizado. */
+.manofav-card { max-width: 620px; }
+.manofav-grid { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; margin-top: 4px; }
+.manofav-cell {
+  aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+  border-radius: 5px; border: 1px solid transparent; font-family: "IBM Plex Mono", monospace;
+  font-size: clamp(8px, 1.6vw, 11px); font-weight: 600; cursor: pointer; padding: 0;
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+.manofav-cell:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
+.manofav-tier-premium { background: #3f7fc1; color: #eaf3ff; }
+.manofav-tier-strong { background: #6fb7c9; color: #062226; }
+.manofav-tier-playable { background: var(--gold); color: #2b1c02; }
+.manofav-tier-marginal { background: #8a8f87; color: #f4efe3; }
+.manofav-tier-fold { background: var(--surface-2); color: var(--ink-soft); }
+.manofav-selected { box-shadow: 0 0 0 2px var(--ink), 0 2px 8px rgba(0, 0, 0, 0.35); transform: scale(1.08); z-index: 2; position: relative; }
+.manofav-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; font-size: 11.5px; color: var(--ink-soft); }
+.manofav-legend-item { display: flex; align-items: center; gap: 6px; }
+.manofav-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
+.manofav-selected-row { margin-top: 12px; font-size: 13.5px; color: var(--ink); font-family: "IBM Plex Mono", monospace; }
+
 /* registro de jugadores: link tipo texto, selector de emoticón, casillas de código OTP */
 .link-btn {
   background: none; border: none; padding: 0; color: var(--gold-strong); font-family: inherit;

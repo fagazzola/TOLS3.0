@@ -16,6 +16,7 @@ export default function MiPerfil({ session }) {
   const [jugador, setJugador] = useState(null);
   const [financiero, setFinanciero] = useState(null); // { cuenta, banco, tipoCuenta }
   const [form, setForm] = useState(null);
+  const [original, setOriginal] = useState(null); // última versión guardada — para detectar cambios sin guardar
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -66,7 +67,7 @@ export default function MiPerfil({ session }) {
         setJugador(mio);
         const fin = cob?.jugadores?.[correo] || {};
         setFinanciero(fin);
-        setForm({
+        const cargado = {
           aliasJugador: mio.aliasJugador || "",
           aliasPokerStars: mio.aliasPokerStars || "",
           telefono: mio.telefono || "",
@@ -75,7 +76,9 @@ export default function MiPerfil({ session }) {
           cuenta: fin.cuenta || "",
           banco: fin.banco || "",
           tipoCuenta: fin.tipoCuenta || "",
-        });
+        };
+        setForm(cargado);
+        setOriginal(cargado);
       })
       .catch((e) => setError(e.message || "No se pudo cargar tu perfil."))
       .finally(() => setLoading(false));
@@ -120,6 +123,7 @@ export default function MiPerfil({ session }) {
 
       setJugador(j1.jugadores.find((j) => j.correo === correo));
       setFinanciero(j2.jugadores?.[correo] || {});
+      setOriginal(form);
       setGuardadoOk(true);
     } catch (e) {
       setError(e.message || "No se pudo guardar.");
@@ -127,6 +131,8 @@ export default function MiPerfil({ session }) {
       setGuardando(false);
     }
   }
+
+  const dirty = Boolean(form && original && JSON.stringify(original) !== JSON.stringify(form));
 
   function elegirManoFavorita(codigo) {
     setForm({ ...form, manoFavorita: codigo });
@@ -286,12 +292,13 @@ export default function MiPerfil({ session }) {
             </div>
           </div>
 
+          {dirty && !guardando && <div className="section-note">Tienes cambios sin guardar.</div>}
           <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="btn btn-primary" disabled={guardando} onClick={guardar}>
+            <button className="btn btn-primary" disabled={guardando || !dirty} onClick={guardar}>
               {guardando ? "Guardando…" : "Guardar cambios"}
             </button>
           </div>
-          {guardadoOk && <div className="check-line check-ok">Tus datos se guardaron correctamente.</div>}
+          {guardadoOk && !dirty && <div className="check-line check-ok">Tus datos se guardaron correctamente.</div>}
 
           <div className="subhead">Seguridad</div>
           {cambioVista === "cerrado" && (

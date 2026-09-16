@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/jugadores.json";
-import { syncJugadores } from "./lib/msgraph.js";
+import { syncJugadores, leerJugadoresDesdeExcel } from "./lib/msgraph.js";
 import { enviarCorreo, plantillaHost } from "./lib/resend.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -24,9 +24,9 @@ function normalizarUno(j) {
     estatus: String(j?.estatus || "Activo").trim(),
     host: Boolean(j?.host),
     hostFecha: String(j?.hostFecha || "").trim(),
-    // 34ª entrega: mano inicial de Texas Hold'em favorita del jugador (ej. "AKs", "77"), elegida desde
+    // 35ª entrega: mano inicial de Texas Hold'em favorita del jugador (ej. "AKs", "77"), elegida desde
     // "Mi Perfil" con el selector de rango de manos — puramente informativo/de perfil, no afecta ningún
-    // cálculo del sitio. Sync a Excel pendiente de confirmar la columna exacta con Federico.
+    // cálculo del sitio. Se sincroniza a la columna "Mano Favorita" (K) de la hoja Jugadores del Excel.
     manoFavorita: String(j?.manoFavorita || "").trim(),
   };
 }
@@ -52,6 +52,46 @@ function conHostExpirado(data) {
   return { cambio, data: { jugadores } };
 }
 
+// 35ª entrega: Federico reportó que en "Mi Perfil" faltaban Teléfono/Fecha de Nacimiento (y a veces los
+// Alias) para jugadores cuyo dato real vive en el Excel (cargado ahí a mano) pero nunca se capturó en el
+// sitio (cuentas de antes del autorregistro actual). Pidió explícitamente: "Los datos del jugador deben
+// ser extraídos del Excel". Fix: en cada GET, si algún jugador tiene alguno de esos campos vacío, se hace
+// una lectura best-effort de la hoja "Jugadores" (misma función que ya usa el botón "Importar desde
+// Excel") y se rellenan SOLO los campos vacíos de cada jugador que sí tengan valor en Excel — nunca se
+// pisa un dato que el jugador ya haya cargado desde el sitio. Si la lectura a Excel falla, no bloquea la
+// carga (mismo criterio de tolerancia a fallos que el resto del sitio). Una vez relleno, se guarda en
+// tols-jugadores para no tener que volver a leer el Excel en cada carga futura.
+function faltanDatosBasicos(jugadores) {
+  return jugadores.some((j) => !j.telefono || !j.fecNac || !j.aliasJugador || !j.aliasPokerStars);
+}
+
+async function backfillDesdeExcel(jugadores) {
+  try {
+    const filasExcel = await leerJugadoresDesdeExcel();
+    const porCorreo = new Map(filasExcel.map((f) => [f.correo, f]));
+    let cambio = false;
+    const rellenos = jugadores.map((j) => {
+      const ex = porCorreo.get(j.correo);
+      if (!ex) return j;
+      const r = { ...j };
+      if (!r.aliasJugador && ex.aliasJugador) { r.aliasJugador = ex.aliasJugador; cambio = true; }
+      if (!r.aliasPokerStars && ex.aliasPokerStars) { r.aliasPokerStars = ex.aliasPokerStars; cambio = true; }
+      if (!r.telefono && ex.telefono) { r.telefono = ex.telefono; cambio = true; }
+      if (!r.fecNac && ex.fecNac) {
+        r.fecNac = ex.fecNac;
+        if (!r.edad && ex.edad) r.edad = ex.edad;
+        cambio = true;
+      }
+      if (!r.manoFavorita && ex.manoFavorita) { r.manoFavorita = ex.manoFavorita; cambio = true; }
+      return r;
+    });
+    return { cambio, jugadores: rellenos };
+  } catch (e) {
+    console.error("[jugadores] backfill desde Excel falló (no bloquea la carga):", e.message || e);
+    return { cambio: false, jugadores };
+  }
+}
+
 // calcula edad a partir de la fecha de nacimiento (YYYY-MM-DD) — se usa cuando el propio jugador
 // edita su FecNac desde "Mi Perfil", para que Edad nunca quede desincronizada de lo que escribió
 function edadDesdeFecNac(fecNac) {
@@ -73,7 +113,17 @@ export default async (req) => {
     let normalizado = normalizar(raw);
     const { cambio, data: sinHostVencido } = conHostExpirado(normalizado);
     if (cambio) normalizado = sinHostVencido;
-    if (!raw || cambio || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
+
+    let cambioBackfill = false;
+    if (faltanDatosBasicos(normalizado.jugadores)) {
+      const backfill = await backfillDesdeExcel(normalizado.jugadores);
+      if (backfill.cambio) {
+        normalizado = { jugadores: backfill.jugadores };
+        cambioBackfill = true;
+      }
+    }
+
+    if (!raw || cambio || cambioBackfill || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
       if (cambio) await syncJugadores(normalizado.jugadores);
     }

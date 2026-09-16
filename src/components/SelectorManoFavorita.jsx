@@ -49,38 +49,40 @@ export default function SelectorManoFavorita({ valorActual, onSeleccionar, onCer
   return (
     <div className="modal-backdrop" onClick={onCerrar}>
       <div className="modal-card modal-card-wide manofav-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">Elige tu mano favorita</div>
-        <p className="section-sub" style={{ marginTop: 0 }}>
-          Toca una casilla de la matriz de manos iniciales de Texas Hold'em (AA, AKs, 76o, etc.).
-        </p>
+        <div className="manofav-scroll">
+          <div className="modal-title">Elige tu mano favorita</div>
+          <p className="section-sub" style={{ marginTop: 0 }}>
+            Toca una casilla de la matriz de manos iniciales de Texas Hold'em (AA, AKs, 76o, etc.).
+          </p>
 
-        <div className="manofav-grid" role="grid" aria-label="Matriz de manos iniciales de poker">
-          {CELDAS.map((code) => (
-            <button
-              key={code}
-              type="button"
-              className={"manofav-cell manofav-tier-" + (TIERS[code] || "fold") + (sel === code ? " manofav-selected" : "")}
-              onClick={() => setSel(code)}
-            >
-              {code}
-            </button>
-          ))}
+          <div className="manofav-grid" role="grid" aria-label="Matriz de manos iniciales de poker">
+            {CELDAS.map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={"manofav-cell manofav-tier-" + (TIERS[code] || "fold") + (sel === code ? " manofav-selected" : "")}
+                onClick={() => setSel(code)}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
+
+          <div className="manofav-legend">
+            {Object.entries(TIER_LABEL).map(([tier, label]) => (
+              <div className="manofav-legend-item" key={tier}>
+                <span className={"manofav-swatch manofav-tier-" + tier} />
+                {label}
+              </div>
+            ))}
+          </div>
+
+          <div className="manofav-selected-row">
+            Mano elegida: <strong>{sel || "ninguna todavía"}</strong>
+          </div>
         </div>
 
-        <div className="manofav-legend">
-          {Object.entries(TIER_LABEL).map(([tier, label]) => (
-            <div className="manofav-legend-item" key={tier}>
-              <span className={"manofav-swatch manofav-tier-" + tier} />
-              {label}
-            </div>
-          ))}
-        </div>
-
-        <div className="manofav-selected-row">
-          Mano elegida: <strong>{sel || "ninguna todavía"}</strong>
-        </div>
-
-        <div className="modal-actions">
+        <div className="modal-actions manofav-actions">
           <button className="btn btn-secondary" onClick={onCerrar}>Cancelar</button>
           <button className="btn btn-primary" disabled={!sel} onClick={() => onSeleccionar(sel)}>
             Usar esta mano

@@ -44,7 +44,7 @@ const TABS = [
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, permiteHost: true },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
-  { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, soloJugador: true },
+  { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];
 
 export default function App() {
@@ -160,8 +160,8 @@ export default function App() {
   }
 
   function puedeVerTab(t) {
+    if (t.siempreVisible) return true;
     if (t.soloAdminGeneral) return session?.rol === "Administrador General";
-    if (t.soloJugador) return session?.rol === "Jugador";
     if (t.permiteHost && hostInfo.esHost) return true;
     return puedeVer(perfiles, session, t.modKey);
   }
@@ -169,7 +169,7 @@ export default function App() {
   function handleLogin(s) {
     setSession(s);
     const firstAllowed = TABS.find((t) =>
-      t.soloAdminGeneral ? s.rol === "Administrador General" : t.soloJugador ? s.rol === "Jugador" : puedeVer(perfiles, s, t.modKey)
+      t.siempreVisible ? true : t.soloAdminGeneral ? s.rol === "Administrador General" : puedeVer(perfiles, s, t.modKey)
     );
     setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {

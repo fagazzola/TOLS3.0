@@ -90,7 +90,7 @@ export function plantillaCodigo(codigo, nombre) {
       <h2 style="margin:0 0 12px; color:#fff;">Confirma tu correo</h2>
       <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
         Hola${nombre ? " " + nombre : ""}, este es tu código para completar tu registro en TOLS 3.0.
-        Es válido por <strong>30 segundos</strong> — ingrésalo apenas lo veas.
+        Es válido por <strong>5 minutos</strong> — ingrésalo apenas lo veas.
       </p>
       <div style="font-size:34px; font-weight:700; letter-spacing:.3em; text-align:center; background:#0f1720; border-radius:10px; padding:16px; color:#8fd694; border:1px solid #2a3a4a;">
         ${codigo}

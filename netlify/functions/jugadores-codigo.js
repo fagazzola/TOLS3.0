@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { enviarCorreo, plantillaCodigo } from "./lib/resend.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
-const DURACION_MS = 30_000; // 30 segundos, tal como lo pidió Federico — es corto, hay que ingresarlo rápido
+const DURACION_MS = 300_000; // 5 minutos (38ª entrega) — antes eran 30 segundos, Federico pidió alargarlo
 
 function generarCodigo() {
   return String(Math.floor(100000 + Math.random() * 900000));

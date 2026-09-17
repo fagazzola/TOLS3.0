@@ -354,7 +354,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                       )}
                     </div>
                     <div>
-                      <span className="badge badge-nivel-escritura">{hora(gn.horaCheckin)}</span>
+                      <span className="badge badge-nivel-escritura" title={gn.horaCheckin ? new Date(gn.horaCheckin).toLocaleString("es-MX") : ""}>{hora(gn.horaCheckin)}</span>
                       {gn.manual && <span className="badge badge-manual" style={{ marginLeft: 4 }}>Manual</span>}
                       {gn.amonestado && <span className="badge badge-amonestado" style={{ marginLeft: 4 }} title="Perdió el punto de asistencia">⚠ Amonestado</span>}
                     </div>

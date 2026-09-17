@@ -5,6 +5,16 @@ import { MoneyBadge } from "./PokerArt.jsx";
 const API = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_COBRANZA = "/api/cobranza";
+const API_GAMENIGHT = "/api/gamenight";
+
+// muestra solo hora:minuto — la fecha ya está implícita en la celda/renglón del Calendario donde se
+// pinta este dato, así que repetirla sería redundante
+function horaCorta(isoStr) {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+}
 
 function money(n) {
   return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
@@ -53,6 +63,7 @@ export default function Calendario({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod1");
   const [data, setData] = useState(null);
   const [cobranza, setCobranza] = useState(null);
+  const [gamenight, setGamenight] = useState(null);
   const [campeonatos, setCampeonatos] = useState([]);
   // el campeonato "activo" es el que gobierna el sitio — el mismo que se ve/edita en el Tablero de
   // Control (tols-campeonatos). El Calendario ya no lo adivina por su cuenta a partir de las fechas.
@@ -114,6 +125,13 @@ export default function Calendario({ session, perfiles }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => setCobranza(json))
       .catch(() => setCobranza(null));
+
+    // 38ª entrega: hora de check-in por fecha, directo de Game Night (no de Cobranza, que solo se
+    // entera del check-in indirectamente vía el espejo) — best-effort, igual que Cobranza arriba
+    fetch(API_GAMENIGHT)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => setGamenight(json))
+      .catch(() => setGamenight(null));
   }, []);
 
   if (loading) return <p className="subtitle">Cargando calendario…</p>;
@@ -250,6 +268,14 @@ export default function Calendario({ session, perfiles }) {
     return m ? Number(m.totalGanado) || 0 : null;
   }
 
+  // 38ª entrega: hora del check-in del jugador en sesión para UNA fecha puntual, leída directo de Game
+  // Night (`tols-gamenight`, la misma fuente que ya usa la pantalla del Host) — null si todavía no hizo
+  // check-in en esa fecha (o si Game Night no respondió, ya que es lectura best-effort).
+  function checkinDeFecha(fechaIso) {
+    const iso8601 = gamenight?.[campeonatoActivo]?.[fechaIso]?.jugadores?.[miCorreo]?.horaCheckin;
+    return iso8601 || null;
+  }
+
   return (
     <div>
       <div className="headtop">
@@ -360,6 +386,14 @@ export default function Calendario({ session, perfiles }) {
                           </div>
                         ) : null;
                       })()}
+                      {(() => {
+                        const ci = checkinDeFecha(iso(cell.date));
+                        return ci ? (
+                          <div className="cal-chip cal-chip-checkin" title={new Date(ci).toLocaleString("es-MX")}>
+                            ✓ Check-in {horaCorta(ci)}
+                          </div>
+                        ) : null;
+                      })()}
                       {esPago && (
                         <div
                           className="cal-chip cal-chip-pago"
@@ -413,6 +447,14 @@ export default function Calendario({ session, perfiles }) {
                           return <span className="stat-value-proximamente">{pasado ? "Sin registro" : "Próximamente"}</span>;
                         })()}
                       </span>
+                      {(() => {
+                        const ci = checkinDeFecha(t.fecha);
+                        return ci ? (
+                          <span>
+                            Check-in: <span className="cal-ganancia-inline">{horaCorta(ci)}</span>
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 </div>

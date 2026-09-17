@@ -3,7 +3,7 @@ import CampoPassword from "./CampoPassword.jsx";
 
 const API_CODIGO = "/api/jugadores-codigo";
 const API_VERIFICAR = "/api/jugadores-verificar";
-const DURACION_S = 30;
+const DURACION_S = 300; // 5 minutos — mismo criterio que "Cambiar contraseña" en Mi Perfil (antes eran 30s)
 
 function vacio() {
   return {
@@ -194,7 +194,7 @@ export default function Registro({ onRegistroExitoso, onIrALogin }) {
         {paso === "otp" && (
           <>
             <p className="section-sub" style={{ textAlign: "center" }}>
-              Enviamos un código de 6 dígitos a <b>{datos.correo}</b>. Tienes {DURACION_S} segundos para ingresarlo.
+              Enviamos un código de 6 dígitos a <b>{datos.correo}</b>. Tienes 5 minutos para ingresarlo.
             </p>
             <div className="otp-row">
               {otp.map((v, i) => (
@@ -212,7 +212,11 @@ export default function Registro({ onRegistroExitoso, onIrALogin }) {
               ))}
             </div>
             <div className="otp-timer">
-              {expirado ? <span className="login-error">El código expiró.</span> : <span>Expira en {segundosRestantes}s</span>}
+              {expirado ? (
+                <span className="login-error">El código expiró.</span>
+              ) : (
+                <span>Expira en {Math.floor(segundosRestantes / 60)}:{String(segundosRestantes % 60).padStart(2, "0")}</span>
+              )}
             </div>
             {otpError && <div className="login-error">{otpError}</div>}
             {!expirado ? (

@@ -333,6 +333,9 @@ export default function MiPerfil({ session }) {
               <p className="section-sub" style={{ marginTop: 0 }}>
                 Enviamos un código de 6 dígitos a <b>{correo}</b>. Tienes 5 minutos para usarlo.
               </p>
+              <p className="section-note" style={{ marginTop: -8, marginBottom: 12 }}>
+                Si no lo ves en unos minutos, revisa tu carpeta de SPAM o correo no deseado.
+              </p>
               <div className="otp-row">
                 {otp.map((v, i) => (
                   <input

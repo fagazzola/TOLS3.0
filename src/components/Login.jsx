@@ -216,6 +216,9 @@ export default function Login({ perfiles, onLogin }) {
             <p className="section-sub" style={{ textAlign: "center" }}>
               Enviamos un código de 6 dígitos a <b>{correoRecuperar}</b>. Tienes 5 minutos para usarlo.
             </p>
+            <p className="section-note" style={{ textAlign: "center", marginTop: -8, marginBottom: 12 }}>
+              Si no lo ves en unos minutos, revisa tu carpeta de SPAM o correo no deseado.
+            </p>
             <div className="otp-row">
               {otp.map((v, i) => (
                 <input

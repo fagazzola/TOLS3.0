@@ -196,6 +196,9 @@ export default function Registro({ onRegistroExitoso, onIrALogin }) {
             <p className="section-sub" style={{ textAlign: "center" }}>
               Enviamos un código de 6 dígitos a <b>{datos.correo}</b>. Tienes 5 minutos para ingresarlo.
             </p>
+            <p className="section-note" style={{ textAlign: "center", marginTop: -8, marginBottom: 12 }}>
+              Si no lo ves en unos minutos, revisa tu carpeta de SPAM o correo no deseado.
+            </p>
             <div className="otp-row">
               {otp.map((v, i) => (
                 <input

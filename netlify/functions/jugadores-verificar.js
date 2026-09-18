@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import jugadoresSeed from "../../src/data/jugadores.json";
 import { normalizar as normalizarPerfiles, validar as validarPerfiles } from "./perfiles.js";
 import { syncJugadores, syncPerfiles } from "./lib/msgraph.js";
+import { enviarCorreo, plantillaRegistroExitoso } from "./lib/resend.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -116,6 +117,18 @@ export default async (req) => {
   await syncPerfiles(dataPerfiles);
 
   await verifStore.delete(correo);
+
+  // correo de bienvenida con el número de registro (= id asignado) que va como centavos en los
+  // depósitos — es best-effort: si Resend falla, el registro ya quedó hecho y no se revierte nada
+  try {
+    await enviarCorreo({
+      to: correo,
+      subject: "¡Registro completo! Tu número de registro — TOLS 3.0",
+      html: plantillaRegistroExitoso(nuevoJugador.nombre, nuevoId),
+    });
+  } catch (e) {
+    // no bloquea el registro exitoso del jugador
+  }
 
   return new Response(
     JSON.stringify({ ok: true, session: { usuario: correo, nombre: nuevoJugador.nombre, rol: "Jugador" } }),

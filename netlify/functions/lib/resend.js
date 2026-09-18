@@ -82,6 +82,43 @@ export function plantillaEstadoCuenta(asunto, cuerpoTexto) {
   </div>`;
 }
 
+export function plantillaRegistroExitoso(nombre, numeroRegistro) {
+  const num = String(numeroRegistro).padStart(2, "0");
+  return `
+  <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
+    <div style="max-width:460px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
+      <div style="font-size:13px; letter-spacing:.06em; color:#8fd694; text-transform:uppercase; margin-bottom:8px;">♥ Torrente On Line Series - TOLS 3.0</div>
+      <h2 style="margin:0 0 12px; color:#fff;">¡Tu registro quedó completo!</h2>
+      <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
+        Hola${nombre ? " " + nombre : ""}, tu cuenta en TOLS 3.0 ya está activa. Bienvenido a la liga.
+      </p>
+      <p style="margin:0 0 8px; color:#b6c2cd; font-size:14px;">
+        Tu <strong>número de registro</strong> es:
+      </p>
+      <div style="font-size:34px; font-weight:700; letter-spacing:.2em; text-align:center; background:#0f1720; border-radius:10px; padding:16px; color:#8fd694; border:1px solid #2a3a4a;">
+        ${num}
+      </div>
+      <p style="margin:20px 0 8px; color:#b6c2cd; font-size:14px;">
+        Guárdalo bien: cada vez que hagas un depósito relacionado con la liga (inscripción, buy-in, re-buy, etc.),
+        debes agregar este número como los <strong>centavos</strong> del monto que transfieras. Así el Tesorero
+        puede identificar de quién es cada depósito.
+      </p>
+      <div style="margin:0 0 16px; background:#0f1720; border-radius:10px; padding:16px; border:1px solid #2a3a4a;">
+        <p style="margin:0 0 8px; color:#8fd694; font-size:13px; font-weight:600;">Ejemplos con tu número (${num}):</p>
+        <p style="margin:0 0 6px; color:#b6c2cd; font-size:14px;">
+          Si la inscripción es de <strong>$400</strong>, depositas <strong>$400.${num}</strong>
+        </p>
+        <p style="margin:0; color:#b6c2cd; font-size:14px;">
+          Si depositas buy-in + re-buy de un torneo regular (<strong>$300 + $250 = $550</strong>), depositas <strong>$550.${num}</strong>
+        </p>
+      </div>
+      <p style="margin:0; color:#7c8a97; font-size:12px;">
+        Si tienes dudas sobre tu número de registro o algún depósito, contacta a un administrador de la liga.
+      </p>
+    </div>
+  </div>`;
+}
+
 export function plantillaCodigo(codigo, nombre) {
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">

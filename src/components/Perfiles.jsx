@@ -4,7 +4,10 @@ import { MODULOS, NIVEL_LABEL } from "../lib/permisos.js";
 const API = "/api/perfiles";
 const API_IMPORTAR = "/api/perfiles-importar-excel";
 const NIVELES = ["ninguno", "lectura", "escritura"];
-const USUARIOS_COLS = "1fr 1.6fr 1fr 1.2fr 72px";
+// 42ª entrega: con contraseña (Administrador General) hay 5 columnas; sin ella (Administrador) son 4 —
+// Administrador no puede ver ni tocar contraseñas, así que ni siquiera se le arma esa columna.
+const USUARIOS_COLS_CON_PASS = "1fr 1.6fr 1fr 1.2fr 72px";
+const USUARIOS_COLS_SIN_PASS = "1fr 1.8fr 1fr 72px";
 
 // búsqueda tolerante a mayúsculas/acentos — así "jose" encuentra "José" o "JOSÉ"
 const DIACRITICOS = new RegExp(String.fromCharCode(0x5b, 0x5c, 0x75, 0x30, 0x33, 0x30, 0x30, 0x2d, 0x5c, 0x75, 0x30, 0x33, 0x36, 0x66, 0x5d), "g");
@@ -17,6 +20,10 @@ function normalizarBusqueda(s) {
 
 export default function Perfiles({ session, perfiles, onPerfilesChange }) {
   const isAdminGeneral = session.rol === "Administrador General";
+  // 42ª entrega: Administrador (no solo Administrador General) ya puede entrar a esta pantalla, pero
+  // nunca puede ver ni manipular contraseñas — eso sigue siendo exclusivo de Administrador General.
+  const esAdmin = isAdminGeneral || session.rol === "Administrador";
+  const USUARIOS_COLS = isAdminGeneral ? USUARIOS_COLS_CON_PASS : USUARIOS_COLS_SIN_PASS;
   const [draft, setDraft] = useState(perfiles);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -132,14 +139,18 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
         </div>
       </div>
 
-      {isAdminGeneral && (
+      {esAdmin && (
         <div className="tablero-savebar">
           {saveError && <div className="login-error" style={{ margin: 0 }}>{saveError}</div>}
           {saveOk && !dirty && <div className="check-line check-ok" style={{ margin: 0 }}>✓ Cambios guardados.</div>}
           {dirty && !saveError && <div className="section-note">Tienes cambios sin guardar.</div>}
-          <button className="btn btn-secondary" onClick={() => setConfirmarImportar(true)} disabled={saving || importando}>
-            {importando ? "Importando…" : "Importar desde Excel"}
-          </button>
+          {/* 42ª entrega: Importar desde Excel sobrescribe también las contraseñas (vienen de la misma
+              hoja) — sigue siendo exclusivo de Administrador General, aunque Administrador ya entra aquí. */}
+          {isAdminGeneral && (
+            <button className="btn btn-secondary" onClick={() => setConfirmarImportar(true)} disabled={saving || importando}>
+              {importando ? "Importando…" : "Importar desde Excel"}
+            </button>
+          )}
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="btn btn-secondary" onClick={handleCancelar} disabled={saving || !dirty}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleGuardar} disabled={saving || !dirty}>
@@ -151,7 +162,7 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
       {isAdminGeneral && importError && <div className="login-error">{importError}</div>}
       {isAdminGeneral && importOk && <div className="check-line check-ok">✓ Usuarios, permisos y jugadores actualizados desde el Excel.</div>}
 
-      {isAdminGeneral ? (
+      {esAdmin ? (
         <div className="section">
           <div className="section-head"><div className="section-title">Usuarios</div></div>
           <input
@@ -164,7 +175,7 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
           />
           <div className="tbl">
             <div className="trow thead" style={{ gridTemplateColumns: USUARIOS_COLS }}>
-              <div>Nombre</div><div>Correo electrónico</div><div>Perfil</div><div>Contraseña</div><div />
+              <div>Nombre</div><div>Correo electrónico</div><div>Perfil</div>{isAdminGeneral && <div>Contraseña</div>}<div />
             </div>
             {draft.usuarios
               .map((u, i) => ({ u, i }))
@@ -189,36 +200,42 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
                       onChange={(e) => set((d) => { d.usuarios[i].rol = e.target.value; })}>
                       {draft.roles.map((r) => <option key={r.tipo} value={r.tipo}>{r.tipo}</option>)}
                     </select>
-                    <div className="pass-field">
-                      <input
-                        className="field"
-                        type={mostrar[i] ? "text" : "password"}
-                        value={u.password}
-                        readOnly
-                      />
-                      <button
-                        type="button"
-                        className="btn-icon-eye"
-                        title={mostrar[i] ? "Ocultar contraseña" : "Mostrar contraseña"}
-                        onClick={() => setMostrar((m) => ({ ...m, [i]: !m[i] }))}
-                      >
-                        {mostrar[i] ? "🙈" : "👁"}
-                      </button>
-                    </div>
+                    {isAdminGeneral && (
+                      <div className="pass-field">
+                        <input
+                          className="field"
+                          type={mostrar[i] ? "text" : "password"}
+                          value={u.password}
+                          readOnly
+                        />
+                        <button
+                          type="button"
+                          className="btn-icon-eye"
+                          title={mostrar[i] ? "Ocultar contraseña" : "Mostrar contraseña"}
+                          onClick={() => setMostrar((m) => ({ ...m, [i]: !m[i] }))}
+                        >
+                          {mostrar[i] ? "🙈" : "👁"}
+                        </button>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                      <button
-                        type="button"
-                        className="btn-icon-eye"
-                        title="Cambiar contraseña"
-                        onClick={() => setCambiarPass(cambiarPass?.index === i ? null : { index: i, valor: "" })}
-                      >
-                        🔑
-                      </button>
+                      {/* 42ª entrega: "Cambiar contraseña" es exclusivo de Administrador General —
+                          Administrador nunca ve ni toca contraseñas. */}
+                      {isAdminGeneral && (
+                        <button
+                          type="button"
+                          className="btn-icon-eye"
+                          title="Cambiar contraseña"
+                          onClick={() => setCambiarPass(cambiarPass?.index === i ? null : { index: i, valor: "" })}
+                        >
+                          🔑
+                        </button>
+                      )}
                       <button className="btn-icon-remove" title="Eliminar usuario" disabled={draft.usuarios.length <= 1}
                         onClick={() => { setEliminarError(""); setConfirmarEliminar({ usuario: u.usuario, nombre: u.nombre || u.correo }); }}>✕</button>
                     </div>
                   </div>
-                  {cambiarPass?.index === i && (
+                  {isAdminGeneral && cambiarPass?.index === i && (
                     <div className="trow" style={{ gridTemplateColumns: "1fr", paddingTop: 0 }}>
                       <div className="pass-change-row">
                         <input
@@ -251,10 +268,10 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
           </div>
         </div>
       ) : (
-        <p className="subtitle">Solo el Administrador General puede ver y administrar los usuarios de la liga.</p>
+        <p className="subtitle">Solo el Administrador General y el Administrador pueden ver y administrar los usuarios de la liga.</p>
       )}
 
-      {isAdminGeneral && (
+      {esAdmin && (
         <div className="section">
           <div className="section-head"><div className="section-title">Permisos por módulo</div></div>
           <div className="tbl">

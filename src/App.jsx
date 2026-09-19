@@ -28,8 +28,9 @@ function isoHoy() {
 
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
 // (Tablero de Control, Calendario, Cobranza, Jugadores, Game Night, Usuarios).
-// La pestaña Usuarios (antes "Jugadores") solo la puede ver el Administrador General,
-// sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla.
+// La pestaña Usuarios (antes "Jugadores") la pueden ver Administrador General y Administrador,
+// sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla. Dentro de la
+// pantalla, solo el Administrador General puede ver/editar contraseñas (42ª entrega) — ver Perfiles.jsx.
 // "Mi Perfil" es otro caso especial: solo la ve quien tiene rol "Jugador" (autoservicio de sus
 // propios datos), sin importar la matriz de permisos tampoco — no es una pantalla de administración.
 // Jugadores (mod6) y Cobranza (mod4) sí siguen la matriz normal de permisos.
@@ -43,7 +44,7 @@ const TABS = [
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, permiteHost: true },
-  { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdminGeneral: true },
+  { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];
 
@@ -159,9 +160,13 @@ export default function App() {
       .finally(() => setPerfilesLoading(false));
   }
 
+  function esAdmin(rol) {
+    return rol === "Administrador General" || rol === "Administrador";
+  }
+
   function puedeVerTab(t) {
     if (t.siempreVisible) return true;
-    if (t.soloAdminGeneral) return session?.rol === "Administrador General";
+    if (t.soloAdmins) return esAdmin(session?.rol);
     if (t.permiteHost && hostInfo.esHost) return true;
     return puedeVer(perfiles, session, t.modKey);
   }
@@ -169,7 +174,7 @@ export default function App() {
   function handleLogin(s) {
     setSession(s);
     const firstAllowed = TABS.find((t) =>
-      t.siempreVisible ? true : t.soloAdminGeneral ? s.rol === "Administrador General" : puedeVer(perfiles, s, t.modKey)
+      t.siempreVisible ? true : t.soloAdmins ? esAdmin(s.rol) : puedeVer(perfiles, s, t.modKey)
     );
     setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {

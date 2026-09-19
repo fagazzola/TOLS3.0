@@ -5,7 +5,10 @@ const API = "/api/jugadores";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_IMPORTAR = "/api/jugadores-importar-excel";
-const COLS = "72px repeat(6, 1fr)";
+// 42ª entrega: antes eran 6 columnas a "1fr" parejo (además de "Reg"), pero el contenido real es muy
+// distinto en longitud (un correo es mucho más largo que "Activo" o un botón de Host) — con anchos
+// iguales se veía desbalanceada. Anchos proporcionales al contenido esperado de cada columna.
+const COLS = "56px 1.3fr 1fr 1.7fr 0.9fr 0.85fr 0.95fr";
 
 function iso(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -152,8 +155,7 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Jugadores</h1>
           <p className="subtitle">
-            Directorio de jugadores. Solo se pueden editar Padrino, Estatus y Host — el resto de los datos los
-            llena cada jugador al autorregistrarse, o se importan desde la hoja Jugadores del Excel.
+            Directorio de jugadores. Solo se pueden editar Padrino, Estatus y Host.
           </p>
         </div>
       </div>
@@ -205,13 +207,13 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
             </div>
             <div className="tbl tbl-compacta">
               <div className="trow thead" style={{ gridTemplateColumns: COLS }}>
-                <div>No.</div><div>Nombre</div><div>Alias PokerStars</div><div>Correo electrónico</div><div>Padrino</div><div>Estatus</div><div>Host</div>
+                <div>Reg</div><div>Nombre</div><div>Alias PokerStars</div><div>Correo electrónico</div><div>Padrino</div><div>Estatus</div><div>Host</div>
               </div>
               {jugadoresFiltrados.map((j) => {
                 const enEdicion = editando?.id === j.id;
                 return (
                   <div className="trow" style={{ gridTemplateColumns: COLS }} key={j.id}>
-                    <div>{j.id}</div>
+                    <div className="num">{String(j.id).padStart(2, "0")}</div>
                     <div>{j.nombre}</div>
                     <div>{j.aliasPokerStars}</div>
                     <div>{j.correo}</div>

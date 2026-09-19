@@ -167,7 +167,10 @@ async function ocultarColumnaTexto(sheetName, columna, startRow, endRow) {
 // Perfil de P a Q) — confirmado leyendo el encabezado real del Excel que subió Federico, no adivinado:
 // 0 Id, 1 Nombre y Apellido, 2 Alias Jugador, 3 Alias PokerStars, 4 Padrino, 5 Teléfono,
 // 6 Correo Electrónico, 7 Tipo de Usuario, 8 Fecha de Nacimiento, 9 Edad, 10 Mano Favorita,
-// 11 Fecha de Registro, 12 Estatus, 13 Host, 14 Host Fecha, 15 Contraseña, 16 Perfil
+// 11 Fecha de Registro, 12 Estatus, 13 Host, 14 Host Fecha, 15 Contraseña, 16 Perfil.
+// 45ª entrega (2026-09-19): se agregaron 3 columnas nuevas al final, confirmadas libres leyendo el
+// encabezado real del Excel de Federico (R, S, T vacías hasta esta entrega) — 17 Cuenta, 18 Banco,
+// 19 Tipo de Cuenta (CLABE/Tarjeta de Débito, centralizados en Jugadores desde la 44ª entrega).
 function filasJugadoresUnificadas(jugadores, perfilesData) {
   const usuarios = perfilesData?.usuarios || [];
   const porCorreo = new Map();
@@ -186,12 +189,13 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
       j.correo, j.tipoUsuario, j.fecNac, j.edad, j.manoFavorita || "", j.fechaRegistro || "",
       j.estatus || "Activo", j.host ? "Sí" : "No", j.hostFecha || "",
       u ? u.password : "", u ? u.rol : "",
+      j.cuenta || "", j.banco || "", j.tipoCuenta || "",
     ]);
   }
   for (const u of usuarios) {
     const correo = String(u.correo || u.usuario || "").trim().toLowerCase();
     if (correo && !correosConJugador.has(correo)) {
-      filas.push(["", u.nombre || "", "", "", "", "", u.correo || u.usuario || "", "", "", "", "", "", "", "", "", u.password, u.rol]);
+      filas.push(["", u.nombre || "", "", "", "", "", u.correo || u.usuario || "", "", "", "", "", "", "", "", "", u.password, u.rol, "", "", ""]);
     }
   }
   return filas;
@@ -271,6 +275,10 @@ export async function leerJugadoresDesdeExcel() {
       estatus: String(f[12] || "Activo").trim() || "Activo",
       host: String(f[13] || "").trim().toLowerCase() === "sí" || String(f[13] || "").trim().toLowerCase() === "si",
       hostFecha: fechaExcelAISO(f[14]) || String(f[14] || "").trim(),
+      // 45ª entrega: columnas 17/18/19 — cuenta/banco/tipoCuenta (CLABE o Tarjeta de Débito)
+      cuenta: String(f[17] || "").trim(),
+      banco: String(f[18] || "").trim(),
+      tipoCuenta: String(f[19] || "").trim(),
     }));
 }
 

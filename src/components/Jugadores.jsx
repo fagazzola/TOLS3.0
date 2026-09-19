@@ -52,11 +52,14 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
     ])
       .then(([jugadores, cal, camp]) => {
         setData(jugadores);
-        // el "próximo torneo" es la fecha más cercana (hoy o después) del campeonato activo — es la fecha
-        // para la que se necesita un Host asignado
+        // el "próximo torneo" es la fecha más cercana (hoy o después) que necesita un Host asignado —
+        // del campeonato activo, o (43ª entrega) una partida de práctica, que requiere Host igual que
+        // cualquier otra fecha aunque no pertenezca a ningún campeonato.
         const activo = camp?.activo || "";
         const hoy = iso(new Date());
-        const torneos = (cal?.torneos || []).filter((t) => (activo ? t.temporada === activo : true) && t.fecha >= hoy);
+        const torneos = (cal?.torneos || []).filter(
+          (t) => (t.practica || !activo || t.temporada === activo) && t.fecha >= hoy
+        );
         torneos.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
         setProximoTorneo(torneos[0] || null);
       })
@@ -178,10 +181,17 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
         <>
           {puedeEscribir && proximoTorneo && (
             <div className={"campeonato-banner" + (!hostActual ? " campeonato-banner-alerta" : "")}>
+              {/* 43ª entrega: si la fecha más próxima es una partida de práctica, se avisa como tal —
+                  requiere Host igual que un torneo normal, aunque no pertenezca a ningún campeonato. */}
               {hostActual ? (
-                <>Próximo torneo — {proximoTorneo.fecha} — Host asignado: <strong>{hostActual.nombre}</strong></>
+                <>
+                  Próximo {proximoTorneo.practica ? "(práctica)" : "torneo"} — {proximoTorneo.fecha} — Host asignado: <strong>{hostActual.nombre}</strong>
+                </>
               ) : (
-                <>⚠ No hay Host asignado para el próximo torneo ({proximoTorneo.fecha}). Sin Host no se puede iniciar el Game Night — asígnalo abajo.</>
+                <>
+                  ⚠ No hay Host asignado para el próximo {proximoTorneo.practica ? "partida de práctica" : "torneo"} ({proximoTorneo.fecha}).
+                  Sin Host no se puede iniciar el Game Night — asígnalo abajo.
+                </>
               )}
             </div>
           )}
@@ -276,7 +286,7 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
                           <button
                             className="btn btn-secondary btn-host-asignar"
                             disabled={hostGuardando === j.id || !proximoTorneo}
-                            title={!proximoTorneo ? "No hay un próximo torneo programado" : "Asignar como Host del próximo torneo"}
+                            title={!proximoTorneo ? "No hay una próxima fecha programada" : (proximoTorneo.practica ? "Asignar como Host de la próxima partida de práctica" : "Asignar como Host del próximo torneo")}
                             onClick={() => setConfirmarHost({ id: j.id, nombre: j.nombre, habiaOtro: !!hostActual && hostActual.id !== j.id })}
                           >
                             Asignar
@@ -304,7 +314,7 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
             <div className="modal-icon-badge">🎙</div>
             <div className="modal-title">Asignar Host: {confirmarHost.nombre}</div>
             <p className="section-sub" style={{ marginTop: 0 }}>
-              <b>{confirmarHost.nombre}</b> quedará como Host del torneo del <b>{proximoTorneo?.fecha}</b>. Se le va a
+              <b>{confirmarHost.nombre}</b> quedará como Host {proximoTorneo?.practica ? "de la partida de práctica" : "del torneo"} del <b>{proximoTorneo?.fecha}</b>. Se le va a
               enviar un correo avisándole.{" "}
               {confirmarHost.habiaOtro
                 ? <>El Host que estaba asignado antes se quita automáticamente.</>

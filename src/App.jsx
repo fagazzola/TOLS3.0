@@ -136,8 +136,10 @@ export default function App() {
 
       const activo = camp?.activo || "";
       const hoy = isoHoy();
+      // 43ª entrega: una partida de práctica también necesita Host, así que cuenta igual que un torneo
+      // del campeonato activo al buscar "la próxima fecha que necesita Host asignado".
       const proximos = (cal?.torneos || [])
-        .filter((t) => (activo ? t.temporada === activo : true) && t.fecha >= hoy)
+        .filter((t) => (t.practica || !activo || t.temporada === activo) && t.fecha >= hoy)
         .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
       const hayHost = (jug?.jugadores || []).some((j) => j.host === true);
       const puedeGestionarJugadores = puedeEditar(perfiles, session, "mod6") || session.rol === "Administrador General";

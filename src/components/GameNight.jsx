@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
-import { estadoTorneo, tipoDeFecha } from "../lib/gamenight.js";
+import { estadoTorneo, tipoDeFecha, PRACTICA_CAMPEONATO } from "../lib/gamenight.js";
 
 const API = "/api/gamenight";
 const API_TABLERO = "/api/tablero";
@@ -77,10 +77,15 @@ export default function GameNight({ session, perfiles, esHost }) {
       .finally(() => setLoading(false));
   }
 
-  const fechasDelCampeonato = useMemo(
-    () => torneosCal.filter((t) => t.temporada === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha)),
-    [torneosCal, campeonatoSel]
-  );
+  // 43ª entrega: "Partidas de práctica" es una opción más del combo de campeonato (llave especial
+  // PRACTICA_CAMPEONATO) — sus fechas no viven en tols-campeonatos ni en torneos[].temporada, sino
+  // marcadas con torneos[].practica en el Calendario.
+  const fechasDelCampeonato = useMemo(() => {
+    if (campeonatoSel === PRACTICA_CAMPEONATO) {
+      return torneosCal.filter((t) => t.practica).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    }
+    return torneosCal.filter((t) => t.temporada === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }, [torneosCal, campeonatoSel]);
 
   const torneoCal = fechasDelCampeonato.find((t) => t.fecha === fechaSel) || null;
   const tipo = tipoDeFecha(torneosCal, fechaSel);
@@ -238,6 +243,7 @@ export default function GameNight({ session, perfiles, esHost }) {
           {campeonatos.nombres.map((n) => (
             <option key={n} value={n}>{n}{n === campeonatos.activo ? " (activo)" : ""}</option>
           ))}
+          <option value={PRACTICA_CAMPEONATO}>🎯 Partidas de práctica</option>
         </select>
         <select className="field" style={{ maxWidth: 220 }} value={fechaSel} onChange={(e) => setFechaSel(e.target.value)}>
           <option value="">— elegir fecha —</option>
@@ -245,7 +251,14 @@ export default function GameNight({ session, perfiles, esHost }) {
             <option key={t.fecha} value={t.fecha}>{t.fecha} {t.main ? "(Main Event)" : ""}</option>
           ))}
         </select>
-        {torneoCal && <span className={"badge " + (torneoCal.main ? "badge-main" : "badge-regular")} style={{ alignSelf: "center" }}>{tipo}</span>}
+        {torneoCal && (
+          <span
+            className={"badge " + (campeonatoSel === PRACTICA_CAMPEONATO ? "badge-practica" : (torneoCal.main ? "badge-main" : "badge-regular"))}
+            style={{ alignSelf: "center" }}
+          >
+            {campeonatoSel === PRACTICA_CAMPEONATO ? "Práctica" : tipo}
+          </span>
+        )}
       </div>
 
       {!fechaSel && <p className="section-sub">Elegí el campeonato y la fecha del torneo que se está jugando.</p>}

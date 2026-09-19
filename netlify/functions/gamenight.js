@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { syncGameNight } from "./lib/msgraph.js";
 import { upsertVariosDesdeGameNight } from "./cobranza.js";
-import { calcularAmonestado, tipoDeFecha, estadoTorneo } from "../../src/lib/gamenight.js";
+import { calcularAmonestado, tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -203,11 +203,15 @@ export default async (req) => {
     await store.setJSON("data", mapa);
     await syncGameNight(mapa);
     // el reflejo en Cobranza se guarda con su propio store/sync — si por lo que sea falla, no debe
-    // tumbar la respuesta de Game Night (el Host ya vio su cambio aplicado en el tablero)
-    try {
-      await espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo);
-    } catch (e) {
-      console.error("[gamenight] no se pudo espejar en Cobranza:", e.message || e);
+    // tumbar la respuesta de Game Night (el Host ya vio su cambio aplicado en el tablero). Las
+    // partidas de práctica (43ª entrega) NUNCA se reflejan en Cobranza: no pertenecen a ningún
+    // campeonato real, así que no deben generar movimientos de cobro ni premio.
+    if (campeonato !== PRACTICA_CAMPEONATO) {
+      try {
+        await espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo);
+      } catch (e) {
+        console.error("[gamenight] no se pudo espejar en Cobranza:", e.message || e);
+      }
     }
 
     return new Response(JSON.stringify({ ...mapa, avisoAmonestacion }), { headers: HEADERS });

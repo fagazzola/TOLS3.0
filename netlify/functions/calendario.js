@@ -9,8 +9,11 @@ const HEADERS = { "content-type": "application/json; charset=utf-8" };
 // Control), no con el primero de la lista, para que coincidan con lo que ya se ve arriba en el
 // Calendario. Mismo patrón defensivo que ya se usa en tablero.js y campeonatos.js: leer, completar
 // lo que falte, y volver a guardar la versión corregida.
+// 43ª entrega: las partidas de práctica (`t.practica === true`) NUNCA deben recibir un campeonato
+// aquí — su `temporada` vacía es intencional (no pertenecen a ningún campeonato), así que se excluyen
+// del auto-completado igual que si ya tuvieran una `temporada` asignada.
 async function conTemporadaCompletada(data) {
-  const faltantes = (data.torneos || []).some((t) => !t.temporada);
+  const faltantes = (data.torneos || []).some((t) => !t.temporada && !t.practica);
   if (!faltantes) return data;
   try {
     const campStore = getStore("tols-campeonatos");
@@ -18,7 +21,7 @@ async function conTemporadaCompletada(data) {
     const nombres = Array.isArray(camp?.nombres) ? camp.nombres : [];
     const relleno = (camp?.activo && nombres.includes(camp.activo)) ? camp.activo : (nombres[0] || "");
     if (!relleno) return data;
-    return { ...data, torneos: data.torneos.map((t) => (t.temporada ? t : { ...t, temporada: relleno })) };
+    return { ...data, torneos: data.torneos.map((t) => (t.temporada || t.practica ? t : { ...t, temporada: relleno })) };
   } catch (e) {
     // si el registro de campeonatos no está disponible, se deja tal cual en vez de bloquear el calendario
     return data;

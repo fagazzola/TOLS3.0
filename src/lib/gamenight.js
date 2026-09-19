@@ -3,6 +3,13 @@
 // Netlify aquí, para poder importarse desde ambos lados sin problema.
 import { tarifa, tipoDeFecha } from "./cobranza.js";
 
+// 43ª entrega: llave de "campeonato" reservada para las partidas de práctica en tols-gamenight —
+// nunca puede coincidir con el nombre real de un campeonato (tols-campeonatos), así que sirve para
+// aislarlas del resto: al no existir ninguna configuración del Tablero de Control bajo esta llave,
+// tarifa()/calcularPot()/calcularPuntos() dan siempre $0/0 sin necesidad de código especial, y
+// netlify/functions/gamenight.js usa esta misma constante para saltarse el espejo hacia Cobranza.
+export const PRACTICA_CAMPEONATO = "__practica__";
+
 // ¿un check-in manual (activado por el Host después de iniciado el torneo) cae fuera de la
 // tolerancia configurada en el Tablero de Control? Si no hay hora de inicio todavía (el torneo no se
 // ha "iniciado" en Game Night), nunca amonesta — no hay contra qué medir el tiempo.

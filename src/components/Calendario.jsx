@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
 import { MoneyBadge } from "./PokerArt.jsx";
+import { PRACTICA_CAMPEONATO } from "../lib/gamenight.js";
 
 const API = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
@@ -100,9 +101,11 @@ export default function Calendario({ session, perfiles }) {
         // campeonato activo — y se guardan de una vez, para que no se sigan viendo "huérfanas" cada
         // vez que alguien entre al Calendario como Administrador. No depende de que el auto-completado
         // del servidor (`conTemporadaCompletada` en calendario.js) se dispare correctamente.
-        const faltan = editable && activo && (cal?.torneos || []).some((t) => !t.temporada);
+        // 43ª entrega: las fechas de práctica (`t.practica`) no cuentan como "huérfanas" — su
+        // `temporada` vacía es intencional, nunca se les asigna un campeonato.
+        const faltan = editable && activo && (cal?.torneos || []).some((t) => !t.temporada && !t.practica);
         if (faltan) {
-          const corregido = { ...cal, torneos: cal.torneos.map((t) => (t.temporada ? t : { ...t, temporada: activo })) };
+          const corregido = { ...cal, torneos: cal.torneos.map((t) => (t.temporada || t.practica ? t : { ...t, temporada: activo })) };
           setData(corregido);
           fetch(API, {
             method: "PUT",
@@ -169,13 +172,16 @@ export default function Calendario({ session, perfiles }) {
     setSaveError("");
     // el campeonato de cualquier fecha, nueva o existente, siempre es el "activo" que gobierna el
     // sitio (definido en el Tablero de Control) — ya no se elige por torneo desde aquí, para que no
-    // haya manera de que una fecha quede "desincronizada" del campeonato vigente.
+    // haya manera de que una fecha quede "desincronizada" del campeonato vigente. Excepción (43ª
+    // entrega): una partida de práctica nunca lleva campeonato, ni el activo ni ningún otro.
+    const esPractica = Boolean(existing?.practica);
     setModal({
       fechaOriginal: existing ? existing.fecha : null,
       fecha: iso(d),
       hora: existing ? existing.hora : data.defaultHora,
       main: existing ? existing.main : false,
-      temporada: campeonatoActivo,
+      practica: esPractica,
+      temporada: esPractica ? "" : campeonatoActivo,
       isNew: !existing,
     });
   }
@@ -212,12 +218,21 @@ export default function Calendario({ session, perfiles }) {
       setSaveError("Completa fecha y hora.");
       return;
     }
-    if (!modal.temporada.trim()) {
+    // 43ª entrega: una partida de práctica no requiere campeonato activo — es la única excepción a
+    // "toda fecha necesita un campeonato".
+    if (!modal.practica && !modal.temporada.trim()) {
       setSaveError("No hay ningún campeonato activo definido en el Tablero de Control todavía — créalo ahí primero.");
       return;
     }
     let torneos = data.torneos.filter((t) => t.fecha !== modal.fechaOriginal);
-    torneos.push({ n: 0, fecha: modal.fecha, hora: modal.hora, main: modal.main, temporada: modal.temporada.trim() });
+    torneos.push({
+      n: 0,
+      fecha: modal.fecha,
+      hora: modal.hora,
+      main: modal.main,
+      temporada: modal.practica ? "" : modal.temporada.trim(),
+      practica: modal.practica,
+    });
     persist({ ...data, torneos });
   }
 
@@ -240,6 +255,9 @@ export default function Calendario({ session, perfiles }) {
   // campeonato activo — si por algo no hay ninguno definido, se cae a todas las fechas para no
   // mostrar ceros por un problema de configuración
   const torneosActivo = campeonatoActivo ? data.torneos.filter((t) => t.temporada === campeonatoActivo) : data.torneos;
+  // 43ª entrega: partidas de práctica — independientes de cualquier campeonato, se listan aparte para
+  // que jugadores y administradores las sigan viendo aunque no cuenten en los datos de arriba.
+  const torneosPractica = data.torneos.filter((t) => t.practica);
   const mainCount = torneosActivo.filter((t) => t.main).length;
   const jugadosCount = torneosActivo.filter((t) => t.fecha < todayIso).length;
   const avancePct = torneosActivo.length > 0 ? Math.round((jugadosCount / torneosActivo.length) * 100) : 0;
@@ -262,17 +280,22 @@ export default function Calendario({ session, perfiles }) {
   const gananciasAcumuladas = misMovimientosCampeonato.reduce((a, m) => a + (Number(m.totalGanado) || 0), 0);
 
   // premio ganado por el jugador en sesión en UNA fecha puntual — null si no hay registro de Cobranza
-  // para esa fecha (torneo futuro, o pasado pero todavía no capturado en Game Night)
-  function gananciaDeFecha(fechaIso) {
+  // para esa fecha (torneo futuro, o pasado pero todavía no capturado en Game Night). 43ª entrega: una
+  // partida de práctica nunca tiene ganancia — nunca se refleja en Cobranza (ver gamenight.js).
+  function gananciaDeFecha(fechaIso, practica) {
+    if (practica) return null;
     const m = misMovimientosCampeonato.find((x) => x.fecha === fechaIso);
     return m ? Number(m.totalGanado) || 0 : null;
   }
 
   // 38ª entrega: hora del check-in del jugador en sesión para UNA fecha puntual, leída directo de Game
   // Night (`tols-gamenight`, la misma fuente que ya usa la pantalla del Host) — null si todavía no hizo
-  // check-in en esa fecha (o si Game Night no respondió, ya que es lectura best-effort).
-  function checkinDeFecha(fechaIso) {
-    const iso8601 = gamenight?.[campeonatoActivo]?.[fechaIso]?.jugadores?.[miCorreo]?.horaCheckin;
+  // check-in en esa fecha (o si Game Night no respondió, ya que es lectura best-effort). 43ª entrega:
+  // una partida de práctica guarda su check-in bajo la llave especial `PRACTICA_CAMPEONATO`, en vez del
+  // campeonato activo, porque no pertenece a ningún campeonato.
+  function checkinDeFecha(fechaIso, practica) {
+    const llave = practica ? PRACTICA_CAMPEONATO : campeonatoActivo;
+    const iso8601 = gamenight?.[llave]?.[fechaIso]?.jugadores?.[miCorreo]?.horaCheckin;
     return iso8601 || null;
   }
 
@@ -370,15 +393,19 @@ export default function Calendario({ session, perfiles }) {
                           <div className="cal-chip-row">
                             <span className="cal-chip-dot" aria-hidden="true" />
                             <span className="cal-chip-hora">{ev.hora}</span>
-                            <span className={ev.main ? "cal-chip-tag cal-chip-tag-main" : "cal-chip-tag cal-chip-tag-regular"}>
-                              {ev.main ? "Main" : "Regular"}
+                            <span className={"cal-chip-tag " + (ev.practica ? "cal-chip-tag-practica" : (ev.main ? "cal-chip-tag-main" : "cal-chip-tag-regular"))}>
+                              {ev.practica ? "Práctica" : (ev.main ? "Main" : "Regular")}
                             </span>
                           </div>
-                          {ev.temporada && <div className="cal-chip-temporada">{ev.temporada}</div>}
+                          {ev.practica ? (
+                            <div className="cal-chip-temporada">Sin campeonato</div>
+                          ) : (
+                            ev.temporada && <div className="cal-chip-temporada">{ev.temporada}</div>
+                          )}
                         </div>
                       ))}
                       {(() => {
-                        const g = gananciaDeFecha(iso(cell.date));
+                        const g = gananciaDeFecha(iso(cell.date), eventos[0]?.practica);
                         return g !== null ? (
                           <div className="cal-chip cal-chip-ganancia">
                             <MoneyBadge size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />
@@ -387,7 +414,7 @@ export default function Calendario({ session, perfiles }) {
                         ) : null;
                       })()}
                       {(() => {
-                        const ci = checkinDeFecha(iso(cell.date));
+                        const ci = checkinDeFecha(iso(cell.date), eventos[0]?.practica);
                         return ci ? (
                           <div className="cal-chip cal-chip-checkin" title={new Date(ci).toLocaleString("es-MX")}>
                             ✓ Check-in {horaCorta(ci)}
@@ -412,7 +439,9 @@ export default function Calendario({ session, perfiles }) {
         </>
       ) : (
         <div className="cal-list">
-          {torneosActivo
+          {/* 43ª entrega: las partidas de práctica se listan junto con las del campeonato activo, para
+              que el jugador las siga viendo aunque no cuenten para puntos ni cobranza. */}
+          {[...torneosActivo, ...torneosPractica]
             .slice()
             .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
             .map((t) => {
@@ -432,23 +461,33 @@ export default function Calendario({ session, perfiles }) {
                         {esHoy && <span className="cal-list-hoy-tag">Hoy</span>}
                       </div>
                       <div className="cal-list-badges">
-                        <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
+                        {t.practica ? (
+                          <span className="badge badge-practica">Práctica</span>
+                        ) : (
+                          <span className={t.main ? "badge badge-main" : "badge badge-regular"}>{t.main ? "Main Event" : "Regular"}</span>
+                        )}
                         <span className={pasado ? "badge badge-efectuado" : "badge badge-pendiente"}>{pasado ? "Efectuado" : "Pendiente"}</span>
                       </div>
                     </div>
                     <div className="cal-list-resultado">
-                      <span>Posición: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
-                      <span>Puntos: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
-                      <span>
-                        Ganancia:{" "}
-                        {(() => {
-                          const g = gananciaDeFecha(t.fecha);
-                          if (g !== null) return <span className="cal-ganancia-inline">{money(g)}</span>;
-                          return <span className="stat-value-proximamente">{pasado ? "Sin registro" : "Próximamente"}</span>;
-                        })()}
-                      </span>
+                      {t.practica ? (
+                        <span className="stat-value-proximamente">No cuenta para puntos ni cobranza — es una partida de práctica</span>
+                      ) : (
+                        <>
+                          <span>Posición: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
+                          <span>Puntos: <span className="stat-value-proximamente">Próximamente (Game Night)</span></span>
+                          <span>
+                            Ganancia:{" "}
+                            {(() => {
+                              const g = gananciaDeFecha(t.fecha, false);
+                              if (g !== null) return <span className="cal-ganancia-inline">{money(g)}</span>;
+                              return <span className="stat-value-proximamente">{pasado ? "Sin registro" : "Próximamente"}</span>;
+                            })()}
+                          </span>
+                        </>
+                      )}
                       {(() => {
-                        const ci = checkinDeFecha(t.fecha);
+                        const ci = checkinDeFecha(t.fecha, t.practica);
                         return ci ? (
                           <span>
                             Check-in: <span className="cal-ganancia-inline">{horaCorta(ci)}</span>
@@ -471,7 +510,9 @@ export default function Calendario({ session, perfiles }) {
               </div>
             </div>
           )}
-          {torneosActivo.length === 0 && <p className="section-sub">Todavía no hay torneos programados para este campeonato.</p>}
+          {torneosActivo.length === 0 && torneosPractica.length === 0 && (
+            <p className="section-sub">Todavía no hay torneos programados para este campeonato.</p>
+          )}
         </div>
       )}
 
@@ -479,6 +520,25 @@ export default function Calendario({ session, perfiles }) {
         <div className="modal-backdrop" onClick={() => !saving && setModal(null)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">{modal.isNew ? "Nuevo torneo" : "Editar torneo"}</div>
+
+            {/* 43ª entrega: botón para marcar la fecha como partida de práctica — independiente de
+                cualquier campeonato, nunca cuenta para puntos ni cobranza, pero sigue requiriendo Host
+                y check-in igual que un torneo normal (eso vive en Jugadores/Game Night). */}
+            <button
+              type="button"
+              className={"btn " + (modal.practica ? "btn-primary" : "btn-secondary")}
+              style={{ marginBottom: 14, width: "100%" }}
+              onClick={() =>
+                setModal({
+                  ...modal,
+                  practica: !modal.practica,
+                  temporada: !modal.practica ? "" : campeonatoActivo,
+                })
+              }
+            >
+              {modal.practica ? "✓ Partida de práctica" : "🎯 Marcar como partida de práctica"}
+            </button>
+
             <div className="login-field">
               <label>Fecha</label>
               <input
@@ -497,12 +557,21 @@ export default function Calendario({ session, perfiles }) {
                 onChange={(e) => setModal({ ...modal, hora: e.target.value })}
               />
             </div>
-            <div className="login-field">
-              <label>Campeonato</label>
-              <div className="field field-readonly" title="Lo define el combo del Tablero de Control — no se elige por fecha.">
-                {modal.temporada || "(sin campeonato activo — créalo en el Tablero de Control)"}
+            {modal.practica ? (
+              <div className="login-field">
+                <label>Campeonato</label>
+                <div className="field field-readonly" title="Las partidas de práctica no pertenecen a ningún campeonato.">
+                  Sin campeonato — no cuenta para puntos ni cobranza
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="login-field">
+                <label>Campeonato</label>
+                <div className="field field-readonly" title="Lo define el combo del Tablero de Control — no se elige por fecha.">
+                  {modal.temporada || "(sin campeonato activo — créalo en el Tablero de Control)"}
+                </div>
+              </div>
+            )}
             <label className="chk-inline">
               <input
                 type="checkbox"

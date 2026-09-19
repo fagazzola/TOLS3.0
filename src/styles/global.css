@@ -536,6 +536,10 @@ h1 {
   font-size: 11px; font-family: "IBM Plex Mono", monospace; cursor: pointer; color: var(--ink-soft);
 }
 .gn-toggle.on { background: var(--good); border-color: var(--good); color: #fff; }
+/* 48ª entrega: toggle manual de "Amonestado" en la celda de Check-in — mismo look que gn-toggle
+   pero en rojo/alerta cuando está activo, para distinguirlo de los Sí/No de buy-in/add-on. */
+.gn-toggle-chico { padding: 3px 7px; font-size: 10px; }
+.gn-toggle-chico.on { background: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
 
 .gn-host-line { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft); margin: 2px 0 0; }
 .gn-row-eliminado { color: var(--ink-soft); opacity: 0.85; }

@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { syncGameNight } from "./lib/msgraph.js";
 import { upsertVariosDesdeGameNight } from "./cobranza.js";
-import { calcularAmonestado, tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe } from "../../src/lib/gamenight.js";
+import { tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe, recomprasMaxEfectivo } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -27,7 +27,10 @@ function normalizarTorneo(t) {
   for (const [correo, j] of Object.entries(t?.jugadores || {})) {
     jugadores[String(correo).trim().toLowerCase()] = normalizarJugadorGN(j);
   }
-  return { horaInicio: String(t?.horaInicio || "").trim(), jugadores };
+  const ordenEliminados = Array.isArray(t?.ordenEliminados)
+    ? t.ordenEliminados.map((c) => String(c || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+  return { horaInicio: String(t?.horaInicio || "").trim(), jugadores, ordenEliminados };
 }
 
 function normalizarMapa(raw) {
@@ -63,7 +66,7 @@ async function calendarioTorneos() {
 
 function getTorneo(mapa, campeonato, fecha) {
   if (!mapa[campeonato]) mapa[campeonato] = {};
-  if (!mapa[campeonato][fecha]) mapa[campeonato][fecha] = { horaInicio: "", jugadores: {} };
+  if (!mapa[campeonato][fecha]) mapa[campeonato][fecha] = { horaInicio: "", jugadores: {}, ordenEliminados: [] };
   return mapa[campeonato][fecha];
 }
 
@@ -71,7 +74,7 @@ function getTorneo(mapa, campeonato, fecha) {
 // que pueda mover subtotales o posiciones, para que el Tesorero siempre vea lo mismo que se vivió en
 // la mesa sin depender de que alguien copie datos a mano de un módulo a otro
 async function espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo) {
-  const estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo });
+  const estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo, ordenEliminados: torneo.ordenEliminados });
   // se espejan TODOS los jugadores que ya tuvieron alguna vez un registro en este torneo, no solo los
   // que siguen con check-in activo — así, si el Host quita un check-in por error, el movimiento que ya
   // se había reflejado en Cobranza también se pone en $0 en vez de quedarse con el valor viejo
@@ -136,8 +139,10 @@ export default async (req) => {
 
     const [tableroMapa, torneosCal] = await Promise.all([tableroMapaActual(), calendarioTorneos()]);
     const tipo = tipoDeFecha(torneosCal, fecha);
+    // 48ª entrega: la tolerancia de check-in ya solo se usa para mostrarle un mensaje informativo al
+    // Host (se calcula y se manda en `avisoTolerancia`) — ya no amonesta a nadie automáticamente.
     const toleranciaMin = tableroMapa?.[campeonato]?.toleranciaCheckinMin ?? 10;
-    const recomprasMax = tableroMapa?.[campeonato]?.recomprasMax ?? 0;
+    const recomprasMax = recomprasMaxEfectivo(tableroMapa, campeonato);
 
     // 45ª entrega: ya no existe un botón "Iniciar torneo" — la hora de inicio para medir la tolerancia
     // de check-in sale directo de la fecha/hora que ya está guardada en el Calendario para este torneo
@@ -154,41 +159,42 @@ export default async (req) => {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (!correo) return new Response(JSON.stringify({ error: "Falta el correo del jugador." }), { status: 400, headers: HEADERS });
       const manual = Boolean(body.manual);
-      const amonestado = calcularAmonestado({ manual, horaInicio, toleranciaMin });
+      // 48ª entrega: la activación ya NO amonesta sola por pasarse del tiempo de tolerancia — Federico
+      // pidió que el tiempo sea "simplemente ilustrativo". El Host decide a mano con la acción
+      // "amonestar" si corresponde o no. Se conserva el valor de amonestado que ya tuviera el jugador
+      // (por si el Host ya lo había marcado antes de quitarle el check-in por error).
       torneo.jugadores[correo] = normalizarJugadorGN({
         ...torneo.jugadores[correo],
         nombre: body.nombre || torneo.jugadores[correo]?.nombre || "",
         checkin: true,
         manual,
-        amonestado,
         horaCheckin: ahora,
         buyIn: true,
         actualizado: ahora,
       });
-      if (amonestado) avisoAmonestacion = "Se activó con amonestación: perdió el punto de asistencia por hacer check-in manual fuera del tiempo de tolerancia.";
     } else if (body.accion === "checkinMasivo") {
-      // activación manual de varios jugadores al mismo tiempo (45ª entrega) — mismo cálculo de
-      // amonestación que una activación individual, uno por uno, en un solo guardado.
+      // activación manual de varios jugadores al mismo tiempo (45ª entrega) — sin amonestación
+      // automática (48ª entrega), igual que la activación individual.
       const lista = Array.isArray(body.jugadores) ? body.jugadores : [];
       if (!lista.length) return new Response(JSON.stringify({ error: "No se seleccionó ningún jugador." }), { status: 400, headers: HEADERS });
-      let algunoAmonestado = false;
       for (const j of lista) {
         const correo = String(j?.correo || "").trim().toLowerCase();
         if (!correo) continue;
-        const amonestado = calcularAmonestado({ manual: true, horaInicio, toleranciaMin });
-        if (amonestado) algunoAmonestado = true;
         torneo.jugadores[correo] = normalizarJugadorGN({
           ...torneo.jugadores[correo],
           nombre: j.nombre || torneo.jugadores[correo]?.nombre || "",
           checkin: true,
           manual: true,
-          amonestado,
           horaCheckin: ahora,
           buyIn: true,
           actualizado: ahora,
         });
       }
-      if (algunoAmonestado) avisoAmonestacion = "Uno o más jugadores quedaron amonestados: se activaron fuera del tiempo de tolerancia y pierden el punto de asistencia.";
+    } else if (body.accion === "amonestar") {
+      // 48ª entrega: toggle manual del Host — reemplaza el cálculo automático por tolerancia.
+      const correo = String(body.correo || "").trim().toLowerCase();
+      if (!torneo.jugadores[correo]) return new Response(JSON.stringify({ error: "Ese jugador no tiene check-in." }), { status: 400, headers: HEADERS });
+      torneo.jugadores[correo] = { ...torneo.jugadores[correo], amonestado: Boolean(body.valor), actualizado: ahora };
     } else if (body.accion === "quitarCheckin") {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (torneo.jugadores[correo]) {
@@ -214,11 +220,33 @@ export default async (req) => {
       if (!torneo.jugadores[victima]) return new Response(JSON.stringify({ error: "Ese jugador no tiene check-in." }), { status: 400, headers: HEADERS });
       if (victima === verdugo) return new Response(JSON.stringify({ error: "Un jugador no puede eliminarse a sí mismo." }), { status: 400, headers: HEADERS });
       torneo.jugadores[victima] = { ...torneo.jugadores[victima], eliminadoPor: verdugo, horaEliminacion: ahora, actualizado: ahora };
+      if (!torneo.ordenEliminados.includes(victima)) torneo.ordenEliminados.push(victima);
     } else if (body.accion === "quitarKiller") {
       const victima = String(body.victima || "").trim().toLowerCase();
       if (torneo.jugadores[victima]) {
         torneo.jugadores[victima] = { ...torneo.jugadores[victima], eliminadoPor: "", horaEliminacion: "", actualizado: ahora };
       }
+      torneo.ordenEliminados = torneo.ordenEliminados.filter((c) => c !== victima);
+    } else if (body.accion === "moverLugar") {
+      // 48ª entrega: el Host puede corregir a mano el lugar de salida de un jugador ya eliminado —
+      // por experiencia, el orden real de la mesa a veces no coincide con la hora exacta registrada de
+      // cada eliminación, y el lugar de salida sí afecta premios. Al mover uno, los demás se reajustan
+      // solos porque el lugar de TODOS sale de su índice en `ordenEliminados` (ver src/lib/gamenight.js).
+      const correo = String(body.correo || "").trim().toLowerCase();
+      const nuevoLugar = Number(body.lugar);
+      if (!torneo.jugadores[correo]) return new Response(JSON.stringify({ error: "Ese jugador no tiene check-in." }), { status: 400, headers: HEADERS });
+      if (!torneo.ordenEliminados.includes(correo)) {
+        return new Response(JSON.stringify({ error: "Ese jugador no ha sido eliminado todavía." }), { status: 400, headers: HEADERS });
+      }
+      const totalHabilitados = Object.values(torneo.jugadores).filter((j) => j.checkin).length;
+      // lugar = total - índice → índice = total - lugar. El campeón (lugar 1) no vive en este arreglo.
+      const nuevoIndice = totalHabilitados - nuevoLugar;
+      if (!Number.isFinite(nuevoIndice) || nuevoIndice < 0 || nuevoIndice >= torneo.ordenEliminados.length) {
+        return new Response(JSON.stringify({ error: "Ese lugar no es válido para este torneo." }), { status: 400, headers: HEADERS });
+      }
+      torneo.ordenEliminados = torneo.ordenEliminados.filter((c) => c !== correo);
+      torneo.ordenEliminados.splice(nuevoIndice, 0, correo);
+      torneo.jugadores[correo] = { ...torneo.jugadores[correo], actualizado: ahora };
     } else if (body.accion === "mejorMano") {
       const correo = String(body.correo || "").trim().toLowerCase();
       const valor = Boolean(body.valor);

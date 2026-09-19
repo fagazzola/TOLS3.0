@@ -10,14 +10,23 @@ import { tarifa, tipoDeFecha } from "./cobranza.js";
 // netlify/functions/gamenight.js usa esta misma constante para saltarse el espejo hacia Cobranza.
 export const PRACTICA_CAMPEONATO = "__practica__";
 
-// ¿un check-in manual (activado por el Host) cae fuera de la tolerancia configurada en el Tablero de
-// Control? Si no hay hora de inicio programada (la fecha no tiene `hora` en el Calendario), nunca
-// amonesta — no hay contra qué medir el tiempo.
-export function calcularAmonestado({ manual, horaInicio, toleranciaMin }) {
-  if (!manual || !horaInicio) return false;
-  const minutos = (Date.now() - new Date(horaInicio).getTime()) / 60000;
-  return minutos > (Number(toleranciaMin) || 0);
+// 48ª entrega: Buy-in/Re-buys/Add-on tienen que funcionar igual aunque el campeonato no tenga
+// configuración en el Tablero de Control (las partidas de práctica NUNCA la tienen, y un campeonato
+// real recién creado tampoco hasta que Federico lo configure) — la diferencia es que no generan $
+// porque no hay tarifa definida (tarifa() ya da $0 sola), no que el botón se bloquee. Antes, sin
+// configuración, `recomprasMax` caía en 0 por default y el botón de "+" quedaba deshabilitado para
+// siempre. Ahora: si NO existe configuración para este campeonato, no hay límite (Infinity); si SÍ
+// existe pero el campo en sí está en 0, se respeta como un límite real que Federico configuró a mano.
+export function recomprasMaxEfectivo(tableroMapa, campeonato) {
+  const datos = tableroMapa?.[campeonato];
+  if (!datos) return Infinity;
+  return Number(datos.recomprasMax) || 0;
 }
+
+// 48ª entrega: la tolerancia de check-in configurada en el Tablero de Control ya NO amonesta
+// automáticamente a nadie — Federico pidió que sea puramente informativa para el Host ("un mensaje",
+// no una función). El Host decide a mano, desde la tabla de habilitados, si un jugador queda
+// amonestado o no (acción `"amonestar"`). Se quitó `calcularAmonestado()` de aquí porque ya no se usa.
 
 // 45ª entrega: ya no hace falta que el Host "inicie" el torneo a mano en Game Night — la hora de
 // inicio sale directo de la fecha/hora que ya está guardada en el Calendario para ese torneo. Se
@@ -40,23 +49,25 @@ export function torneoCalendarioDe(torneosCal, campeonato, fecha) {
   return (torneosCal || []).find((t) => t.temporada === campeonato && t.fecha === fecha) || null;
 }
 
-// arma la lista de posiciones de salida a partir de quién eliminó a quién — se deriva siempre desde
-// cero (nunca se guarda "lugar" como dato independiente) para que sea imposible que quede
-// desincronizado si el Host corrige o borra un killer después. Orden: el primero en salir (más
-// temprano) recibe el lugar más alto (ej. con 9 jugadores, el primer eliminado es 9º lugar); cuando
-// solo queda un jugador sin eliminar, ese es el Campeón (lugar 1) sin necesidad de un killer explícito.
-export function derivarPosiciones(jugadoresPorCorreo, correosHabilitados) {
+// arma la lista de posiciones de salida a partir del orden de eliminación guardado en el torneo
+// (`ordenEliminados`, un arreglo de correos del primero en salir al último). El servidor mantiene este
+// arreglo solo (agrega al eliminar con "killer", quita al deshacer con "quitarKiller"), pero desde la
+// 48ª entrega el Host también lo puede reordenar a mano con `"moverLugar"` — por experiencia, el orden
+// real de la mesa a veces no coincide exactamente con la hora registrada de cada eliminación, y el
+// lugar de salida sí afecta premios, así que hace falta poder corregirlo. Mover a alguien de posición
+// reacomoda a los demás solo, porque el lugar de TODOS sale de su índice en este mismo arreglo, nunca
+// de un número guardado por separado. Orden: el primero en salir (más temprano, índice 0) recibe el
+// lugar más alto (ej. con 9 jugadores, el primer eliminado es 9º lugar); cuando solo queda un jugador
+// sin eliminar, ese es el Campeón (lugar 1) sin necesidad de un killer explícito.
+export function derivarPosiciones(jugadoresPorCorreo, correosHabilitados, ordenEliminados) {
   const total = correosHabilitados.length;
-  // "eliminado" se decide solo por tener hora de salida — el nombre de quien lo eliminó (killer) es
-  // informativo y puede quedar en blanco (ej. quedó fuera sin que se identifique quién lo eliminó)
-  const eliminados = correosHabilitados
-    .map((correo) => ({ correo, ...(jugadoresPorCorreo[correo] || {}) }))
-    .filter((j) => j.horaEliminacion)
-    .sort((a, b) => a.horaEliminacion.localeCompare(b.horaEliminacion));
+  // por seguridad, se ignora cualquier correo en `ordenEliminados` que ya no esté habilitado (ej. se
+  // le quitó el check-in por completo) — nunca debería pasar, pero así nunca se cae la pantalla
+  const eliminadosOrdenados = (ordenEliminados || []).filter((c) => correosHabilitados.includes(c));
 
   const lugares = {}; // correo -> lugar (número)
-  eliminados.forEach((j, idx) => {
-    lugares[j.correo] = total - idx;
+  eliminadosOrdenados.forEach((correo, idx) => {
+    lugares[correo] = total - idx;
   });
 
   const sinEliminar = correosHabilitados.filter((c) => !lugares[c]);
@@ -66,7 +77,7 @@ export function derivarPosiciones(jugadoresPorCorreo, correosHabilitados) {
     campeon = sinEliminar[0];
   }
 
-  return { total, lugares, eliminados: eliminados.map((j) => j.correo), enJuego: sinEliminar, campeon };
+  return { total, lugares, eliminados: eliminadosOrdenados, enJuego: sinEliminar, campeon };
 }
 
 // la burbuja: el último jugador en salir justo ANTES de entrar a los lugares que pagan — es decir,
@@ -126,13 +137,13 @@ export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo) {
 // arma, para un torneo puntual (campeonato+fecha), el estado completo ya calculado que consume la UI
 // y lo que se necesita para reflejar el torneo en Cobranza — un solo lugar con toda la lógica de
 // negocio para que servidor y cliente calculen exactamente lo mismo
-export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, toleranciaMin }) {
+export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, ordenEliminados }) {
   const datosTablero = tableroMapa?.[campeonato] || {};
   const correosHabilitados = Object.entries(jugadoresState)
     .filter(([, j]) => j.checkin)
     .map(([correo]) => correo);
 
-  const { total, lugares, campeon } = derivarPosiciones(jugadoresState, correosHabilitados);
+  const { total, lugares, campeon } = derivarPosiciones(jugadoresState, correosHabilitados, ordenEliminados);
   const numLugaresPago = (datosTablero.premios?.porTorneo?.lugares || []).length;
   const burbujaCorreo = calcularBurbuja(lugares, numLugaresPago, total);
 

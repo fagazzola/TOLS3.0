@@ -3,6 +3,34 @@
 // exactamente los mismos que los que se guardan/sincronizan. No depende de nada del DOM ni de
 // Netlify, así que se puede importar desde ambos lados sin problema.
 
+// 44ª entrega: validación de la cuenta de cobro (CLABE o Tarjeta de Débito), en el formato ORIGINAL
+// que exige el banco — solo dígitos, sin espacios ni guiones. Compartida entre el cliente (MiPerfil.jsx,
+// Cobranza.jsx, para el combo y el mensaje de error antes de guardar) y el servidor
+// (netlify/functions/jugadores.js, para no guardar basura aunque el navegador falle o alguien pegue el
+// dato con espacios).
+export const TIPOS_CUENTA = ["CLABE", "Tarjeta de Débito"];
+
+export function longitudEsperada(tipoCuenta) {
+  if (tipoCuenta === "CLABE") return 18;
+  if (tipoCuenta === "Tarjeta de Débito") return 16;
+  return null;
+}
+
+// devuelve un mensaje de error (string) si la combinación cuenta+tipoCuenta no es válida, o null si
+// está bien. Ambos vacíos NO es error (el jugador todavía no cargó sus datos de cobro).
+export function validarCuentaCobro(cuenta, tipoCuenta) {
+  const limpio = String(cuenta || "").trim();
+  const tipo = String(tipoCuenta || "").trim();
+  if (!limpio && !tipo) return null;
+  if (!tipo) return "Elige si es CLABE o Tarjeta de Débito.";
+  if (!TIPOS_CUENTA.includes(tipo)) return "Tipo de cuenta no reconocido — elige CLABE o Tarjeta de Débito.";
+  const longitud = longitudEsperada(tipo);
+  if (!limpio) return `Falta el número de ${tipo === "CLABE" ? "CLABE" : "tarjeta"}.`;
+  if (!/^\d+$/.test(limpio)) return `${tipo} debe contener solo dígitos, sin espacios ni guiones.`;
+  if (limpio.length !== longitud) return `${tipo} debe tener exactamente ${longitud} dígitos (tiene ${limpio.length}).`;
+  return null;
+}
+
 // tarifa (regular/main) de un concepto ("buyin" | "rebuy" | "addon") para un campeonato, leída del
 // Tablero de Control (tols-tablero). Si el campeonato no tiene datos todavía, devuelve 0 en vez de
 // tronar — el Tesorero va a ver montos en $0 hasta que el Tablero tenga ese campeonato configurado.

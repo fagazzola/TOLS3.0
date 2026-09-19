@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import CampoPassword from "./CampoPassword.jsx";
 import SelectorManoFavorita from "./SelectorManoFavorita.jsx";
+import { TIPOS_CUENTA, longitudEsperada, validarCuentaCobro } from "../lib/cobranza.js";
 
 const API_JUG = "/api/jugadores";
-const API_COBRANZA = "/api/cobranza";
 const API_RESET_CODIGO = "/api/reset-codigo";
 const API_RESET_CONFIRMAR = "/api/reset-confirmar";
 const DURACION_S = 300; // 5 minutos — mismo código de un solo uso que ya usa "Olvidé mi contraseña" en Login
@@ -23,7 +23,6 @@ function formatTelefono(v) {
 export default function MiPerfil({ session }) {
   const correo = (session?.usuario || "").trim().toLowerCase();
   const [jugador, setJugador] = useState(null);
-  const [financiero, setFinanciero] = useState(null); // { cuenta, banco, tipoCuenta }
   const [form, setForm] = useState(null);
   const [original, setOriginal] = useState(null); // última versión guardada — para detectar cambios sin guardar
   const [loading, setLoading] = useState(true);
@@ -63,28 +62,26 @@ export default function MiPerfil({ session }) {
   function cargar() {
     setLoading(true);
     setError("");
-    Promise.all([
-      fetch(API_JUG).then((r) => r.json()),
-      fetch(API_COBRANZA).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ])
-      .then(([jug, cob]) => {
+    // 44ª entrega: cuenta/banco/tipoCuenta se centralizaron en tols-jugadores (antes vivían aparte en
+    // tols-cobranza) — ya no hace falta un segundo fetch a /api/cobranza para tenerlos.
+    fetch(API_JUG)
+      .then((r) => r.json())
+      .then((jug) => {
         const mio = (jug?.jugadores || []).find((j) => j.correo === correo);
         if (!mio) {
           setError("No se encontró tu registro de jugador. Si acabas de registrarte, vuelve a intentar en unos minutos.");
           return;
         }
         setJugador(mio);
-        const fin = cob?.jugadores?.[correo] || {};
-        setFinanciero(fin);
         const cargado = {
           aliasJugador: mio.aliasJugador || "",
           aliasPokerStars: mio.aliasPokerStars || "",
           telefono: mio.telefono || "",
           fecNac: mio.fecNac || "",
           manoFavorita: mio.manoFavorita || "",
-          cuenta: fin.cuenta || "",
-          banco: fin.banco || "",
-          tipoCuenta: fin.tipoCuenta || "",
+          cuenta: mio.cuenta || "",
+          banco: mio.banco || "",
+          tipoCuenta: mio.tipoCuenta || "",
         };
         setForm(cargado);
         setOriginal(cargado);
@@ -95,10 +92,19 @@ export default function MiPerfil({ session }) {
 
   async function guardar() {
     if (!form) return;
+    // 44ª entrega: CLABE (18 dígitos) o Tarjeta de Débito (16 dígitos), solo numéricos — se valida
+    // antes de mandar nada al servidor, que igual vuelve a validar por su cuenta (defensa en profundidad).
+    const errorCuenta = validarCuentaCobro(form.cuenta, form.tipoCuenta);
+    if (errorCuenta) {
+      setError(errorCuenta);
+      return;
+    }
     setGuardando(true);
     setError("");
     setGuardadoOk(false);
     try {
+      // 44ª entrega: cuenta/banco/tipoCuenta viajan en el mismo PUT a /api/jugadores que el resto del
+      // perfil — antes hacía falta una segunda llamada a /api/cobranza porque esos datos vivían aparte.
       const r1 = await fetch(API_JUG, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -110,28 +116,15 @@ export default function MiPerfil({ session }) {
           telefono: form.telefono,
           fecNac: form.fecNac,
           manoFavorita: form.manoFavorita,
-        }),
-      });
-      const j1 = await r1.json();
-      if (!r1.ok) throw new Error(j1.error || "No se pudieron guardar tus datos.");
-
-      const r2 = await fetch(API_COBRANZA, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          accion: "guardarJugador",
-          correo,
-          nombre: jugador.nombre,
           cuenta: form.cuenta,
           banco: form.banco,
           tipoCuenta: form.tipoCuenta,
         }),
       });
-      const j2 = await r2.json();
-      if (!r2.ok) throw new Error(j2.error || "No se pudieron guardar tus datos bancarios.");
+      const j1 = await r1.json();
+      if (!r1.ok) throw new Error(j1.error || "No se pudieron guardar tus datos.");
 
       setJugador(j1.jugadores.find((j) => j.correo === correo));
-      setFinanciero(j2.jugadores?.[correo] || {});
       setOriginal(form);
       setGuardadoOk(true);
     } catch (e) {
@@ -294,16 +287,33 @@ export default function MiPerfil({ session }) {
           </p>
           <div className="login-field-row">
             <div className="login-field" style={{ maxWidth: 200 }}>
-              <label>Cuenta</label>
-              <input className="field" value={form.cuenta} onChange={(e) => setForm({ ...form, cuenta: e.target.value })} />
+              <label>Tipo de cuenta</label>
+              <select
+                className="field"
+                value={form.tipoCuenta}
+                onChange={(e) => setForm({ ...form, tipoCuenta: e.target.value })}
+              >
+                <option value="">— elegir —</option>
+                {TIPOS_CUENTA.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div className="login-field" style={{ maxWidth: 220 }}>
+              <label>
+                {form.tipoCuenta ? `${form.tipoCuenta} (${longitudEsperada(form.tipoCuenta)} dígitos)` : "Número de cuenta"}
+              </label>
+              <input
+                className="field"
+                inputMode="numeric"
+                maxLength={longitudEsperada(form.tipoCuenta) || 20}
+                value={form.cuenta}
+                onChange={(e) => setForm({ ...form, cuenta: e.target.value.replace(/\D/g, "") })}
+              />
             </div>
             <div className="login-field" style={{ maxWidth: 200 }}>
               <label>Banco</label>
               <input className="field" value={form.banco} onChange={(e) => setForm({ ...form, banco: e.target.value })} />
-            </div>
-            <div className="login-field" style={{ maxWidth: 200 }}>
-              <label>Tipo de cuenta</label>
-              <input className="field" value={form.tipoCuenta} onChange={(e) => setForm({ ...form, tipoCuenta: e.target.value })} placeholder="CLABE / Tarjeta de débito" />
             </div>
           </div>
 

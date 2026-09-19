@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
-import { finanzasCampeonato } from "../lib/cobranza.js";
+import { finanzasCampeonato, TIPOS_CUENTA, longitudEsperada, validarCuentaCobro } from "../lib/cobranza.js";
 
 const API = "/api/cobranza";
 const API_ENVIAR = "/api/cobranza-enviar-estado";
@@ -72,9 +72,23 @@ export default function Cobranza({ session, perfiles }) {
   const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
   const [motivoExcepcion, setMotivoExcepcion] = useState("");
 
+  // 44ª entrega: cuenta/banco/tipoCuenta ahora viven en tols-jugadores (centralizados, editables desde
+  // Mi Perfil) — este mini-formulario deja al Tesorero editarlos en nombre de otro jugador desde acá,
+  // con la misma validación de CLABE (18 dígitos)/Tarjeta de Débito (16 dígitos). Estado local propio
+  // (no controlado directo por `data.resumen`) para poder mostrar el error antes de guardar.
+  const [cuentaForm, setCuentaForm] = useState({ cuenta: "", banco: "", tipoCuenta: "" });
+  const [cuentaError, setCuentaError] = useState("");
+
   useEffect(() => {
     cargar();
   }, []);
+
+  useEffect(() => {
+    const r = correoEstado ? data?.resumen?.[correoEstado] : null;
+    setCuentaForm({ cuenta: r?.cuenta || "", banco: r?.banco || "", tipoCuenta: r?.tipoCuenta || "" });
+    setCuentaError("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correoEstado]);
 
   function cargar() {
     setLoading(true);
@@ -195,6 +209,37 @@ export default function Cobranza({ session, perfiles }) {
     }
   }
 
+  // 44ª entrega: guarda cuenta/banco/tipoCuenta en /api/jugadores (accion "autoeditar", por correo) en
+  // vez de /api/cobranza — ahí es donde vive esa información desde esta entrega. Solo tiene sentido
+  // cuando el correo ya tiene un registro real en Jugadores (ver `tieneRegistroJugador` en el render).
+  async function guardarCuentaCobro(correo) {
+    const errorValidacion = validarCuentaCobro(cuentaForm.cuenta, cuentaForm.tipoCuenta);
+    if (errorValidacion) {
+      setCuentaError(errorValidacion);
+      return;
+    }
+    setCuentaError("");
+    setGuardando(true);
+    try {
+      const r = await fetch(API_JUG, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion: "autoeditar", correo, ...cuentaForm }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
+      setJugadoresSitio(json.jugadores || []);
+      // el resumen de Cobranza saca cuenta/banco/tipoCuenta del directorio de Jugadores (44ª entrega) —
+      // se refresca para reflejar el cambio sin recargar toda la pantalla
+      const cob = await fetch(API).then((rr) => rr.json());
+      setData(cob);
+    } catch (e) {
+      setCuentaError(e.message || "No se pudo guardar.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   async function aprobarExcepcion() {
     if (!excepcionModal || !data?.proximaFecha) return;
     setGuardando(true);
@@ -251,6 +296,10 @@ export default function Cobranza({ session, perfiles }) {
   const movimientosJugador = correoEstado ? (data?.movimientos || []).filter((m) => m.correo === correoEstado).sort((a, b) => b.fecha.localeCompare(a.fecha)) : [];
   const pendientesJugador = movimientosJugador.filter((m) => !m.pagado && m.montoTotal > 0);
   const adeudaJugador = correoEstado ? data?.adeudos?.[correoEstado] : false;
+  // 44ª entrega: cuenta/banco/tipoCuenta solo se pueden guardar para un correo que ya tiene un
+  // registro real en Jugadores (ahí es donde viven) — un correo registrado únicamente en Cobranza (sin
+  // Jugadores) no tiene dónde guardarlos.
+  const tieneRegistroJugador = correoEstado ? jugadoresSitio.some((j) => j.correo === correoEstado) : false;
 
   const finanzas = campeonatoSel ? finanzasCampeonato(campeonatoSel, data?.movimientos || [], tableroMapa) : null;
 
@@ -472,19 +521,55 @@ export default function Cobranza({ session, perfiles }) {
               )}
 
               {editable && (
-                <div className="login-field-row" style={{ marginTop: 16 }}>
-                  <div className="login-field" style={{ maxWidth: 220 }}>
-                    <label>Cuenta</label>
-                    <input className="field" defaultValue={r.cuenta} onBlur={(e) => e.target.value !== r.cuenta && guardarDatosJugador(r.correo, { nombre: r.nombre, cuenta: e.target.value, banco: r.banco, tipoCuenta: r.tipoCuenta })} />
-                  </div>
-                  <div className="login-field" style={{ maxWidth: 220 }}>
-                    <label>Banco</label>
-                    <input className="field" defaultValue={r.banco} onBlur={(e) => e.target.value !== r.banco && guardarDatosJugador(r.correo, { nombre: r.nombre, cuenta: r.cuenta, banco: e.target.value, tipoCuenta: r.tipoCuenta })} />
-                  </div>
-                  <div className="login-field" style={{ maxWidth: 220 }}>
-                    <label>Tipo de cuenta</label>
-                    <input className="field" defaultValue={r.tipoCuenta} onBlur={(e) => e.target.value !== r.tipoCuenta && guardarDatosJugador(r.correo, { nombre: r.nombre, cuenta: r.cuenta, banco: r.banco, tipoCuenta: e.target.value })} />
-                  </div>
+                <div style={{ marginTop: 16 }}>
+                  {!tieneRegistroJugador ? (
+                    <div className="section-sub" style={{ marginTop: 0 }}>
+                      Este correo no tiene un registro en Jugadores — los datos de cobro (CLABE/Tarjeta) solo
+                      se pueden guardar para jugadores ya registrados en el sitio.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="login-field-row">
+                        <div className="login-field" style={{ maxWidth: 200 }}>
+                          <label>Tipo de cuenta</label>
+                          <select
+                            className="field"
+                            value={cuentaForm.tipoCuenta}
+                            onChange={(e) => { setCuentaForm({ ...cuentaForm, tipoCuenta: e.target.value }); setCuentaError(""); }}
+                          >
+                            <option value="">— elegir —</option>
+                            {TIPOS_CUENTA.map((t) => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="login-field" style={{ maxWidth: 220 }}>
+                          <label>
+                            {cuentaForm.tipoCuenta ? `${cuentaForm.tipoCuenta} (${longitudEsperada(cuentaForm.tipoCuenta)} dígitos)` : "Número de cuenta"}
+                          </label>
+                          <input
+                            className="field"
+                            inputMode="numeric"
+                            maxLength={longitudEsperada(cuentaForm.tipoCuenta) || 20}
+                            value={cuentaForm.cuenta}
+                            onChange={(e) => { setCuentaForm({ ...cuentaForm, cuenta: e.target.value.replace(/\D/g, "") }); setCuentaError(""); }}
+                          />
+                        </div>
+                        <div className="login-field" style={{ maxWidth: 220 }}>
+                          <label>Banco</label>
+                          <input
+                            className="field"
+                            value={cuentaForm.banco}
+                            onChange={(e) => setCuentaForm({ ...cuentaForm, banco: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      {cuentaError && <div className="login-error">{cuentaError}</div>}
+                      <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => guardarCuentaCobro(r.correo)}>
+                        {guardando ? "Guardando…" : "Guardar cuenta de cobro"}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 

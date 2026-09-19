@@ -5,14 +5,53 @@ import { conMontos, resumenPorJugador, tieneAdeudoBloqueante } from "../../src/l
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
+// 44ª entrega: cuenta/banco/tipoCuenta se centralizaron en tols-jugadores (editables desde Mi Perfil,
+// con validación de CLABE/Tarjeta — ver src/lib/cobranza.js y netlify/functions/jugadores.js). El
+// registro propio de Cobranza (tols-cobranza.jugadores) ya solo guarda lo que es genuinamente de
+// Cobranza: el nombre de respaldo para un correo que el Tesorero registró a mano sin que exista todavía
+// en Jugadores, y las excepciones de adeudo aprobadas.
 function normalizarJugador(j) {
   return {
     nombre: String(j?.nombre || "").trim(),
-    cuenta: String(j?.cuenta || "").trim(),
-    banco: String(j?.banco || "").trim(),
-    tipoCuenta: String(j?.tipoCuenta || "").trim(),
     excepciones: Array.isArray(j?.excepciones) ? j.excepciones.filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f)) : [],
   };
+}
+
+// lee el directorio de Jugadores (tols-jugadores) por correo, para sacar de ahí cuenta/banco/tipoCuenta
+// al armar el resumen de Cobranza — best-effort: si falla, el resumen simplemente muestra esos tres
+// campos vacíos en vez de tronar.
+async function directorioJugadoresActual() {
+  try {
+    const store = getStore("tols-jugadores");
+    const raw = await store.get("data", { type: "json" });
+    const lista = Array.isArray(raw?.jugadores) ? raw.jugadores : [];
+    const porCorreo = {};
+    for (const j of lista) porCorreo[String(j.correo || "").trim().toLowerCase()] = j;
+    return porCorreo;
+  } catch (e) {
+    return {};
+  }
+}
+
+// arma, para cada correo que aparece en Cobranza (registro propio o con algún movimiento) o en el
+// directorio de Jugadores, el dict que espera resumenPorJugador()/tieneAdeudoBloqueante(): nombre y
+// cuenta/banco/tipoCuenta salen del directorio de Jugadores cuando existe (fuente de verdad desde la
+// 44ª entrega); excepciones y el nombre de respaldo salen del propio registro de Cobranza.
+function jugadoresParaResumen(cobranzaJugadores, directorio) {
+  const correos = new Set([...Object.keys(cobranzaJugadores || {}), ...Object.keys(directorio || {})]);
+  const out = {};
+  for (const correo of correos) {
+    const cj = cobranzaJugadores?.[correo] || {};
+    const dj = directorio?.[correo] || {};
+    out[correo] = {
+      nombre: dj.nombre || cj.nombre || "",
+      cuenta: dj.cuenta || "",
+      banco: dj.banco || "",
+      tipoCuenta: dj.tipoCuenta || "",
+      excepciones: cj.excepciones || [],
+    };
+  }
+  return out;
 }
 
 function normalizarMovimiento(m) {
@@ -73,12 +112,17 @@ async function tableroMapaActual() {
 // arma la respuesta completa que consume el frontend: datos crudos + todo ya calculado, para que
 // Cobranza.jsx y Jugadores.jsx no tengan que reimplementar la lógica de cobranza.js
 async function respuestaCompleta(data) {
-  const [tableroMapa, { fecha: proximaFecha, torneos }] = await Promise.all([tableroMapaActual(), proximaFechaActiva()]);
+  const [tableroMapa, { fecha: proximaFecha, torneos }, directorio] = await Promise.all([
+    tableroMapaActual(),
+    proximaFechaActiva(),
+    directorioJugadoresActual(),
+  ]);
   const movimientos = conMontos(data.movimientos, tableroMapa, torneos);
-  const resumen = resumenPorJugador(movimientos, data.jugadores);
+  const jugadoresResumen = jugadoresParaResumen(data.jugadores, directorio);
+  const resumen = resumenPorJugador(movimientos, jugadoresResumen);
   const adeudos = {};
   for (const correo of Object.keys(resumen)) {
-    adeudos[correo] = tieneAdeudoBloqueante(correo, movimientos, data.jugadores, proximaFecha);
+    adeudos[correo] = tieneAdeudoBloqueante(correo, movimientos, jugadoresResumen, proximaFecha);
   }
   return { jugadores: data.jugadores, movimientos, resumen, adeudos, proximaFecha };
 }

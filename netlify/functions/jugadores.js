@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/jugadores.json";
 import { syncJugadores, leerJugadoresDesdeExcel } from "./lib/msgraph.js";
 import { enviarCorreo, plantillaHost } from "./lib/resend.js";
+import { validarCuentaCobro } from "../../src/lib/cobranza.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -28,6 +29,14 @@ function normalizarUno(j) {
     // "Mi Perfil" con el selector de rango de manos — puramente informativo/de perfil, no afecta ningún
     // cálculo del sitio. Se sincroniza a la columna "Mano Favorita" (K) de la hoja Jugadores del Excel.
     manoFavorita: String(j?.manoFavorita || "").trim(),
+    // 44ª entrega: datos de cobro para depositarle premios — antes vivían solo en tols-cobranza
+    // (hoja Cobranza_Resumen), centralizados aquí junto con el resto del perfil del jugador a pedido de
+    // Federico. `tipoCuenta` es "CLABE" o "Tarjeta de Débito" (ver TIPOS_CUENTA en src/lib/cobranza.js);
+    // `cuenta` se valida con validarCuentaCobro() antes de guardarse (18 dígitos para CLABE, 16 para
+    // tarjeta, solo numéricos) — ver la acción "autoeditar" más abajo.
+    cuenta: String(j?.cuenta || "").trim(),
+    banco: String(j?.banco || "").trim(),
+    tipoCuenta: String(j?.tipoCuenta || "").trim(),
   };
 }
 
@@ -205,6 +214,23 @@ export default async (req) => {
         if (edadCalc !== null) editable.edad = edadCalc;
       }
       if (body.manoFavorita !== undefined) editable.manoFavorita = String(body.manoFavorita || "").trim();
+      // 44ª entrega: datos de cobro (CLABE/Tarjeta) — se validan aquí también (no solo en el navegador)
+      // para que nunca quede guardado algo que no sea el número exacto de dígitos, aunque el cliente
+      // falle. Esta misma acción la usa tanto Mi Perfil (el propio jugador, con su correo) como el
+      // Tesorero desde Cobranza (editando en nombre de otro jugador por su correo) — "autoeditar" en el
+      // nombre es histórico, no implica que solo el dueño de la cuenta pueda llamarla.
+      if (body.cuenta !== undefined || body.banco !== undefined || body.tipoCuenta !== undefined) {
+        const nuevaCuenta = body.cuenta !== undefined ? String(body.cuenta || "").trim() : editable.cuenta;
+        const nuevoBanco = body.banco !== undefined ? String(body.banco || "").trim() : editable.banco;
+        const nuevoTipo = body.tipoCuenta !== undefined ? String(body.tipoCuenta || "").trim() : editable.tipoCuenta;
+        const errorCuenta = validarCuentaCobro(nuevaCuenta, nuevoTipo);
+        if (errorCuenta) {
+          return new Response(JSON.stringify({ error: errorCuenta }), { status: 400, headers: HEADERS });
+        }
+        editable.cuenta = nuevaCuenta;
+        editable.banco = nuevoBanco;
+        editable.tipoCuenta = nuevoTipo;
+      }
       actual.jugadores[idx] = editable;
       await store.setJSON("data", actual);
       await syncJugadores(actual.jugadores);

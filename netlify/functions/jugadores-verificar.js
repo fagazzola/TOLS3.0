@@ -46,8 +46,8 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: "Falta el correo o el código." }), { status: 400, headers: HEADERS });
   }
 
-  const verifStore = getStore("tols-verificacion-jugadores");
-  const registro = await verifStore.get(correo, { type: "json" });
+  const verifStore = getStore({ name: "tols-verificacion-jugadores", consistency: "strong" });
+  const registro = await verifStore.get(correo, { type: "json", consistency: "strong" });
 
   if (!registro) {
     return new Response(JSON.stringify({ error: "No hay un código pendiente para ese correo. Solicita uno nuevo." }), { status: 400, headers: HEADERS });
@@ -65,8 +65,8 @@ export default async (req) => {
   }
 
   // -- crea el jugador en tols-jugadores --
-  const jugadoresStore = getStore("tols-jugadores");
-  const dataJugadores = (await jugadoresStore.get("data", { type: "json" })) || jugadoresSeed;
+  const jugadoresStore = getStore({ name: "tols-jugadores", consistency: "strong" });
+  const dataJugadores = (await jugadoresStore.get("data", { type: "json", consistency: "strong" })) || jugadoresSeed;
   const lista = Array.isArray(dataJugadores.jugadores) ? dataJugadores.jugadores : [];
 
   if (lista.some((j) => String(j.correo || "").toLowerCase() === correo)) {
@@ -93,8 +93,8 @@ export default async (req) => {
   await syncJugadores(lista);
 
   // -- crea el usuario ligado en tols-perfiles, reutilizando las mismas reglas que Perfiles.jsx --
-  const perfilesStore = getStore("tols-perfiles");
-  const rawPerfiles = await perfilesStore.get("data", { type: "json" });
+  const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+  const rawPerfiles = await perfilesStore.get("data", { type: "json", consistency: "strong" });
   const dataPerfiles = normalizarPerfiles(rawPerfiles);
 
   if (dataPerfiles.usuarios.some((u) => String(u.correo || "").toLowerCase() === correo)) {

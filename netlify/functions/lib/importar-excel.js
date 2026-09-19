@@ -26,10 +26,10 @@ export async function importarJugadoresYPerfilesDesdeExcel() {
     throw new Error("El Excel tiene un problema en Usuarios/Permisos: " + problemaPerfiles);
   }
 
-  await getStore("tols-jugadores").setJSON("data", normalizadoJugadores);
+  await getStore({ name: "tols-jugadores", consistency: "strong" }).setJSON("data", normalizadoJugadores);
   await syncJugadores(normalizadoJugadores.jugadores);
 
-  await getStore("tols-perfiles").setJSON("data", normalizadoPerfiles);
+  await getStore({ name: "tols-perfiles", consistency: "strong" }).setJSON("data", normalizadoPerfiles);
   // no hace falta volver a sincronizar Usuarios/Permisos hacia el Excel — los datos ya vienen de ahí mismo
 
   return { jugadores: normalizadoJugadores, perfiles: normalizadoPerfiles };

@@ -44,8 +44,8 @@ function normalizarMapa(raw) {
 
 async function tableroMapaActual() {
   try {
-    const store = getStore("tols-tablero");
-    return (await store.get("data", { type: "json" })) || {};
+    const store = getStore({ name: "tols-tablero", consistency: "strong" });
+    return (await store.get("data", { type: "json", consistency: "strong" })) || {};
   } catch (e) {
     return {};
   }
@@ -53,8 +53,8 @@ async function tableroMapaActual() {
 
 async function calendarioTorneos() {
   try {
-    const store = getStore("tols-calendario");
-    const data = await store.get("data", { type: "json" });
+    const store = getStore({ name: "tols-calendario", consistency: "strong" });
+    const data = await store.get("data", { type: "json", consistency: "strong" });
     return data?.torneos || [];
   } catch (e) {
     return [];
@@ -91,8 +91,8 @@ async function espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo) {
 // usada por campeonatos.js al renombrar un campeonato: mueve la clave del mapa de "de" a "a" —
 // tols-gamenight está indexado como { [campeonato]: { [fecha]: {...} } }.
 export async function renombrarCampeonatoEnGameNight(de, a) {
-  const store = getStore("tols-gamenight");
-  const raw = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-gamenight", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
   const mapa = normalizarMapa(raw);
   if (!mapa[de]) return;
   if (mapa[a]) {
@@ -107,10 +107,10 @@ export async function renombrarCampeonatoEnGameNight(de, a) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-gamenight");
+  const store = getStore({ name: "tols-gamenight", consistency: "strong" });
 
   if (req.method === "GET") {
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const normalizado = normalizarMapa(raw);
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
@@ -129,7 +129,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Falta el campeonato o la fecha del torneo." }), { status: 400, headers: HEADERS });
     }
 
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const mapa = normalizarMapa(raw);
     const torneo = getTorneo(mapa, campeonato, fecha);
     const ahora = new Date().toISOString();

@@ -70,8 +70,12 @@ export function derivarPosiciones(jugadoresPorCorreo, correosHabilitados) {
 }
 
 // la burbuja: el último jugador en salir justo ANTES de entrar a los lugares que pagan — es decir,
-// quien quedó en el lugar (numLugaresPago + 1)
-export function calcularBurbuja(lugares, numLugaresPago) {
+// quien quedó en el lugar (numLugaresPago + 1). Solo existe cuando el campeonato de verdad tiene
+// lugares de premio configurados (numLugaresPago > 0) Y hay al menos un jugador más que esos lugares
+// (si no, todos quedan en el dinero y no hay "burbuja" posible). Sin esta guarda, un campeonato SIN
+// premios configurados (numLugaresPago = 0) marcaba como "burbuja" al lugar 1 — el mismo Campeón.
+export function calcularBurbuja(lugares, numLugaresPago, total) {
+  if (!numLugaresPago || numLugaresPago <= 0 || numLugaresPago >= total) return null;
   const entrada = Object.entries(lugares).find(([, lugar]) => lugar === numLugaresPago + 1);
   return entrada ? entrada[0] : null;
 }
@@ -130,7 +134,7 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, to
 
   const { total, lugares, campeon } = derivarPosiciones(jugadoresState, correosHabilitados);
   const numLugaresPago = (datosTablero.premios?.porTorneo?.lugares || []).length;
-  const burbujaCorreo = calcularBurbuja(lugares, numLugaresPago);
+  const burbujaCorreo = calcularBurbuja(lugares, numLugaresPago, total);
 
   const pot = calcularPot(
     correosHabilitados.map((c) => jugadoresState[c]),

@@ -44,7 +44,7 @@ export default async (req) => {
     if (!r.ok) throw new Error(json.error_description || json.error || `HTTP ${r.status}`);
     if (!json.refresh_token) throw new Error("Microsoft no devolvió un refresh_token — revisa que el permiso offline_access esté agregado en Azure Portal.");
 
-    const store = getStore("tols-ms-token");
+    const store = getStore({ name: "tols-ms-token", consistency: "strong" });
     await store.setJSON("data", { refresh_token: json.refresh_token, updated_at: Date.now() });
 
     return html(`<h1>✓ OneDrive conectado</h1><p>Ya puedes cerrar esta pestaña. A partir de ahora, cada vez que se guarde algo en el Tablero, el Calendario o Usuarios, el Excel de tu OneDrive se va a actualizar solo.</p>`);

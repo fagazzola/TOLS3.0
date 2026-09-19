@@ -16,8 +16,8 @@ async function conTemporadaCompletada(data) {
   const faltantes = (data.torneos || []).some((t) => !t.temporada && !t.practica);
   if (!faltantes) return data;
   try {
-    const campStore = getStore("tols-campeonatos");
-    const camp = await campStore.get("data", { type: "json" });
+    const campStore = getStore({ name: "tols-campeonatos", consistency: "strong" });
+    const camp = await campStore.get("data", { type: "json", consistency: "strong" });
     const nombres = Array.isArray(camp?.nombres) ? camp.nombres : [];
     const relleno = (camp?.activo && nombres.includes(camp.activo)) ? camp.activo : (nombres[0] || "");
     if (!relleno) return data;
@@ -31,8 +31,8 @@ async function conTemporadaCompletada(data) {
 // usada por campeonatos.js al renombrar un campeonato: remapea torneos[].temporada de "de" a "a" y
 // vuelve a guardar/sincronizar. Se llama server-a-server, nunca desde el cliente directamente.
 export async function renombrarCampeonatoEnCalendario(de, a) {
-  const store = getStore("tols-calendario");
-  const raw = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-calendario", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
   if (!raw || !Array.isArray(raw.torneos)) return;
   const cambia = raw.torneos.some((t) => t.temporada === de);
   if (!cambia) return;
@@ -54,10 +54,10 @@ function validar(data) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-calendario");
+  const store = getStore({ name: "tols-calendario", consistency: "strong" });
 
   if (req.method === "GET") {
-    let data = await store.get("data", { type: "json" });
+    let data = await store.get("data", { type: "json", consistency: "strong" });
     if (!data) {
       data = seed;
       await store.setJSON("data", data);

@@ -18,8 +18,8 @@ function isoHoy() {
 // servidor (el cliente puede tener datos desactualizados) y no se puede importar un componente .jsx.
 async function estaEnCurso(nombre) {
   try {
-    const calStore = getStore("tols-calendario");
-    const cal = await calStore.get("data", { type: "json" });
+    const calStore = getStore({ name: "tols-calendario", consistency: "strong" });
+    const cal = await calStore.get("data", { type: "json", consistency: "strong" });
     const fechas = (cal?.torneos || []).filter((t) => t.temporada === nombre);
     if (fechas.length === 0) return false;
     const hoy = isoHoy();
@@ -68,8 +68,8 @@ function validar(data) {
 // en este registro — se agregan solos al final para que no queden "huérfanos" sin aparecer en el combo
 async function conHuerfanosSanados(normalizado) {
   try {
-    const tableroStore = getStore("tols-tablero");
-    const tablero = await tableroStore.get("data", { type: "json" });
+    const tableroStore = getStore({ name: "tols-tablero", consistency: "strong" });
+    const tablero = await tableroStore.get("data", { type: "json", consistency: "strong" });
     if (!tablero || typeof tablero !== "object") return normalizado;
     const huerfanos = Object.keys(tablero).filter((n) => !normalizado.nombres.includes(n));
     if (huerfanos.length === 0) return normalizado;
@@ -81,10 +81,10 @@ async function conHuerfanosSanados(normalizado) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-campeonatos");
+  const store = getStore({ name: "tols-campeonatos", consistency: "strong" });
 
   if (req.method === "GET") {
-    const data = await store.get("data", { type: "json" });
+    const data = await store.get("data", { type: "json", consistency: "strong" });
     let normalizado = normalizar(data);
     normalizado = await conHuerfanosSanados(normalizado);
     if (!data || JSON.stringify(data) !== JSON.stringify(normalizado)) {
@@ -113,7 +113,7 @@ export default async (req) => {
       if (!de || !a) {
         return new Response(JSON.stringify({ error: "Faltan los nombres para renombrar." }), { status: 400, headers: HEADERS });
       }
-      const actual = normalizar(await store.get("data", { type: "json" }));
+      const actual = normalizar(await store.get("data", { type: "json", consistency: "strong" }));
       if (!actual.nombres.includes(de)) {
         return new Response(JSON.stringify({ error: `No existe el campeonato "${de}".` }), { status: 400, headers: HEADERS });
       }
@@ -162,7 +162,7 @@ export default async (req) => {
     // si el body trae "activo" explícito (ej. al cambiar el campeonato seleccionado en el Tablero) se
     // respeta ese valor; si no, se conserva el que ya estaba guardado — normalizar() cae a nombres[0]
     // si el activo actual ya no existe en la lista (ej. se acaba de eliminar ese campeonato)
-    const actual = await store.get("data", { type: "json" });
+    const actual = await store.get("data", { type: "json", consistency: "strong" });
     const activoDeseado = body?.activo !== undefined ? String(body.activo || "").trim() : normalizar(actual).activo;
     const limpio = normalizar({ nombres: nombresLimpio.nombres, activo: activoDeseado });
     await store.setJSON("data", limpio);

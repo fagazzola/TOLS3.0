@@ -22,8 +22,8 @@ function normalizarJugador(j) {
 // campos vacíos en vez de tronar.
 async function directorioJugadoresActual() {
   try {
-    const store = getStore("tols-jugadores");
-    const raw = await store.get("data", { type: "json" });
+    const store = getStore({ name: "tols-jugadores", consistency: "strong" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const lista = Array.isArray(raw?.jugadores) ? raw.jugadores : [];
     const porCorreo = {};
     for (const j of lista) porCorreo[String(j.correo || "").trim().toLowerCase()] = j;
@@ -85,10 +85,10 @@ function normalizar(data) {
 // Host, para que "próximo torneo" signifique lo mismo en toda la app
 async function proximaFechaActiva() {
   try {
-    const [calStore, campStore] = [getStore("tols-calendario"), getStore("tols-campeonatos")];
+    const [calStore, campStore] = [getStore({ name: "tols-calendario", consistency: "strong" }), getStore({ name: "tols-campeonatos", consistency: "strong" })];
     const [cal, camp] = await Promise.all([
-      calStore.get("data", { type: "json" }),
-      campStore.get("data", { type: "json" }),
+      calStore.get("data", { type: "json", consistency: "strong" }),
+      campStore.get("data", { type: "json", consistency: "strong" }),
     ]);
     const activo = camp?.activo || "";
     const hoy = new Date().toISOString().slice(0, 10);
@@ -102,8 +102,8 @@ async function proximaFechaActiva() {
 
 async function tableroMapaActual() {
   try {
-    const store = getStore("tols-tablero");
-    return (await store.get("data", { type: "json" })) || {};
+    const store = getStore({ name: "tols-tablero", consistency: "strong" });
+    return (await store.get("data", { type: "json", consistency: "strong" })) || {};
   } catch (e) {
     return {};
   }
@@ -150,8 +150,8 @@ function filasParaExcel({ movimientos, resumen }) {
 // Se hace en una sola lectura/escritura del store (no una por jugador) para no pisarse entre sí ni
 // disparar una sincronización a Excel por cada jugador.
 export async function upsertVariosDesdeGameNight(campeonato, fecha, lista) {
-  const store = getStore("tols-cobranza");
-  const raw = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-cobranza", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
   const actual = normalizar(raw);
 
   for (const it of lista || []) {
@@ -192,8 +192,8 @@ export async function upsertVariosDesdeGameNight(campeonato, fecha, lista) {
 // para que sigan siendo el mismo registro la próxima vez que se guarde ese Game Night con el nombre nuevo
 // — si no se renombrara el id, upsertVariosDesdeGameNight generaría un id distinto y duplicaría la fila.
 export async function renombrarCampeonatoEnCobranza(de, a) {
-  const store = getStore("tols-cobranza");
-  const raw = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-cobranza", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
   const actual = normalizar(raw);
   const cambia = actual.movimientos.some((m) => m.campeonato === de);
   if (!cambia) return;
@@ -209,10 +209,10 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-cobranza");
+  const store = getStore({ name: "tols-cobranza", consistency: "strong" });
 
   if (req.method === "GET") {
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const normalizado = normalizar(raw);
     if (!raw) await store.setJSON("data", normalizado);
     const completa = await respuestaCompleta(normalizado);
@@ -227,7 +227,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
 
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const actual = normalizar(raw);
 
     if (body?.accion === "guardarJugador") {

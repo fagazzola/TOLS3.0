@@ -50,8 +50,8 @@ function colLetter(n) {
 // intercambia el refresh_token guardado por un access_token fresco — Microsoft rota el refresh_token
 // en cada uso, así que el nuevo se vuelve a guardar cada vez (si no se hace, deja de servir en unos días)
 async function getAccessToken() {
-  const store = getStore("tols-ms-token");
-  const saved = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-ms-token", consistency: "strong" });
+  const saved = await store.get("data", { type: "json", consistency: "strong" });
   if (!saved?.refresh_token) {
     throw new Error("OneDrive no está conectado. Visita /api/auth-onedrive-start para autorizarlo una vez.");
   }
@@ -350,8 +350,8 @@ export function syncCalendario(data) {
 
 export function syncJugadores(jugadores) {
   return safe(async () => {
-    const perfilesStore = getStore("tols-perfiles");
-    const perfilesData = await perfilesStore.get("data", { type: "json" }).catch(() => null);
+    const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+    const perfilesData = await perfilesStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
     await escribirJugadoresUnificado(jugadores, perfilesData);
   });
 }
@@ -405,8 +405,8 @@ export function syncPerfiles(data) {
   return safe(async () => {
     // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el
     // directorio de jugadores en la hoja única "Jugadores" (ver escribirJugadoresUnificado arriba)
-    const jugadoresStore = getStore("tols-jugadores");
-    const jugadoresData = await jugadoresStore.get("data", { type: "json" }).catch(() => null);
+    const jugadoresStore = getStore({ name: "tols-jugadores", consistency: "strong" });
+    const jugadoresData = await jugadoresStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
     await escribirJugadoresUnificado(jugadoresData?.jugadores || [], data);
 
     // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores

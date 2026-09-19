@@ -28,8 +28,8 @@ export default async (req) => {
 
   // evita mandar un código si ese correo ya está registrado (como usuario o como jugador)
   try {
-    const perfilesStore = getStore("tols-perfiles");
-    const perfiles = await perfilesStore.get("data", { type: "json" });
+    const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+    const perfiles = await perfilesStore.get("data", { type: "json", consistency: "strong" });
     const yaExiste = (perfiles?.usuarios || []).some((u) => String(u.correo || "").trim().toLowerCase() === correo);
     if (yaExiste) {
       return new Response(JSON.stringify({ error: "Ese correo ya tiene una cuenta en TOLS 3.0." }), { status: 400, headers: HEADERS });
@@ -39,7 +39,7 @@ export default async (req) => {
   }
 
   const codigo = generarCodigo();
-  const verifStore = getStore("tols-verificacion-jugadores");
+  const verifStore = getStore({ name: "tols-verificacion-jugadores", consistency: "strong" });
   await verifStore.setJSON(correo, { codigo, expira: Date.now() + DURACION_MS });
 
   try {

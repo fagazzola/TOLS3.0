@@ -123,10 +123,10 @@ function edadDesdeFecNac(fecNac) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-jugadores");
+  const store = getStore({ name: "tols-jugadores", consistency: "strong" });
 
   if (req.method === "GET") {
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     let normalizado = normalizar(raw);
     const { cambio, data: sinHostVencido } = conHostExpirado(normalizado);
     if (cambio) normalizado = sinHostVencido;
@@ -155,7 +155,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
 
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     let actual = normalizar(raw);
     const expirado = conHostExpirado(actual);
     if (expirado.cambio) actual = expirado.data;

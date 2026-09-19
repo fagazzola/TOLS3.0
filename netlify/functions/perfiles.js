@@ -75,10 +75,10 @@ export function validar(data) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-perfiles");
+  const store = getStore({ name: "tols-perfiles", consistency: "strong" });
 
   if (req.method === "GET") {
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const normalizado = normalizar(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);

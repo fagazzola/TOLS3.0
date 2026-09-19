@@ -27,8 +27,8 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: "La nueva contraseña debe tener al menos 6 caracteres." }), { status: 400, headers: HEADERS });
   }
 
-  const verifStore = getStore("tols-verificacion-reset");
-  const registro = await verifStore.get(correo, { type: "json" });
+  const verifStore = getStore({ name: "tols-verificacion-reset", consistency: "strong" });
+  const registro = await verifStore.get(correo, { type: "json", consistency: "strong" });
 
   if (!registro) {
     return new Response(JSON.stringify({ error: "No hay un código pendiente para ese correo. Solicita uno nuevo." }), { status: 400, headers: HEADERS });
@@ -40,8 +40,8 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: "El código no coincide.", incorrecto: true }), { status: 400, headers: HEADERS });
   }
 
-  const perfilesStore = getStore("tols-perfiles");
-  const raw = await perfilesStore.get("data", { type: "json" });
+  const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+  const raw = await perfilesStore.get("data", { type: "json", consistency: "strong" });
   const data = normalizarPerfiles(raw);
   const idx = data.usuarios.findIndex((u) => String(u.correo || "").trim().toLowerCase() === correo);
 

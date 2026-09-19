@@ -26,8 +26,8 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: "Correo electrónico inválido." }), { status: 400, headers: HEADERS });
   }
 
-  const perfilesStore = getStore("tols-perfiles");
-  const raw = await perfilesStore.get("data", { type: "json" });
+  const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+  const raw = await perfilesStore.get("data", { type: "json", consistency: "strong" });
   const data = normalizarPerfiles(raw);
   const usuario = data.usuarios.find((u) => String(u.correo || "").trim().toLowerCase() === correo);
 
@@ -36,7 +36,7 @@ export default async (req) => {
   }
 
   const codigo = generarCodigo();
-  const verifStore = getStore("tols-verificacion-reset");
+  const verifStore = getStore({ name: "tols-verificacion-reset", consistency: "strong" });
   await verifStore.setJSON(correo, { codigo, expira: Date.now() + DURACION_MS });
 
   try {

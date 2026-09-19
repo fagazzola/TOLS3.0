@@ -137,8 +137,8 @@ function validarUno(data) {
 // no tenía datos guardados en el Tablero, no hace nada — no todos los campeonatos tienen configuración
 // propia todavía). Comparte la misma lógica que la acción "renombrar" del endpoint HTTP de abajo.
 export async function renombrarCampeonatoEnTablero(de, a) {
-  const store = getStore("tols-tablero");
-  const raw = await store.get("data", { type: "json" });
+  const store = getStore({ name: "tols-tablero", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
   const mapa = normalizarMapa(raw);
   if (!mapa[de] || de === a) return;
   if (!mapa[a]) mapa[a] = mapa[de];
@@ -148,10 +148,10 @@ export async function renombrarCampeonatoEnTablero(de, a) {
 }
 
 export default async (req) => {
-  const store = getStore("tols-tablero");
+  const store = getStore({ name: "tols-tablero", consistency: "strong" });
 
   if (req.method === "GET") {
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const normalizado = normalizarMapa(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
@@ -168,7 +168,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
     }
 
-    const raw = await store.get("data", { type: "json" });
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
     const mapa = normalizarMapa(raw);
 
     if (body?.accion === "guardar") {

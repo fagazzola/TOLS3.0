@@ -131,14 +131,18 @@ export default function GameNight({ session, perfiles, esHost }) {
     llamar({ accion: "checkin", correo: miCorreo, nombre: miEntrada.nombre, manual: false });
   }
 
+  // 47ª entrega: los que siguen en juego van arriba, ordenados alfabéticamente (por lo que se muestra,
+  // el Alias PokerStars) para ubicar rápido a alguien durante la partida; los ya eliminados van hasta
+  // abajo, ordenados por su lugar de salida (mejor lugar primero) y se pintan en gris en el render.
   const habilitados = jugadoresSitio
     .filter((j) => torneoState.jugadores[j.correo]?.checkin)
     .map((j) => ({ ...j, gn: estado.porJugador[j.correo] }))
     .sort((a, b) => {
-      const la = a.gn?.lugar || 999;
-      const lb = b.gn?.lugar || 999;
-      if (la !== lb) return la - lb;
-      return a.nombre.localeCompare(b.nombre);
+      const aElim = Boolean(a.gn?.lugar);
+      const bElim = Boolean(b.gn?.lugar);
+      if (aElim !== bElim) return aElim ? 1 : -1;
+      if (aElim) return a.gn.lugar - b.gn.lugar;
+      return nombreCorto(a).localeCompare(nombreCorto(b));
     });
   const deshabilitados = jugadoresSitio.filter((j) => !torneoState.jugadores[j.correo]?.checkin);
   const enJuego = habilitados.filter((j) => !j.gn?.lugar);
@@ -376,18 +380,18 @@ export default function GameNight({ session, perfiles, esHost }) {
               <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
             </div>
             <div className="tbl">
-              <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.8fr 0.6fr 1.3fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
-                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer / Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
+              <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
+                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{recomprasMax > 0 ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
               </div>
               {habilitados.map((j) => {
                 const gn = j.gn || {};
                 const eliminado = Boolean(gn.lugar);
                 return (
-                  <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.8fr 0.6fr 1.3fr 0.8fr 0.7fr 0.7fr 0.6fr" }} key={j.correo}>
+                  <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }} key={j.correo}>
                     <div>
                       {nombreCorto(j)}
-                      {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }}>🏆 Campeón</span>}
-                      {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }}>Burbuja</span>}
+                      {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
+                      {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
                       {editable && !eliminado && (
                         <button
                           className="btn-icon-remove"
@@ -412,7 +416,13 @@ export default function GameNight({ session, perfiles, esHost }) {
                     <div className="gn-stepper">
                       <button disabled={!editable || guardando || (gn.rebuys || 0) <= 0} onClick={() => cambiarRebuy(j, -1)}>−</button>
                       <span className="gn-stepper-val">{gn.rebuys || 0}</span>
-                      <button disabled={!editable || guardando || (gn.rebuys || 0) >= recomprasMax} onClick={() => cambiarRebuy(j, 1)}>+</button>
+                      <button
+                        disabled={!editable || guardando || (gn.rebuys || 0) >= recomprasMax}
+                        title={recomprasMax <= 0 ? "El campeonato no tiene un máximo de recompras configurado en el Tablero de Control" : `Máximo ${recomprasMax} recompras`}
+                        onClick={() => cambiarRebuy(j, 1)}
+                      >
+                        +
+                      </button>
                     </div>
                     <div>
                       <button className={"gn-toggle" + (gn.addon ? " on" : "")} disabled={!editable || guardando} onClick={() => toggleAddon(j)}>
@@ -422,8 +432,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                     <div>
                       {eliminado ? (
                         <>
-                          <span className="badge badge-regular">Lugar {gn.lugar}</span>{" "}
-                          <span style={{ fontSize: 12 }}>Killer: {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}</span>
+                          {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}
                           {editable && (
                             <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer eliminación" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
                           )}
@@ -436,6 +445,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                         )
                       )}
                     </div>
+                    <div>{eliminado ? <span className="badge badge-regular">Lugar {gn.lugar}</span> : <span className="muted">—</span>}</div>
                     <div>
                       <button className={"gn-toggle" + (gn.mejorMano ? " on" : "")} disabled={!editable || guardando} onClick={() => toggleMejorMano(j)} title="Solo un jugador por torneo">
                         {gn.mejorMano ? "Sí" : "No"}

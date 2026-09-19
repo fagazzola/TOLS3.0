@@ -1,10 +1,10 @@
-import { getStore } from "@netlify/blobs";
-import { normalizar } from "./jugadores.js";
-import { leerJugadoresDesdeExcel, syncJugadores } from "./lib/msgraph.js";
+import { importarJugadoresYPerfilesDesdeExcel } from "./lib/importar-excel.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
-// el Excel manda: lee la hoja Jugadores y sobrescribe tols-jugadores con lo que haya ahí.
+// el Excel manda: lee la hoja Jugadores (y Usuarios/Permisos) y sobrescribe tols-jugadores Y
+// tols-perfiles con lo que haya ahí — ambas pantallas leen la misma base de datos, así que "Importar
+// desde Excel" desde Jugadores actualiza también Usuarios (41ª entrega).
 // A diferencia del resto de los endpoints (sitio → Excel), este va en el sentido contrario, y solo se
 // dispara cuando Federico oprime "Importar desde Excel" en la pantalla de Jugadores — nunca automático.
 export default async (req) => {
@@ -12,25 +12,14 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: "Método no permitido." }), { status: 405, headers: HEADERS });
   }
 
-  let filas;
+  let resultado;
   try {
-    filas = await leerJugadoresDesdeExcel();
+    resultado = await importarJugadoresYPerfilesDesdeExcel();
   } catch (e) {
-    return new Response(JSON.stringify({ error: "No se pudo leer el Excel: " + (e.message || e) }), { status: 500, headers: HEADERS });
+    return new Response(JSON.stringify({ error: e.message || "No se pudo importar desde el Excel." }), { status: 500, headers: HEADERS });
   }
 
-  const conCorreoYNombre = filas.filter((j) => j.correo && j.nombre);
-  if (!conCorreoYNombre.length) {
-    return new Response(JSON.stringify({ error: "La hoja Jugadores del Excel no tiene registros con nombre y correo." }), { status: 400, headers: HEADERS });
-  }
-
-  const normalizado = normalizar({ jugadores: conCorreoYNombre });
-
-  const store = getStore("tols-jugadores");
-  await store.setJSON("data", normalizado);
-  await syncJugadores(normalizado.jugadores);
-
-  return new Response(JSON.stringify(normalizado), { headers: HEADERS });
+  return new Response(JSON.stringify({ ...resultado.jugadores, perfiles: resultado.perfiles }), { headers: HEADERS });
 };
 
 export const config = { path: "/api/jugadores-importar-excel" };

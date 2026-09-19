@@ -5,7 +5,7 @@ const API = "/api/jugadores";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_IMPORTAR = "/api/jugadores-importar-excel";
-const COLS = "repeat(6, 1fr)";
+const COLS = "72px repeat(6, 1fr)";
 
 function iso(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -14,7 +14,7 @@ function iso(d) {
 // Pantalla de solo consulta del directorio de jugadores (los datos personales los llena cada jugador
 // al autorregistrarse, o llegan importados desde la hoja Jugadores del Excel). Únicamente se pueden
 // editar Padrino, Estatus y Host desde aquí — el resto se muestra sin poder tocarse.
-export default function Jugadores({ session, perfiles }) {
+export default function Jugadores({ session, perfiles, onPerfilesChange }) {
   const [data, setData] = useState(null);
   const [proximoTorneo, setProximoTorneo] = useState(null); // { fecha, ... } | null
   const [loading, setLoading] = useState(true);
@@ -128,7 +128,9 @@ export default function Jugadores({ session, perfiles }) {
       const r = await fetch(API_IMPORTAR, { method: "POST" });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error || "No se pudo importar desde el Excel.");
-      setData(json);
+      const { perfiles: perfilesActualizados, ...jugadoresJson } = json;
+      setData(jugadoresJson);
+      if (perfilesActualizados && onPerfilesChange) onPerfilesChange(perfilesActualizados);
       setImportOk(true);
     } catch (e) {
       setImportError(e.message || "No se pudo importar desde el Excel.");
@@ -163,7 +165,7 @@ export default function Jugadores({ session, perfiles }) {
           <button className="btn btn-secondary" onClick={() => setConfirmarImportar(true)} disabled={importando}>
             {importando ? "Importando…" : "Importar desde Excel"}
           </button>
-          {importOk && <div className="check-line check-ok" style={{ margin: 0 }}>✓ Jugadores actualizados desde el Excel.</div>}
+          {importOk && <div className="check-line check-ok" style={{ margin: 0 }}>✓ Jugadores y Usuarios actualizados desde el Excel.</div>}
         </div>
       )}
       {puedeEscribir && importError && <div className="login-error">{importError}</div>}
@@ -203,12 +205,13 @@ export default function Jugadores({ session, perfiles }) {
             </div>
             <div className="tbl tbl-compacta">
               <div className="trow thead" style={{ gridTemplateColumns: COLS }}>
-                <div>Nombre</div><div>Alias PokerStars</div><div>Correo electrónico</div><div>Padrino</div><div>Estatus</div><div>Host</div>
+                <div>No.</div><div>Nombre</div><div>Alias PokerStars</div><div>Correo electrónico</div><div>Padrino</div><div>Estatus</div><div>Host</div>
               </div>
               {jugadoresFiltrados.map((j) => {
                 const enEdicion = editando?.id === j.id;
                 return (
                   <div className="trow" style={{ gridTemplateColumns: COLS }} key={j.id}>
+                    <div>{j.id}</div>
                     <div>{j.nombre}</div>
                     <div>{j.aliasPokerStars}</div>
                     <div>{j.correo}</div>
@@ -323,8 +326,9 @@ export default function Jugadores({ session, perfiles }) {
             <div className="modal-icon-badge danger">📥</div>
             <div className="modal-title">Importar desde Excel</div>
             <p className="section-sub">
-              Vas a reemplazar los jugadores guardados en el sitio con lo que haya <b>ahora mismo</b> en la hoja
-              Jugadores del Excel. Cualquier cambio hecho desde el sitio que no esté también en el Excel se va a
+              Vas a reemplazar los jugadores <b>y los usuarios/permisos</b> guardados en el sitio con lo que haya{" "}
+              <b>ahora mismo</b> en la hoja Jugadores (y Permisos) del Excel — Jugadores y Usuarios comparten la
+              misma base de datos. Cualquier cambio hecho desde el sitio que no esté también en el Excel se va a
               perder. Esta acción no se puede deshacer.
             </p>
             <div className="modal-actions">

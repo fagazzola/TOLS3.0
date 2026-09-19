@@ -149,7 +149,7 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
         </div>
       )}
       {isAdminGeneral && importError && <div className="login-error">{importError}</div>}
-      {isAdminGeneral && importOk && <div className="check-line check-ok">✓ Usuarios y permisos actualizados desde el Excel.</div>}
+      {isAdminGeneral && importOk && <div className="check-line check-ok">✓ Usuarios, permisos y jugadores actualizados desde el Excel.</div>}
 
       {isAdminGeneral ? (
         <div className="section">
@@ -311,9 +311,10 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
             <div className="modal-icon-badge danger">📥</div>
             <div className="modal-title">Importar desde Excel</div>
             <p className="section-sub">
-              Vas a reemplazar los usuarios y permisos guardados en el sitio con lo que haya <b>ahora mismo</b>{" "}
-              en las hojas Jugadores y Permisos del Excel. Cualquier cambio hecho desde el sitio que no esté
-              también en el Excel se va a perder. Esta acción no se puede deshacer.
+              Vas a reemplazar los usuarios y permisos <b>y los jugadores</b> guardados en el sitio con lo que
+              haya <b>ahora mismo</b> en las hojas Jugadores y Permisos del Excel — Usuarios y Jugadores comparten
+              la misma base de datos. Cualquier cambio hecho desde el sitio que no esté también en el Excel se va
+              a perder. Esta acción no se puede deshacer.
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConfirmarImportar(false)} disabled={importando}>

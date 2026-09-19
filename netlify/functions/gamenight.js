@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { syncGameNight } from "./lib/msgraph.js";
 import { upsertVariosDesdeGameNight } from "./cobranza.js";
-import { calcularAmonestado, tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO } from "../../src/lib/gamenight.js";
+import { calcularAmonestado, tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -139,15 +139,22 @@ export default async (req) => {
     const toleranciaMin = tableroMapa?.[campeonato]?.toleranciaCheckinMin ?? 10;
     const recomprasMax = tableroMapa?.[campeonato]?.recomprasMax ?? 0;
 
+    // 45ª entrega: ya no existe un botón "Iniciar torneo" — la hora de inicio para medir la tolerancia
+    // de check-in sale directo de la fecha/hora que ya está guardada en el Calendario para este torneo
+    // (se recalcula en cada acción, así que si Federico corrige la hora en el Calendario después, el
+    // cambio se refleja solo). Se sigue guardando en `torneo.horaInicio` únicamente para mostrarla y
+    // para el histórico que se sincroniza a `GameNight_Sesiones` en Excel.
+    const torneoCalActual = torneoCalendarioDe(torneosCal, campeonato, fecha);
+    const horaInicio = horaInicioProgramada(torneoCalActual);
+    if (horaInicio) torneo.horaInicio = horaInicio;
+
     let avisoAmonestacion = "";
 
-    if (body.accion === "iniciar") {
-      if (!torneo.horaInicio) torneo.horaInicio = ahora;
-    } else if (body.accion === "checkin") {
+    if (body.accion === "checkin") {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (!correo) return new Response(JSON.stringify({ error: "Falta el correo del jugador." }), { status: 400, headers: HEADERS });
       const manual = Boolean(body.manual);
-      const amonestado = calcularAmonestado({ manual, horaInicio: torneo.horaInicio, toleranciaMin });
+      const amonestado = calcularAmonestado({ manual, horaInicio, toleranciaMin });
       torneo.jugadores[correo] = normalizarJugadorGN({
         ...torneo.jugadores[correo],
         nombre: body.nombre || torneo.jugadores[correo]?.nombre || "",
@@ -159,6 +166,29 @@ export default async (req) => {
         actualizado: ahora,
       });
       if (amonestado) avisoAmonestacion = "Se activó con amonestación: perdió el punto de asistencia por hacer check-in manual fuera del tiempo de tolerancia.";
+    } else if (body.accion === "checkinMasivo") {
+      // activación manual de varios jugadores al mismo tiempo (45ª entrega) — mismo cálculo de
+      // amonestación que una activación individual, uno por uno, en un solo guardado.
+      const lista = Array.isArray(body.jugadores) ? body.jugadores : [];
+      if (!lista.length) return new Response(JSON.stringify({ error: "No se seleccionó ningún jugador." }), { status: 400, headers: HEADERS });
+      let algunoAmonestado = false;
+      for (const j of lista) {
+        const correo = String(j?.correo || "").trim().toLowerCase();
+        if (!correo) continue;
+        const amonestado = calcularAmonestado({ manual: true, horaInicio, toleranciaMin });
+        if (amonestado) algunoAmonestado = true;
+        torneo.jugadores[correo] = normalizarJugadorGN({
+          ...torneo.jugadores[correo],
+          nombre: j.nombre || torneo.jugadores[correo]?.nombre || "",
+          checkin: true,
+          manual: true,
+          amonestado,
+          horaCheckin: ahora,
+          buyIn: true,
+          actualizado: ahora,
+        });
+      }
+      if (algunoAmonestado) avisoAmonestacion = "Uno o más jugadores quedaron amonestados: se activaron fuera del tiempo de tolerancia y pierden el punto de asistencia.";
     } else if (body.accion === "quitarCheckin") {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (torneo.jugadores[correo]) {

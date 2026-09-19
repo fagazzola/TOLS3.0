@@ -10,13 +10,34 @@ import { tarifa, tipoDeFecha } from "./cobranza.js";
 // netlify/functions/gamenight.js usa esta misma constante para saltarse el espejo hacia Cobranza.
 export const PRACTICA_CAMPEONATO = "__practica__";
 
-// ¿un check-in manual (activado por el Host después de iniciado el torneo) cae fuera de la
-// tolerancia configurada en el Tablero de Control? Si no hay hora de inicio todavía (el torneo no se
-// ha "iniciado" en Game Night), nunca amonesta — no hay contra qué medir el tiempo.
+// ¿un check-in manual (activado por el Host) cae fuera de la tolerancia configurada en el Tablero de
+// Control? Si no hay hora de inicio programada (la fecha no tiene `hora` en el Calendario), nunca
+// amonesta — no hay contra qué medir el tiempo.
 export function calcularAmonestado({ manual, horaInicio, toleranciaMin }) {
   if (!manual || !horaInicio) return false;
   const minutos = (Date.now() - new Date(horaInicio).getTime()) / 60000;
   return minutos > (Number(toleranciaMin) || 0);
+}
+
+// 45ª entrega: ya no hace falta que el Host "inicie" el torneo a mano en Game Night — la hora de
+// inicio sale directo de la fecha/hora que ya está guardada en el Calendario para ese torneo. Se
+// asume el huso horario de Ciudad de México (UTC-6, fijo todo el año desde que México eliminó el
+// horario de verano en 2022) porque ahí es donde se juega la liga.
+export function horaInicioProgramada(torneoCal) {
+  if (!torneoCal?.fecha || !torneoCal?.hora) return "";
+  const d = new Date(`${torneoCal.fecha}T${torneoCal.hora}:00-06:00`);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+// encuentra, dentro de los torneos del Calendario, el que corresponde a este campeonato+fecha —
+// respeta la llave especial de partidas de práctica (43ª entrega), que se identifican por
+// `practica: true` en vez de por `temporada`.
+export function torneoCalendarioDe(torneosCal, campeonato, fecha) {
+  if (!fecha) return null;
+  if (campeonato === PRACTICA_CAMPEONATO) {
+    return (torneosCal || []).find((t) => t.practica && t.fecha === fecha) || null;
+  }
+  return (torneosCal || []).find((t) => t.temporada === campeonato && t.fecha === fecha) || null;
 }
 
 // arma la lista de posiciones de salida a partir de quién eliminó a quién — se deriva siempre desde

@@ -500,15 +500,6 @@ export default function GameNight({ session, perfiles, esHost }) {
       {error && <div className="login-error">{error}</div>}
       {aviso && <div className="campeonato-banner campeonato-banner-alerta" style={{ marginTop: 12 }}>⚠ {aviso}</div>}
 
-      {puedoAutoCheckin && (
-        <div className="campeonato-banner campeonato-banner-row" style={{ marginTop: 12 }}>
-          <span>Es el día de la jugada — puedes hacer tu propio check-in.</span>
-          <button className="btn btn-primary" disabled={guardando} onClick={hacerMiCheckin}>
-            {guardando ? "Un momento…" : "Hacer mi check-in"}
-          </button>
-        </div>
-      )}
-
       {/* 45ª entrega: la fecha y el tipo de torneo ya no se eligen — vienen solos, ligados a la
           partida guardada en el Calendario para el campeonato elegido. Solo el campeonato sigue
           siendo un combo. */}
@@ -582,6 +573,24 @@ export default function GameNight({ session, perfiles, esHost }) {
               >
                 {campeonatoSel === PRACTICA_CAMPEONATO ? "Práctica" : tipo}
               </span>
+            )}
+            {/* 61ª entrega: único lugar donde el Jugador puede hacer su propio check-in — antes había un
+                banner aparte arriba de toda la pantalla; Federico pidió consolidarlo en un solo botón
+                explícito, junto al tipo de partida. Mismas condiciones de siempre (`puedoAutoCheckin`):
+                solo el día de la jugada, sin haber hecho check-in ya, y con el torneo todavía no
+                concluido. Al hacer clic, `hacerMiCheckin()` llama la misma acción "checkin" que ya usa el
+                Host (`manual: false`) — por eso en la tabla de habilitados le queda "Auto" en la columna
+                de Check-in (no la tarjeta amarilla de amonestación) y se le cuentan los puntos de
+                asistencia normalmente, igual que si el Host lo hubiera activado a tiempo. */}
+            {puedoAutoCheckin && (
+              <button
+                className="btn btn-primary"
+                style={{ marginLeft: "auto" }}
+                disabled={guardando}
+                onClick={hacerMiCheckin}
+              >
+                {guardando ? "Un momento…" : "Check-in al Torneo"}
+              </button>
             )}
             {editable && (
               <button

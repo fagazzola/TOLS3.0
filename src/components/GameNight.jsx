@@ -672,8 +672,10 @@ export default function GameNight({ session, perfiles, esHost }) {
               53ª entrega: el rol Jugador ya no ve esta misma tabla completa con los botones
               deshabilitados — Federico pidió un espejo simplificado, de solo lectura, con solo las 6
               columnas que le importan a un jugador (sin hora de check-in, sin Lugar/Mejor
-              mano/Debe/Premio, con "Killer" en vez de "Eliminar"). El Host (`editable`) sigue viendo la
-              tabla completa de siempre, sin cambios. */}
+              mano/Debe/Premio). El Host (`editable`) sigue viendo la tabla completa de siempre.
+              54ª entrega: la columna/botón de sacar a un jugador del torneo se renombró de
+              "Eliminar" a "Killer" (encabezado) / "Kill" (botón y modal) en toda la pantalla del Host —
+              ya lo tenía la vista Jugador desde la 53ª. */}
           {editable ? (
           <div className="section">
             <div className="section-head">
@@ -681,7 +683,7 @@ export default function GameNight({ session, perfiles, esHost }) {
             </div>
             <div className="tbl">
               <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
-                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Eliminar</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
+                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
               </div>
               {habilitados.map((j) => {
                 const gn = j.gn || {};
@@ -758,12 +760,12 @@ export default function GameNight({ session, perfiles, esHost }) {
                         <>
                           {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}
                           {editableAhora && (
-                            <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer eliminación" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
+                            <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer Kill" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
                           )}
                         </>
                       ) : (
                         editableAhora && enJuego.length > 1 ? (
-                          <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirKiller(j)}>Eliminar</button>
+                          <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirKiller(j)}>Kill</button>
                         ) : (
                           <span className="muted">En juego</span>
                         )
@@ -940,9 +942,9 @@ export default function GameNight({ session, perfiles, esHost }) {
         <div className="modal-backdrop" onClick={() => !guardando && setKillerModal(null)}>
           <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
             <div className="modal-icon-badge">☠</div>
-            <div className="modal-title">Eliminar a {killerModal.nombre}</div>
+            <div className="modal-title">Kill a {killerModal.nombre}</div>
             <div className="login-field">
-              <label>Eliminado por (opcional)</label>
+              <label>Killer (opcional)</label>
               <select className="field" value={verdugoSel} onChange={(e) => setVerdugoSel(e.target.value)}>
                 <option value="">— sin identificar —</option>
                 {enJuego.filter((j) => j.correo !== killerModal.correo).map((j) => (
@@ -955,7 +957,7 @@ export default function GameNight({ session, perfiles, esHost }) {
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setKillerModal(null)} disabled={guardando}>Cancelar</button>
-              <button className="btn btn-primary" disabled={guardando} onClick={confirmarKiller}>{guardando ? "Un momento…" : "Confirmar eliminación"}</button>
+              <button className="btn btn-primary" disabled={guardando} onClick={confirmarKiller}>{guardando ? "Un momento…" : "Confirmar Kill"}</button>
             </div>
           </div>
         </div>

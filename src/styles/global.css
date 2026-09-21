@@ -228,6 +228,22 @@ h1 {
   flex-direction: row; align-items: center; gap: 3px; font-size: 10.5px;
   background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold-strong); font-weight: 600;
 }
+/* 54ª entrega: ícono de "Resultado final" para un torneo ya Concluido en Game Night — mismo patrón
+   visual que los otros chips de la cuadrícula/lista del Calendario, pero clickeable (abre el modal con
+   la tabla de resultados de esa fecha). */
+.cal-chip-resultado {
+  flex-direction: row; align-items: center; gap: 3px; font-size: 10.5px; cursor: pointer;
+  background: color-mix(in srgb, var(--burgundy) 14%, transparent); color: var(--burgundy);
+  font-weight: 700; transition: filter 0.15s ease;
+}
+.cal-chip-resultado:hover { filter: brightness(1.08); }
+.cal-chip-resultado-lista { display: inline-flex; margin-top: 4px; padding: 3px 8px; border-radius: 999px; }
+/* filas de podio (lugares 1º-3º) en la tabla de "Resultado final" — mismo acento dorado que
+   `.badge-campeon`, para que salten a la vista de inmediato */
+.cal-resultado-podio {
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  font-weight: 600;
+}
 .section-note { font-size: 12.5px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace; }
 .section-sub { font-size: 13px; color: var(--ink-soft); margin: 10px 0 14px; line-height: 1.5; }
 .subhead { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 22px 0 10px; }

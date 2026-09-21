@@ -7,6 +7,14 @@ const API = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_COBRANZA = "/api/cobranza";
 const API_GAMENIGHT = "/api/gamenight";
+const API_JUG = "/api/jugadores";
+
+// 54ª entrega: Alias PokerStars para la tabla de "Resultado final" — mismo criterio que ya usa
+// GameNight.jsx (aliasPokerStars si existe, si no el nombre completo, si no el correo a secas).
+function nombreCorto(j) {
+  if (!j) return "";
+  return (j.aliasPokerStars || "").trim() || j.nombre || "";
+}
 
 // muestra solo hora:minuto — la fecha ya está implícita en la celda/renglón del Calendario donde se
 // pinta este dato, así que repetirla sería redundante
@@ -65,6 +73,7 @@ export default function Calendario({ session, perfiles }) {
   const [data, setData] = useState(null);
   const [cobranza, setCobranza] = useState(null);
   const [gamenight, setGamenight] = useState(null);
+  const [jugadoresSitio, setJugadoresSitio] = useState([]);
   const [campeonatos, setCampeonatos] = useState([]);
   // el campeonato "activo" es el que gobierna el sitio — el mismo que se ve/edita en el Tablero de
   // Control (tols-campeonatos). El Calendario ya no lo adivina por su cuenta a partir de las fechas.
@@ -79,6 +88,9 @@ export default function Calendario({ session, perfiles }) {
   });
   const [modal, setModal] = useState(null); // { fechaOriginal, fecha, hora, main, temporada, isNew }
   const [pagoModal, setPagoModal] = useState(null); // { fecha, nota }
+  // 54ª entrega: modal de "Resultado final" de un torneo ya concluido en Game Night, abierto desde el
+  // ícono nuevo en la cuadrícula (Administrador) o la lista (Jugador) del Calendario.
+  const [resultadoModal, setResultadoModal] = useState(null); // { campeonato, fecha, practica }
 
   useEffect(() => {
     Promise.all([
@@ -135,6 +147,13 @@ export default function Calendario({ session, perfiles }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => setGamenight(json))
       .catch(() => setGamenight(null));
+
+    // 54ª entrega: directorio de jugadores (Alias PokerStars) para la tabla de "Resultado final" —
+    // best-effort, igual que los dos anteriores (si falla, la tabla cae al correo a secas).
+    fetch(API_JUG)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => setJugadoresSitio(Array.isArray(json?.jugadores) ? json.jugadores : Array.isArray(json) ? json : []))
+      .catch(() => setJugadoresSitio([]));
   }, []);
 
   if (loading) return <p className="subtitle">Cargando calendario…</p>;
@@ -304,6 +323,47 @@ export default function Calendario({ session, perfiles }) {
     return { hora: j.horaCheckin, amonestado: Boolean(j.amonestado) };
   }
 
+  // 54ª entrega: si Game Night ya marcó esa fecha como "Concluida" (`concluir`, botón "Jugada
+  // Concluida"), devuelve el torneo completo (campeonato + fecha + los datos ya congelados de cada
+  // jugador: lugar/puntos/premioTotal) para poder mostrar el ícono de "Resultado final" y, si se abre,
+  // la tabla de esa jugada puntual. `null` mientras el torneo siga en curso o sin jugarse.
+  function torneoConcluido(fechaIso, practica) {
+    const campeonato = practica ? PRACTICA_CAMPEONATO : campeonatoActivo;
+    const torneo = gamenight?.[campeonato]?.[fechaIso];
+    return torneo?.concluido ? { campeonato, fecha: fechaIso, torneo } : null;
+  }
+
+  // 54ª entrega: "puntos acumulados" y "posición general" del jugador en sesión, para el bloque de
+  // arriba del Calendario (antes decían "Próx.", pendiente desde la 38ª entrega). Suma los puntos ya
+  // congelados (`estadoTorneo()`, ver src/lib/gamenight.js) de TODAS las fechas concluidas del
+  // campeonato activo, más TODAS las partidas de práctica concluidas — las prácticas siempre cuentan,
+  // indistintamente del campeonato (así lo pidió Federico en la 53ª entrega para sus puntos). La
+  // posición general se calcula sobre esa misma bolsa de puntos, comparando contra cualquier otro
+  // jugador que también tenga puntos ahí (no hace falta la lista completa de Jugadores para esto).
+  function tablaDePuntosAcumulados() {
+    const fechas = [
+      ...torneosActivo.map((t) => ({ campeonato: campeonatoActivo, fecha: t.fecha })),
+      ...torneosPractica.map((t) => ({ campeonato: PRACTICA_CAMPEONATO, fecha: t.fecha })),
+    ];
+    const totales = {};
+    fechas.forEach(({ campeonato, fecha }) => {
+      const torneo = gamenight?.[campeonato]?.[fecha];
+      if (!torneo?.concluido) return;
+      Object.entries(torneo.jugadores || {}).forEach(([correo, j]) => {
+        totales[correo] = (totales[correo] || 0) + (Number(j.puntos) || 0);
+      });
+    });
+    return totales;
+  }
+  const totalesPuntos = tablaDePuntosAcumulados();
+  const puntosAcumulados = totalesPuntos[miCorreo] || 0;
+  const posicionGeneral = (() => {
+    const correos = Object.keys(totalesPuntos);
+    if (!correos.includes(miCorreo)) return null;
+    const orden = correos.slice().sort((a, b) => totalesPuntos[b] - totalesPuntos[a]);
+    return orden.indexOf(miCorreo) + 1;
+  })();
+
   return (
     <div>
       <div className="headtop">
@@ -350,11 +410,11 @@ export default function Calendario({ session, perfiles }) {
           </div>
           <div className="cal-mini-stat">
             <div className="cal-mini-stat-label">Puntos</div>
-            <div className="cal-mini-stat-value cal-mini-stat-proximamente">Próx.</div>
+            <div className="cal-mini-stat-value">{puntosAcumulados}</div>
           </div>
           <div className="cal-mini-stat">
             <div className="cal-mini-stat-label">Posición</div>
-            <div className="cal-mini-stat-value cal-mini-stat-proximamente">Próx.</div>
+            <div className="cal-mini-stat-value">{posicionGeneral ? `${posicionGeneral}º` : "—"}</div>
           </div>
         </div>
       </div>
@@ -423,6 +483,21 @@ export default function Calendario({ session, perfiles }) {
                         return ci ? (
                           <div className="cal-chip cal-chip-checkin" title={new Date(ci.hora).toLocaleString("es-MX")}>
                             {ci.amonestado ? <span className="tarjeta-amarilla" style={{ marginRight: 4 }} title="Activado manualmente por el Host — amonestado" /> : "✓ Auto"} {horaCorta(ci.hora)}
+                          </div>
+                        ) : null;
+                      })()}
+                      {(() => {
+                        const cerrado = torneoConcluido(iso(cell.date), eventos[0]?.practica);
+                        return cerrado ? (
+                          <div
+                            className="cal-chip cal-chip-resultado"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setResultadoModal({ campeonato: cerrado.campeonato, fecha: cerrado.fecha, practica: Boolean(eventos[0]?.practica) });
+                            }}
+                            title="Ver resultado final de este torneo"
+                          >
+                            🏆 Resultado
                           </div>
                         ) : null;
                       })()}
@@ -502,6 +577,17 @@ export default function Calendario({ session, perfiles }) {
                               <span className="cal-ganancia-inline">Auto</span>
                             )}{" "}
                             <span className="cal-ganancia-inline">{horaCorta(ci.hora)}</span>
+                          </span>
+                        ) : null;
+                      })()}
+                      {(() => {
+                        const cerrado = torneoConcluido(t.fecha, t.practica);
+                        return cerrado ? (
+                          <span
+                            className="cal-chip cal-chip-resultado cal-chip-resultado-lista"
+                            onClick={() => setResultadoModal({ campeonato: cerrado.campeonato, fecha: cerrado.fecha, practica: Boolean(t.practica) })}
+                          >
+                            🏆 Ver resultado final
                           </span>
                         ) : null;
                       })()}
@@ -643,6 +729,59 @@ export default function Calendario({ session, perfiles }) {
           </div>
         </div>
       )}
+
+      {/* 54ª entrega: "Resultado final" de un torneo ya concluido — ícono nuevo en la cuadrícula
+          (Administrador) y en la lista (Jugador) del Calendario, junto al chip de check-in. Lee
+          directo del mismo `gamenight` best-effort que ya usa esta pantalla; las cifras (lugar,
+          puntos, premio) ya vienen congeladas desde que Game Night marcó el torneo como Concluido. */}
+      {resultadoModal && (() => {
+        const torneo = gamenight?.[resultadoModal.campeonato]?.[resultadoModal.fecha];
+        const filas = Object.entries(torneo?.jugadores || {})
+          .filter(([, j]) => j.lugar)
+          .map(([correo, j]) => ({
+            correo,
+            lugar: j.lugar,
+            puntos: Number(j.puntos) || 0,
+            premio: Number(j.premioTotal) || 0,
+          }))
+          .sort((a, b) => a.lugar - b.lugar);
+        const d = new Date(resultadoModal.fecha + "T00:00:00");
+        return (
+          <div className="modal-backdrop" onClick={() => setResultadoModal(null)}>
+            <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-title">
+                🏆 Resultado final — {diasCortos[d.getDay()]} {d.getDate()} {mesesLargos[d.getMonth()]} {d.getFullYear()}
+                {resultadoModal.practica && <span className="badge badge-practica" style={{ marginLeft: 8 }}>Práctica</span>}
+              </div>
+              <div className="tbl">
+                <div className="trow thead" style={{ gridTemplateColumns: "0.6fr 1.6fr 0.8fr 0.8fr" }}>
+                  <div>Lugar</div><div>Alias PokerStars</div><div>Puntos</div><div>Premio $</div>
+                </div>
+                {filas.map((f) => (
+                  <div
+                    className={"trow" + (f.lugar <= 3 ? " cal-resultado-podio" : "")}
+                    style={{ gridTemplateColumns: "0.6fr 1.6fr 0.8fr 0.8fr" }}
+                    key={f.correo}
+                  >
+                    <div className="num">{f.lugar}º</div>
+                    <div>{nombreCorto(jugadoresSitio.find((j) => j.correo === f.correo)) || f.correo}</div>
+                    <div className="num">{f.puntos}</div>
+                    <div className="num">{money(f.premio)}</div>
+                  </div>
+                ))}
+                {filas.length === 0 && (
+                  <div className="section-sub" style={{ padding: "14px 18px", margin: 0 }}>
+                    Todavía no hay lugares registrados para este torneo.
+                  </div>
+                )}
+              </div>
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={() => setResultadoModal(null)}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

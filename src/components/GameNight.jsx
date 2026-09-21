@@ -287,7 +287,7 @@ export default function GameNight({ session, perfiles, esHost }) {
     llamar({ accion: "mejorMano", correo: j.correo, valor: !j.gn?.mejorMano });
   }
   function pedirKiller(j) {
-    setKillerModal({ correo: j.correo, nombre: j.nombre });
+    setKillerModal({ correo: j.correo, nombre: nombreCorto(j) });
     setVerdugoSel("");
   }
   async function confirmarKiller() {
@@ -456,7 +456,7 @@ export default function GameNight({ session, perfiles, esHost }) {
             </div>
             <div className="tbl">
               <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
-                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
+                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Eliminar</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
               </div>
               {habilitados.map((j) => {
                 const gn = j.gn || {};
@@ -679,7 +679,7 @@ export default function GameNight({ session, perfiles, esHost }) {
               <select className="field" value={verdugoSel} onChange={(e) => setVerdugoSel(e.target.value)}>
                 <option value="">— sin identificar —</option>
                 {enJuego.filter((j) => j.correo !== killerModal.correo).map((j) => (
-                  <option key={j.correo} value={j.correo}>{j.nombre}</option>
+                  <option key={j.correo} value={j.correo}>{nombreCorto(j)}</option>
                 ))}
               </select>
             </div>

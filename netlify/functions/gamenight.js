@@ -64,6 +64,25 @@ async function calendarioTorneos() {
   }
 }
 
+// 49ª entrega: Federico reportó que, después de mover Re-buys/Add-on varias veces seguidas y rápido,
+// "se borró todo y se inicializó" — el torneo completo (y potencialmente TODOS los campeonatos/fechas
+// guardados en este store) volvió a cero. Causa más probable: aunque el store se abre con
+// `consistency: "strong"` desde la 47ª entrega, una lectura ocasional todavía puede devolver `null`
+// justo después de un guardado muy reciente (retraso de réplica). Como cada acción reconstruye y vuelve
+// a guardar el mapa COMPLETO (todos los campeonatos, no solo el que se está tocando), una sola lectura
+// nula tratada como "no hay nada guardado todavía" provoca que el siguiente guardado sobreescriba TODO
+// el store con un mapa casi vacío — no solo pierde el torneo actual, pierde los de cualquier otro
+// campeonato también. Fix: reintentar la lectura un par de veces antes de asumir que el store
+// genuinamente está vacío (primer uso).
+async function leerMapaConReintento(store) {
+  for (let intento = 0; intento < 3; intento++) {
+    const raw = await store.get("data", { type: "json", consistency: "strong" });
+    if (raw) return raw;
+    if (intento < 2) await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return null; // después de 3 intentos seguidos en null, se asume que de verdad no hay datos aún
+}
+
 function getTorneo(mapa, campeonato, fecha) {
   if (!mapa[campeonato]) mapa[campeonato] = {};
   if (!mapa[campeonato][fecha]) mapa[campeonato][fecha] = { horaInicio: "", jugadores: {}, ordenEliminados: [] };
@@ -132,17 +151,24 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Falta el campeonato o la fecha del torneo." }), { status: 400, headers: HEADERS });
     }
 
-    const raw = await store.get("data", { type: "json", consistency: "strong" });
-    const mapa = normalizarMapa(raw);
-    const torneo = getTorneo(mapa, campeonato, fecha);
     const ahora = new Date().toISOString();
 
+    // 49ª entrega: se piden PRIMERO los datos de otros stores (Tablero, Calendario) — que no cambian
+    // seguido y no hace falta que estén "frescos al segundo" — para que la lectura del propio store de
+    // Game Night quede lo más pegada posible al guardado que viene después. Antes esta lectura y el
+    // guardado final quedaban separados por dos round-trips de red completos (Tablero + Calendario), lo
+    // que ampliaba la ventana en la que dos acciones casi simultáneas (ej. dos clics rápidos de Re-buy)
+    // podían leer la misma versión vieja y una terminar pisando a la otra al guardar.
     const [tableroMapa, torneosCal] = await Promise.all([tableroMapaActual(), calendarioTorneos()]);
     const tipo = tipoDeFecha(torneosCal, fecha);
     // 48ª entrega: la tolerancia de check-in ya solo se usa para mostrarle un mensaje informativo al
     // Host (se calcula y se manda en `avisoTolerancia`) — ya no amonesta a nadie automáticamente.
     const toleranciaMin = tableroMapa?.[campeonato]?.toleranciaCheckinMin ?? 10;
     const recomprasMax = recomprasMaxEfectivo(tableroMapa, campeonato);
+
+    const raw = await leerMapaConReintento(store);
+    const mapa = normalizarMapa(raw);
+    const torneo = getTorneo(mapa, campeonato, fecha);
 
     // 45ª entrega: ya no existe un botón "Iniciar torneo" — la hora de inicio para medir la tolerancia
     // de check-in sale directo de la fecha/hora que ya está guardada en el Calendario para este torneo

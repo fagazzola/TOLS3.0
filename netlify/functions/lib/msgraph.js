@@ -47,6 +47,22 @@ function colLetter(n) {
   return s;
 }
 
+// 56ª entrega: Federico reportó que la CLABE (18 dígitos) y el número de Tarjeta (16 dígitos) de
+// "Cuenta de cobro" se seguían guardando en formato científico en el Excel y perdiendo dígitos —
+// escribir un valor via `writeSheetTable()` (más abajo) manda el string tal cual dentro de `values`, y
+// Excel, igual que si alguien lo tecleara a mano, interpreta un texto que "parece número" como número:
+// con 16-18 dígitos eso excede la precisión de un `Number` normal (~15 dígitos significativos) y el
+// formato General de la celda lo muestra en notación científica, perdiendo los dígitos de más.
+// Solución que pidió Federico, la misma que se usa a mano en Excel: anteponer un apóstrofo (') al
+// valor — Excel lo toma como señal de "esto es texto" y no lo vuelve a mostrar (no queda como parte
+// del valor visible ni de lo que se copia). Solo tiene sentido para un string de puros dígitos; un
+// nombre, una fecha ya formateada como texto, o un campo vacío se guardan bien tal cual.
+export function celdaTexto(valor) {
+  const s = String(valor ?? "").trim();
+  if (!s) return "";
+  return /^\d+$/.test(s) ? "'" + s : s;
+}
+
 // intercambia el refresh_token guardado por un access_token fresco — Microsoft rota el refresh_token
 // en cada uso, así que el nuevo se vuelve a guardar cada vez (si no se hace, deja de servir en unos días)
 async function getAccessToken() {
@@ -197,7 +213,7 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
       j.correo, j.tipoUsuario, j.fecNac, j.edad, j.manoFavorita || "", j.fechaRegistro || "",
       j.estatus || "Activo", j.host ? "Sí" : "No", j.hostFecha || "",
       u ? u.password : "", u ? u.rol : "",
-      j.cuenta || "", j.banco || "", j.tipoCuenta || "",
+      celdaTexto(j.cuenta), j.banco || "", j.tipoCuenta || "",
     ]);
   }
   for (const u of usuarios) {

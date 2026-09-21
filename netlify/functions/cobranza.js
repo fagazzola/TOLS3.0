@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/cobranza.json";
-import { syncCobranza, syncCierres } from "./lib/msgraph.js";
+import { syncCobranza, syncCierres, celdaTexto } from "./lib/msgraph.js";
 import { conMontos, resumenPorJugador, tieneAdeudoBloqueante } from "../../src/lib/cobranza.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -130,7 +130,10 @@ async function respuestaCompleta(data) {
 function filasParaExcel({ movimientos, resumen }) {
   const resumenRows = Object.values(resumen)
     .sort((a, b) => a.nombre.localeCompare(b.nombre))
-    .map((r) => [r.correo, r.nombre, r.cuenta, r.banco, r.tipoCuenta, r.pago, r.deposito, r.saldo]);
+    // 56ª entrega: `celdaTexto()` antepone un apóstrofo a la CLABE/Tarjeta (puros dígitos) para que
+    // Excel la guarde como texto en vez de convertirla a número y mostrarla en notación científica —
+    // ver la nota junto a `celdaTexto()` en msgraph.js.
+    .map((r) => [r.correo, r.nombre, celdaTexto(r.cuenta), r.banco, r.tipoCuenta, r.pago, r.deposito, r.saldo]);
   const movimientoRows = [...movimientos]
     .sort((a, b) => (a.campeonato + a.fecha).localeCompare(b.campeonato + b.fecha))
     .map((m) => [

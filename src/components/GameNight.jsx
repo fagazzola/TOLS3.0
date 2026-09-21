@@ -513,35 +513,47 @@ export default function GameNight({ session, perfiles, esHost }) {
           partida guardada en el Calendario para el campeonato elegido. Solo el campeonato sigue
           siendo un combo. */}
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20, flexWrap: "wrap", alignItems: "center" }}>
-        <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
-          {/* 51ª/52ª entrega: mientras haya una partida pendiente por orden cronológico (`bloqueante`), el
-              combo muestra SOLO esa opción — ya no se listan las demás deshabilitadas. Antes, con todas
-              visibles (aunque disabled), el campeonato activo seguía "apareciendo" en el combo y podía
-              confundir; ahora no hay forma de ver ni de intentar elegir nada que no sea lo que toca jugar
-              primero. En cuanto esa partida queda "Concluida", `bloqueante` pasa a `null` y el combo
-              vuelve a mostrar todos los campeonatos + práctica, para poder revisar cualquiera.
-              58ª entrega: Federico reportó que esto le impedía llegar a OTRO torneo (ej. una práctica ya
-              jugada, no la que bloquea ahora mismo) para usar "Reiniciar este torneo" ahí — el servidor sí
-              permite esa acción sobre cualquier torneo, bloqueado o no, pero el combo no dejaba ni
-              seleccionarlo. `mostrarTodos` (el link de abajo) revela la lista completa sin quitar la
-              restricción por default. */}
-          {bloqueante && !mostrarTodos ? (
-            <option value={bloqueante.campeonato}>
-              {bloqueante.campeonato === PRACTICA_CAMPEONATO
-                ? "🎯 Partidas de práctica"
-                : `${bloqueante.campeonato}${bloqueante.campeonato === campeonatos.activo ? " (activo)" : ""}`}
-            </option>
-          ) : (
-            <>
-              {campeonatos.nombres.map((n) => (
-                <option key={n} value={n}>
-                  {n}{n === campeonatos.activo ? " (activo)" : ""}
-                </option>
-              ))}
-              <option value={PRACTICA_CAMPEONATO}>🎯 Partidas de práctica</option>
-            </>
-          )}
-        </select>
+        {/* 60ª entrega: el rol Jugador solo ve un espejo de lo que el Host ve — la partida a mostrar no
+            es un combo editable para él (ni el escape hatch de "Mostrar todos", que es una herramienta
+            de corrección exclusiva del Host/Admin), así que se muestra como texto de solo lectura, igual
+            que ya se hace con la fecha (`fechaSel`) más abajo. */}
+        {editable ? (
+          <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
+            {/* 51ª/52ª entrega: mientras haya una partida pendiente por orden cronológico (`bloqueante`), el
+                combo muestra SOLO esa opción — ya no se listan las demás deshabilitadas. Antes, con todas
+                visibles (aunque disabled), el campeonato activo seguía "apareciendo" en el combo y podía
+                confundir; ahora no hay forma de ver ni de intentar elegir nada que no sea lo que toca jugar
+                primero. En cuanto esa partida queda "Concluida", `bloqueante` pasa a `null` y el combo
+                vuelve a mostrar todos los campeonatos + práctica, para poder revisar cualquiera.
+                58ª entrega: Federico reportó que esto le impedía llegar a OTRO torneo (ej. una práctica ya
+                jugada, no la que bloquea ahora mismo) para usar "Reiniciar este torneo" ahí — el servidor sí
+                permite esa acción sobre cualquier torneo, bloqueado o no, pero el combo no dejaba ni
+                seleccionarlo. `mostrarTodos` (el link de abajo) revela la lista completa sin quitar la
+                restricción por default. */}
+            {bloqueante && !mostrarTodos ? (
+              <option value={bloqueante.campeonato}>
+                {bloqueante.campeonato === PRACTICA_CAMPEONATO
+                  ? "🎯 Partidas de práctica"
+                  : `${bloqueante.campeonato}${bloqueante.campeonato === campeonatos.activo ? " (activo)" : ""}`}
+              </option>
+            ) : (
+              <>
+                {campeonatos.nombres.map((n) => (
+                  <option key={n} value={n}>
+                    {n}{n === campeonatos.activo ? " (activo)" : ""}
+                  </option>
+                ))}
+                <option value={PRACTICA_CAMPEONATO}>🎯 Partidas de práctica</option>
+              </>
+            )}
+          </select>
+        ) : (
+          <span className="field field-readonly" style={{ maxWidth: 220 }}>
+            {campeonatoSel === PRACTICA_CAMPEONATO
+              ? "🎯 Partidas de práctica"
+              : `${campeonatoSel}${campeonatoSel === campeonatos.activo ? " (activo)" : ""}`}
+          </span>
+        )}
         {bloqueante && bloqueante.campeonato !== campeonatoSel && (
           <span className="campeonato-banner campeonato-banner-alerta" style={{ margin: 0 }}>
             Hay que jugar/concluir primero la partida del {bloqueante.fecha}
@@ -549,7 +561,7 @@ export default function GameNight({ session, perfiles, esHost }) {
             por eso el combo solo deja elegir esa por ahora.
           </span>
         )}
-        {bloqueante && (
+        {editable && bloqueante && (
           <button
             type="button"
             className="btn-link"
@@ -877,6 +889,9 @@ export default function GameNight({ session, perfiles, esHost }) {
           )}
 
           {/* ───────── Jugadores sin check-in ───────── */}
+          {/* 60ª entrega: exclusiva del Host/Admin — el rol Jugador no necesita verla (es información
+              operativa para activar manualmente a alguien, no algo que le importe a un jugador). */}
+          {editable && (
           <div className="section">
             <div className="section-head">
               <div className="section-title">Jugadores sin check-in <span className="section-title-campeonato">· {deshabilitados.length}</span></div>
@@ -929,6 +944,7 @@ export default function GameNight({ session, perfiles, esHost }) {
               {deshabilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todos los jugadores activos de la liga ya hicieron check-in.</div>}
             </div>
           </div>
+          )}
         </>
       )}
 

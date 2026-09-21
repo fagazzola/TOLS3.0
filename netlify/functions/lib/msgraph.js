@@ -421,6 +421,41 @@ export function syncGameNight(mapa) {
   });
 }
 
+// 51ª entrega: Federico pidió que, al confirmar "Jugada Concluida" en Game Night, quede un registro
+// AUDITABLE en Excel — a diferencia de "Cobranza"/"Cobranza_Resumen" (que son un espejo en vivo, se
+// reescriben completas en cada acción y se pueden vaciar con "Reiniciar este torneo"), esta hoja solo
+// ACUMULA: cada cierre de torneo agrega sus filas al final de la lista completa que ya se traía
+// (`registros` en `tols-cierres`, ver `registrarCierreTorneo()` en `cobranza.js`) — las filas de un
+// cierre anterior nunca se tocan ni se recalculan por acciones posteriores. Es el registro que el
+// Tesorero puede usar después para auditar a quién había que cobrarle/pagarle al momento exacto en que
+// se cerró cada torneo, sin depender de que nadie haya tocado nada después. Como la hoja crece con cada
+// cierre (nunca se editan filas viejas), el `maxRows` de la limpieza se calcula sobre el tamaño real de
+// la lista en cada llamada.
+export function syncCierres(registros) {
+  return safe(async () => {
+    const filas = (registros || [])
+      .slice()
+      .sort((a, b) => (a.concluidoEn || "").localeCompare(b.concluidoEn || ""))
+      .map((r) => [
+        r.campeonato, r.fecha, r.tipo || "", r.correo, r.nombre || "",
+        r.buyIn ? "Sí" : "No", r.rebuys || 0, r.addon ? "Sí" : "No",
+        r.debeBuyIn || 0, r.debeRebuys || 0, r.debeAddon || 0, r.debeTotal || 0,
+        r.lugar || "", r.esCampeon ? "Sí" : "No",
+        r.premioLugar || 0, r.premioBurbuja || 0, r.premioMano || 0, r.premioTotal || 0,
+        r.balance || 0, r.accion || "", r.concluidoEn || "",
+      ]);
+    await asegurarHoja("Cobranza_Cierres", [
+      "Campeonato", "Fecha", "Tipo", "Correo", "Jugador",
+      "Buy-in", "Re-buys", "Add-on",
+      "$ Buy-in", "$ Re-buys", "$ Add-on", "$ Total a Cobrar",
+      "Lugar", "Campeón",
+      "Premio Lugar", "Premio Burbuja", "Premio Mejor Mano", "$ Premio Total",
+      "Balance Neto", "Acción", "Concluido En",
+    ]);
+    await writeSheetTable("Cobranza_Cierres", filas, { maxRows: filas.length + 50 });
+  });
+}
+
 export function syncPerfiles(data) {
   return safe(async () => {
     // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el

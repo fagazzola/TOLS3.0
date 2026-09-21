@@ -49,17 +49,27 @@ export function torneoCalendarioDe(torneosCal, campeonato, fecha) {
   return (torneosCal || []).find((t) => t.temporada === campeonato && t.fecha === fecha) || null;
 }
 
-// 50ª entrega: Federico pidió que Game Night respete el orden cronológico real de las partidas —
-// si por fecha corresponde jugar primero una partida de práctica (o de cualquier otro campeonato),
-// no se debe poder trabajar en un torneo posterior hasta que esa partida quede "Concluida" (ver
-// acción `"concluir"` en netlify/functions/gamenight.js). Junta TODAS las fechas ya vencidas
-// (`fecha <= hoy`) de TODOS los campeonatos y de las partidas de práctica en una sola línea de
-// tiempo, y devuelve la más antigua que todavía no esté concluida — esa es la que "bloquea" el
-// combo de campeonato en la pantalla de Game Night para cualquier otro valor. `null` si no hay
-// ninguna partida vencida pendiente de concluir (todo al día).
-export function torneoBloqueante(torneosCal, gnMapa, hoy) {
+// 50ª/51ª entrega: Federico pidió que Game Night respete el orden cronológico real de las partidas —
+// si por fecha corresponde jugar primero una partida de práctica (o del campeonato activo), no se
+// debe poder trabajar en una fecha posterior hasta que esa partida quede "Concluida" (ver acción
+// `"concluir"` en netlify/functions/gamenight.js).
+//
+// 51ª entrega — dos correcciones sobre la versión original de la 50ª:
+// 1) Ya NO se exige que la fecha esté "vencida" (`fecha <= hoy`). Federico aclaró que el orden es por
+//    CALENDARIO, no por si la fecha ya pasó — una partida de práctica programada para MAÑANA (todavía
+//    no vencida) igual debe bloquear un campeonato cuyas fechas empiezan después. Con el filtro viejo,
+//    una práctica futura no bloqueaba nada y "Otoño 2026 (activo)" seguía apareciendo disponible.
+// 2) Los candidatos ya NO se juntan de TODOS los campeonatos que existan en el Calendario — solo del
+//    campeonato ACTIVO (`campeonatoActivo`) y de las partidas de práctica. Antes, cualquier campeonato
+//    viejo/ya jugado (de una temporada anterior, de antes de que existiera el campo `concluido`)
+//    quedaba con fechas vencidas y `concluido: false` para siempre, y el más antiguo de TODA la
+//    historia de la liga terminaba "bloqueando" el sitio entero sin que Federico entendiera por qué.
+// Devuelve la fecha (real del activo, o de práctica) más antigua por calendario que todavía no esté
+// concluida — esa es la única que se puede trabajar en Game Night. `null` si no hay ninguna pendiente
+// (todo al día en el campeonato activo y en las prácticas).
+export function torneoBloqueante(torneosCal, gnMapa, campeonatoActivo) {
   const candidatos = (torneosCal || [])
-    .filter((t) => (t.practica || t.temporada) && t.fecha && t.fecha <= hoy)
+    .filter((t) => t.fecha && (t.practica || t.temporada === campeonatoActivo))
     .map((t) => {
       const campeonato = t.practica ? PRACTICA_CAMPEONATO : t.temporada;
       return {

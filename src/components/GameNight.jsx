@@ -98,7 +98,7 @@ export default function GameNight({ session, perfiles, esHost }) {
         // partida anterior por orden cronológico sin concluir), arranca directo en esa partida
         // pendiente en vez de en el activo — para que Federico vea de una vez cuál le falta cerrar.
         const activo = camp?.activo || nombres[0] || "";
-        const bloqueanteInicial = torneoBloqueante(torneos, gnData, iso(new Date()));
+        const bloqueanteInicial = torneoBloqueante(torneos, gnData, activo);
         const default_ = bloqueanteInicial && bloqueanteInicial.campeonato !== activo ? bloqueanteInicial.campeonato : activo;
         setCampeonatoSel((prev) => prev || default_);
       })
@@ -145,7 +145,10 @@ export default function GameNight({ session, perfiles, esHost }) {
   // 50ª entrega: cuál es, cronológicamente, la partida vencida (fecha <= hoy) más antigua que
   // todavía no está Concluida — mientras exista, ningún otro campeonato/práctica posterior se puede
   // seleccionar en el combo, para respetar el orden real en el que se jugaron/juegan las partidas.
-  const bloqueante = useMemo(() => torneoBloqueante(torneosCal, gnMapa, iso(new Date())), [torneosCal, gnMapa]);
+  const bloqueante = useMemo(
+    () => torneoBloqueante(torneosCal, gnMapa, campeonatos.activo),
+    [torneosCal, gnMapa, campeonatos.activo]
+  );
 
   // si el combo queda seleccionado en un campeonato/práctica que se vuelve bloqueado (ej. se creó una
   // partida de práctica con fecha anterior mientras la pantalla ya estaba abierta en el Regular), lo
@@ -502,22 +505,34 @@ export default function GameNight({ session, perfiles, esHost }) {
           siendo un combo. */}
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20, flexWrap: "wrap", alignItems: "center" }}>
         <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
-          {campeonatos.nombres.map((n) => {
-            const bloqueado = Boolean(bloqueante) && bloqueante.campeonato !== n;
-            return (
-              <option key={n} value={n} disabled={bloqueado}>
-                {n}{n === campeonatos.activo ? " (activo)" : ""}{bloqueado ? " — pendiente de concluir partida anterior" : ""}
-              </option>
-            );
-          })}
-          <option value={PRACTICA_CAMPEONATO} disabled={Boolean(bloqueante) && bloqueante.campeonato !== PRACTICA_CAMPEONATO}>
-            🎯 Partidas de práctica{Boolean(bloqueante) && bloqueante.campeonato !== PRACTICA_CAMPEONATO ? " — pendiente de concluir partida anterior" : ""}
-          </option>
+          {/* 51ª entrega: mientras haya una partida pendiente por orden cronológico (`bloqueante`), el
+              combo muestra SOLO esa opción — ya no se listan las demás deshabilitadas. Antes, con todas
+              visibles (aunque disabled), el campeonato activo seguía "apareciendo" en el combo y podía
+              confundir; ahora no hay forma de ver ni de intentar elegir nada que no sea lo que toca jugar
+              primero. En cuanto esa partida queda "Concluida", `bloqueante` pasa a `null` y el combo
+              vuelve a mostrar todos los campeonatos + práctica, para poder revisar cualquiera. */}
+          {bloqueante ? (
+            <option value={bloqueante.campeonato}>
+              {bloqueante.campeonato === PRACTICA_CAMPEONATO
+                ? "🎯 Partidas de práctica"
+                : `${bloqueante.campeonato}${bloqueante.campeonato === campeonatos.activo ? " (activo)" : ""}`}
+            </option>
+          ) : (
+            <>
+              {campeonatos.nombres.map((n) => (
+                <option key={n} value={n}>
+                  {n}{n === campeonatos.activo ? " (activo)" : ""}
+                </option>
+              ))}
+              <option value={PRACTICA_CAMPEONATO}>🎯 Partidas de práctica</option>
+            </>
+          )}
         </select>
         {bloqueante && bloqueante.campeonato !== campeonatoSel && (
           <span className="campeonato-banner campeonato-banner-alerta" style={{ margin: 0 }}>
-            Hay una partida del {bloqueante.fecha} sin concluir — hay que cerrarla antes de trabajar en otra
-            posterior.
+            Hay que jugar/concluir primero la partida del {bloqueante.fecha}
+            {bloqueante.campeonato === PRACTICA_CAMPEONATO ? " (práctica)" : ` (${bloqueante.campeonato})`} —
+            por eso el combo solo deja elegir esa por ahora.
           </span>
         )}
         {fechaSel ? (
@@ -549,36 +564,7 @@ export default function GameNight({ session, perfiles, esHost }) {
 
       {fechaSel && (
         <>
-          {/* ───────── Totales de Buy-in/Re-buys/Add-on (51ª entrega) — para que el Host valide rápido
-              cuánto lleva registrado en la mesa, sin tener que sumar la tabla completa a mano. ───────── */}
-          <div className="stats gn-stats-row" style={{ margin: "20px 0" }}>
-            <div className="stat">
-              <div className="stat-label">Buy-ins</div>
-              <div className="stat-value">{totalesAgiles.buyIns}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">$ por Buy-ins</div>
-              <div className="stat-value">{money(totalesAgiles.buyInsUSD)}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Re-buys</div>
-              <div className="stat-value">{totalesAgiles.rebuys}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">$ por Re-buys</div>
-              <div className="stat-value">{money(totalesAgiles.rebuysUSD)}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Add-ons</div>
-              <div className="stat-value">{totalesAgiles.addons}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">$ por Add-ons</div>
-              <div className="stat-value">{money(totalesAgiles.addonsUSD)}</div>
-            </div>
-          </div>
-
-          {/* ───────── Podio de premios en efectivo ───────── */}
+          {/* ───────── Podio de premios en efectivo (bloque 1) ───────── */}
           <div className="gn-podium">
             {lugaresPago >= 2 && (
               <div className="gn-podium-spot gn-podium-2">
@@ -611,6 +597,41 @@ export default function GameNight({ session, perfiles, esHost }) {
               </div>
             )}
             {lugaresPago === 0 && <p className="section-sub">Este campeonato todavía no tiene lugares de premio configurados en el Tablero de Control.</p>}
+          </div>
+
+          {/* ───────── Totales de Buy-in/Re-buys/Add-on (bloque 2, 51ª entrega) — un solo recuadro con
+              2 líneas (cantidades arriba, montos en $ abajo) para que el Host valide rápido cuánto lleva
+              registrado en la mesa, sin tener que sumar la tabla completa a mano. ───────── */}
+          <div className="gn-totales-card">
+            <div className="gn-totales-titulo">Totales de la mesa</div>
+            <div className="gn-totales-fila">
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">Buy-ins</div>
+                <div className="gn-totales-item-valor">{totalesAgiles.buyIns}</div>
+              </div>
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">Re-buys</div>
+                <div className="gn-totales-item-valor">{totalesAgiles.rebuys}</div>
+              </div>
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">Add-ons</div>
+                <div className="gn-totales-item-valor">{totalesAgiles.addons}</div>
+              </div>
+            </div>
+            <div className="gn-totales-fila gn-totales-fila-usd">
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">$ Buy-ins</div>
+                <div className="gn-totales-item-valor">{money(totalesAgiles.buyInsUSD)}</div>
+              </div>
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">$ Re-buys</div>
+                <div className="gn-totales-item-valor">{money(totalesAgiles.rebuysUSD)}</div>
+              </div>
+              <div className="gn-totales-item">
+                <div className="gn-totales-item-label">$ Add-ons</div>
+                <div className="gn-totales-item-valor">{money(totalesAgiles.addonsUSD)}</div>
+              </div>
+            </div>
           </div>
 
           {/* ───────── Hora programada del torneo ───────── */}
@@ -901,9 +922,12 @@ export default function GameNight({ session, perfiles, esHost }) {
             <div className="modal-title">Concluir esta jugada</div>
             <p className="section-sub" style={{ marginTop: 0 }}>
               El torneo va a quedar <b>formalmente cerrado</b>, registrado en el Excel con sus cifras
-              finales (lugares, premios, killers, puntos, etc.). Desde ese momento ya <b>no se va a poder
-              modificar nada</b> de esta jugada — ni check-ins, ni buy-ins/re-buys/add-ons, ni killers ni
-              lugares. Esta acción no se puede deshacer.
+              finales (lugares, premios, killers, puntos, etc.). Además, se agrega un registro por
+              jugador en la hoja <b>Cobranza_Cierres</b> (a quién hay que cobrarle y a quién hay que
+              pagarle, con el balance neto) para que el Tesorero tenga un historial auditable de este
+              cierre, que no se vuelve a tocar aunque después se edite o reinicie el torneo. Desde este
+              momento ya <b>no se va a poder modificar nada</b> de esta jugada — ni check-ins, ni
+              buy-ins/re-buys/add-ons, ni killers ni lugares. Esta acción no se puede deshacer.
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConcluirModal(false)} disabled={guardando}>Cancelar</button>

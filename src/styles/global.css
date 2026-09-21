@@ -218,10 +218,12 @@ h1 {
   position: relative; background: var(--surface); padding: 24px 20px 18px;
   border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden;
 }
+/* 51ª entrega: Federico pidió cambiar el borde punteado de arriba ("se ve infantil") por algo más de
+   dashboard profesional — se reemplazó el patrón a rayas por una barra sólida en degradé, más fina. */
 .stat::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 6px;
-  background: repeating-linear-gradient(90deg, var(--gold) 0 9px, transparent 9px 18px);
-  opacity: 0.8;
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--burgundy) 100%);
+  opacity: 0.9;
 }
 .stat-label { font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 8px; }
 .stat-value { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 26px; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -521,6 +523,43 @@ h1 {
 
 .gn-stats-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 6px 0 4px; }
 .gn-stats-row .stat { flex: 1; min-width: 130px; }
+
+/* 51ª entrega: bloque de totales de Buy-in/Re-buys/Add-on — Federico pidió que sea UN SOLO recuadro
+   con 2 líneas (cantidades arriba, montos en $ abajo) en vez de 6 tarjetas sueltas, con un estilo de
+   dashboard profesional de app de poker (fondo oscuro tipo "mesa", acentos dorados, números grandes en
+   monoespaciada) en vez de las tarjetas claras genéricas del resto del sitio. */
+.gn-totales-card {
+  position: relative; overflow: hidden; border-radius: 16px; margin: 20px 0;
+  background: linear-gradient(155deg, #1b2420 0%, #10201c 55%, #14211d 100%);
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, #0c1512);
+  box-shadow: 0 10px 26px -14px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 18px 22px 16px;
+}
+.gn-totales-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--burgundy) 100%);
+}
+.gn-totales-titulo {
+  font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; font-family: "IBM Plex Mono", monospace;
+  color: color-mix(in srgb, var(--gold) 70%, #fff); margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+}
+.gn-totales-titulo::before { content: "♠"; font-size: 13px; }
+.gn-totales-fila { display: flex; gap: 18px; flex-wrap: wrap; }
+.gn-totales-fila + .gn-totales-fila { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.gn-totales-item { flex: 1; min-width: 120px; text-align: center; }
+.gn-totales-item-label {
+  font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; font-family: "IBM Plex Mono", monospace;
+  color: rgba(255, 255, 255, 0.55); margin-bottom: 6px;
+}
+.gn-totales-item-valor {
+  font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 24px; color: #f4ead0;
+  font-variant-numeric: tabular-nums;
+}
+.gn-totales-fila-usd .gn-totales-item-valor { color: color-mix(in srgb, var(--gold) 55%, #fff); font-size: 20px; }
+@media (max-width: 640px) {
+  .gn-totales-fila { gap: 10px; }
+  .gn-totales-item { min-width: 90px; }
+}
 
 .gn-stepper { display: flex; align-items: center; gap: 6px; justify-content: center; }
 .gn-stepper button {

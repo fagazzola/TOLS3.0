@@ -50,7 +50,8 @@ function borradorEstadoCuenta(r, pendientes, proximaFecha) {
 export default function Cobranza({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod4");
 
-  const [vista, setVista] = useState("movimientos"); // "movimientos" | "estado" | "finanzas"
+  const [vista, setVista] = useState("resultado"); // "resultado" | "movimientos" | "estado" | "finanzas"
+  const [fechaResultado, setFechaResultado] = useState("");
   const [data, setData] = useState(null); // { jugadores, movimientos, resumen, adeudos, proximaFecha }
   const [tableroMapa, setTableroMapa] = useState({});
   const [torneosCal, setTorneosCal] = useState([]);
@@ -128,6 +129,13 @@ export default function Cobranza({ session, perfiles }) {
     () => torneosCal.filter((t) => t.temporada === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha)),
     [torneosCal, campeonatoSel]
   );
+
+  // 51ª entrega: "Resultado de torneos" — si se cambia de campeonato arriba mientras esta vista está
+  // abierta, la fecha elegida ya no aplica (pertenece a otro campeonato) — se limpia sola para no dejar
+  // una fecha "fantasma" seleccionada que en realidad es de otro torneo.
+  useEffect(() => {
+    setFechaResultado("");
+  }, [campeonatoSel]);
 
   const movimientosDelCampeonato = useMemo(
     () => (data?.movimientos || []).filter((m) => m.campeonato === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.correo.localeCompare(b.correo)),
@@ -310,7 +318,8 @@ export default function Cobranza({ session, perfiles }) {
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Cobranza</h1>
           <p className="subtitle">
-            Registro de pagos y depósitos, estado de cuenta por jugador, y finanzas generales del torneo.
+            Resultado por torneo, registro de pagos y depósitos, estado de cuenta por jugador, y finanzas
+            generales del campeonato.
           </p>
         </div>
       </div>
@@ -319,6 +328,7 @@ export default function Cobranza({ session, perfiles }) {
 
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20 }}>
         {[
+          ["resultado", "Resultado de torneos"],
           ["movimientos", "Registrar pagos y depósitos"],
           ["estado", "Estado de cuenta"],
           ["finanzas", "Finanzas generales"],
@@ -336,6 +346,76 @@ export default function Cobranza({ session, perfiles }) {
           ))}
         </select>
       </div>
+
+      {vista === "resultado" && (
+        <div className="section">
+          <div className="section-head">
+            <div className="section-title">Resultado del torneo</div>
+          </div>
+          <select className="field" style={{ maxWidth: 260 }} value={fechaResultado} onChange={(e) => setFechaResultado(e.target.value)}>
+            <option value="">— elegir fecha —</option>
+            {fechasDelCampeonato.map((t) => (
+              <option key={t.fecha} value={t.fecha}>
+                {t.fecha} {t.main ? "(Main)" : ""}
+              </option>
+            ))}
+          </select>
+
+          {!fechaResultado && <p className="section-sub">Elegí una fecha del campeonato ({campeonatoSel}) para ver su resultado.</p>}
+
+          {fechaResultado && (() => {
+            const filas = movimientosDelCampeonato
+              .filter((m) => m.fecha === fechaResultado)
+              .sort((a, b) => (data.resumen[a.correo]?.nombre || a.correo).localeCompare(data.resumen[b.correo]?.nombre || b.correo));
+            if (!filas.length) {
+              return <p className="section-sub">Todavía no hay movimientos registrados en Cobranza para esta fecha.</p>;
+            }
+            const totalDebe = filas.reduce((a, m) => a + (m.montoTotal || 0), 0);
+            const totalGano = filas.reduce((a, m) => a + (m.totalGanado || 0), 0);
+            const totalBalance = filas.reduce((a, m) => a + (m.balanceNeto || 0), 0);
+            return (
+              <>
+                <div className="tbl" style={{ marginTop: 16 }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr" }}>
+                    <div>Jugador</div><div>Debe (cobrar)</div><div>Ganó (pagar)</div><div>Balance</div><div>Pagado</div>
+                  </div>
+                  {filas.map((m) => (
+                    <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr" }} key={m.id}>
+                      <div>{data.resumen[m.correo]?.nombre || m.correo}</div>
+                      <div className="num right">{money(m.montoTotal)}</div>
+                      <div className="num right">{money(m.totalGanado)}</div>
+                      <div className="num right">{money(m.balanceNeto)}</div>
+                      <div>
+                        <span className={"badge " + (m.pagado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{m.pagado ? "Sí" : "No"}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr", fontWeight: 700, background: "var(--surface-2)" }}>
+                    <div>Total</div>
+                    <div className="num right">{money(totalDebe)}</div>
+                    <div className="num right">{money(totalGano)}</div>
+                    <div className="num right">{money(totalBalance)}</div>
+                    <div />
+                  </div>
+                </div>
+                <p className="section-sub">
+                  {/* 51ª entrega: pedido explícito de Federico — un balance final para que el Tesorero pueda
+                      hacer una sola transacción en vez de una por jugador. Si se cobra más de lo que se
+                      paga en premios (balance negativo), la diferencia es lo que sobra para mandar al fondo
+                      acumulado del campeonato; si se paga más de lo cobrado (balance positivo), es lo que
+                      falta cubrir con el fondo o con cobros pendientes. */}
+                  Balance total de la fecha: <b>{money(totalBalance)}</b> —{" "}
+                  {totalBalance < 0
+                    ? "se cobró más de lo que se pagó en premios; la diferencia es lo que se puede mandar de una sola vez al fondo acumulado."
+                    : totalBalance > 0
+                    ? "se pagó más en premios de lo que se cobró; hay que cubrir la diferencia (del fondo acumulado o de cobros todavía pendientes) antes de cerrar la cuenta."
+                    : "cuadra exacto — lo cobrado alcanza justo para cubrir los premios pagados."}
+                </p>
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {vista === "movimientos" && (
         <div className="section">

@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/cobranza.json";
-import { syncCobranza } from "./lib/msgraph.js";
+import { syncCobranza, syncCierres } from "./lib/msgraph.js";
 import { conMontos, resumenPorJugador, tieneAdeudoBloqueante } from "../../src/lib/cobranza.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -203,6 +203,54 @@ export async function eliminarMovimientosDeGameNight(campeonato, fecha) {
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
+}
+
+// 51ª entrega: Federico pidió que, al confirmar "Jugada Concluida" en Game Night, quede un registro
+// financiero AUDITABLE en Excel para el Tesorero — a quién hay que cobrarle y a quién hay que pagarle,
+// con las cifras exactas del cierre. A diferencia del espejo en vivo de Cobranza (`upsertVariosDesde
+// GameNight`, que se reescribe completo en cada acción y se puede vaciar con "Reiniciar este torneo"),
+// este historial vive en su propio store (`tols-cierres`) y solo CRECE: cada llamada agrega un
+// registro por jugador al final de la lista que ya había, nunca modifica ni borra los de un cierre
+// anterior — ni siquiera si ese mismo torneo se reinicia después (el reinicio limpia el espejo en vivo
+// de Cobranza, pero el cierre que ya quedó auditado aquí se conserva tal cual se vio en su momento).
+// Se llama una sola vez, desde la acción "concluir" de Game Night, con el `estado` ya calculado
+// (mismo objeto que se usa para congelar lugar/premio/puntos en cada jugador antes de guardar).
+export async function registrarCierreTorneo(campeonato, fecha, tipo, estado, concluidoEn) {
+  const store = getStore({ name: "tols-cierres", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
+  const actual = Array.isArray(raw?.registros) ? raw.registros : [];
+
+  const nuevos = Object.entries(estado.porJugador || {}).map(([correo, j]) => {
+    const balance = Math.round(((j.premioTotal || 0) - (j.debeTotal || 0)) * 100) / 100;
+    return {
+      campeonato,
+      fecha,
+      tipo,
+      correo,
+      nombre: j.nombre || "",
+      buyIn: Boolean(j.buyIn),
+      rebuys: Number(j.rebuys) || 0,
+      addon: Boolean(j.addon),
+      debeBuyIn: j.debeBuyIn || 0,
+      debeRebuys: j.debeRebuys || 0,
+      debeAddon: j.debeAddon || 0,
+      debeTotal: j.debeTotal || 0,
+      lugar: j.lugar || null,
+      esCampeon: Boolean(j.esCampeon),
+      premioLugar: j.premioLugar || 0,
+      premioBurbuja: j.premioBurbuja || 0,
+      premioMano: j.premioMano || 0,
+      premioTotal: j.premioTotal || 0,
+      balance,
+      accion: balance > 0 ? "Pagar al jugador" : balance < 0 ? "Cobrar al jugador" : "Sin movimiento",
+      concluidoEn,
+    };
+  });
+
+  const actualizado = [...actual, ...nuevos];
+  await store.setJSON("data", { registros: actualizado });
+  await syncCierres(actualizado);
+  return actualizado;
 }
 
 // usada por campeonatos.js al renombrar un campeonato: remapea movimientos[].campeonato de "de" a "a".

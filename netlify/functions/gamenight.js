@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { syncGameNight } from "./lib/msgraph.js";
-import { upsertVariosDesdeGameNight, eliminarMovimientosDeGameNight } from "./cobranza.js";
-import { tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe, recomprasMaxEfectivo } from "../../src/lib/gamenight.js";
+import { upsertVariosDesdeGameNight, eliminarMovimientosDeGameNight, registrarCierreTorneo } from "./cobranza.js";
+import { tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe, recomprasMaxEfectivo, torneoBloqueante } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -79,6 +79,20 @@ async function calendarioTorneos() {
     return data?.torneos || [];
   } catch (e) {
     return [];
+  }
+}
+
+// 51ª entrega: hace falta saber cuál es el campeonato "activo" para aplicar el mismo orden
+// cronológico obligatorio (`torneoBloqueante()`) también del lado del servidor — antes solo se
+// aplicaba en el cliente (deshabilitando el combo), pero eso no evita que un PUT directo a este
+// endpoint (o un bug futuro en la pantalla) se salte el orden.
+async function campeonatoActivoActual() {
+  try {
+    const store = getStore({ name: "tols-campeonatos", consistency: "strong" });
+    const data = await store.get("data", { type: "json", consistency: "strong" });
+    return String(data?.activo || "").trim();
+  } catch (e) {
+    return "";
   }
 }
 
@@ -180,7 +194,11 @@ export default async (req) => {
     // guardado final quedaban separados por dos round-trips de red completos (Tablero + Calendario), lo
     // que ampliaba la ventana en la que dos acciones casi simultáneas (ej. dos clics rápidos de Re-buy)
     // podían leer la misma versión vieja y una terminar pisando a la otra al guardar.
-    const [tableroMapa, torneosCal] = await Promise.all([tableroMapaActual(), calendarioTorneos()]);
+    const [tableroMapa, torneosCal, campeonatoActivo] = await Promise.all([
+      tableroMapaActual(),
+      calendarioTorneos(),
+      campeonatoActivoActual(),
+    ]);
     const tipo = tipoDeFecha(torneosCal, fecha);
     // 48ª entrega: la tolerancia de check-in ya solo se usa para mostrarle un mensaje informativo al
     // Host (se calcula y se manda en `avisoTolerancia`) — ya no amonesta a nadie automáticamente.
@@ -209,6 +227,21 @@ export default async (req) => {
     if (torneo.concluido && body.accion !== "reiniciarTorneo") {
       return new Response(
         JSON.stringify({ error: "Este torneo ya quedó concluido y no se puede modificar." }),
+        { status: 409, headers: HEADERS }
+      );
+    }
+
+    // 51ª entrega: el mismo orden cronológico obligatorio que aplica el combo de Game Night en el
+    // cliente (`torneoBloqueante()`) se aplica también aquí — si hay una partida pendiente (del
+    // campeonato activo o de práctica) por concluir y es ANTERIOR, por calendario, a la que se está
+    // por tocar, se rechaza cualquier acción salvo "reiniciarTorneo" (limpieza administrativa, que debe
+    // poder usarse sobre cualquier fecha para deshacer datos mezclados, esté o no bloqueada).
+    const bloqueante = torneoBloqueante(torneosCal, mapa, campeonatoActivo);
+    if (bloqueante && body.accion !== "reiniciarTorneo" && (bloqueante.campeonato !== campeonato || bloqueante.fecha !== fecha)) {
+      return new Response(
+        JSON.stringify({
+          error: `Hay que jugar/concluir primero la partida del ${bloqueante.fecha} antes de trabajar en esta.`,
+        }),
         { status: 409, headers: HEADERS }
       );
     }
@@ -392,6 +425,18 @@ export default async (req) => {
           console.error("[gamenight] no se pudo espejar en Cobranza:", e.message || e);
         })
       );
+      // 51ª entrega: al confirmar "Jugada Concluida", además del espejo en vivo de siempre, se agrega
+      // un registro permanente/auditable en la hoja "Cobranza_Cierres" (ver `registrarCierreTorneo()`
+      // en cobranza.js) — a diferencia del espejo, este historial nunca se vuelve a escribir para un
+      // torneo ya cerrado, ni siquiera si después se usa "Reiniciar este torneo" sobre esa misma fecha.
+      // No aplica a partidas de práctica (nunca generan cobros/premios reales, ver arriba).
+      if (body.accion === "concluir") {
+        tareasSync.push(
+          registrarCierreTorneo(campeonato, fecha, tipo, estado, ahora).catch((e) => {
+            console.error("[gamenight] no se pudo registrar el cierre auditable en Cobranza:", e.message || e);
+          })
+        );
+      }
     }
     await Promise.all(tareasSync);
 

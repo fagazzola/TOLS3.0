@@ -103,6 +103,25 @@ body {
 .suit-divider .suit-black { color: #0a0a0a; }
 
 .headtop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+
+/* 53ª entrega: recuadro del número de registro en Mi Perfil — bien visible, letra grande, con el
+   recordatorio de usarlo como centavos al depositar. */
+.mp-registro-card {
+  flex-shrink: 0; text-align: center; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: var(--shadow); padding: 10px 16px 12px; max-width: 220px;
+}
+.mp-registro-numero {
+  font-family: "Fraunces", Georgia, serif; font-weight: 700; font-size: 40px; line-height: 1;
+  color: var(--gold-strong); font-variant-numeric: tabular-nums;
+}
+.mp-registro-leyenda { font-size: 10.5px; color: var(--ink-soft); line-height: 1.35; margin-top: 6px; }
+
+/* 53ª entrega: tarjeta amarilla (estilo fútbol) para indicar amonestación en las vistas de solo lectura
+   de Game Night y Calendario — un poco inclinada, como una tarjeta real. */
+.tarjeta-amarilla {
+  display: inline-block; width: 12px; height: 17px; background: #f5c518; border: 1px solid #9c7a00;
+  border-radius: 2px; transform: rotate(-14deg); vertical-align: middle; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
 .eyebrow {
   display: flex; align-items: center; gap: 10px;
   font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: clamp(1.5rem, 3.4vw, 2.1rem);

@@ -293,10 +293,15 @@ export default function Calendario({ session, perfiles }) {
   // check-in en esa fecha (o si Game Night no respondió, ya que es lectura best-effort). 43ª entrega:
   // una partida de práctica guarda su check-in bajo la llave especial `PRACTICA_CAMPEONATO`, en vez del
   // campeonato activo, porque no pertenece a ningún campeonato.
+  // 53ª entrega: además de la hora, ahora también hace falta saber si el check-in fue "Auto" (el
+  // propio jugador, al entrar al Calendario el día de la jugada) o manual del Host (que desde la 51ª
+  // entrega implica quedar amonestado) — Federico pidió mostrar una tarjeta amarilla, como en fútbol,
+  // en ese segundo caso, en vez de la hora sola.
   function checkinDeFecha(fechaIso, practica) {
     const llave = practica ? PRACTICA_CAMPEONATO : campeonatoActivo;
-    const iso8601 = gamenight?.[llave]?.[fechaIso]?.jugadores?.[miCorreo]?.horaCheckin;
-    return iso8601 || null;
+    const j = gamenight?.[llave]?.[fechaIso]?.jugadores?.[miCorreo];
+    if (!j?.horaCheckin) return null;
+    return { hora: j.horaCheckin, amonestado: Boolean(j.amonestado) };
   }
 
   return (
@@ -416,8 +421,8 @@ export default function Calendario({ session, perfiles }) {
                       {(() => {
                         const ci = checkinDeFecha(iso(cell.date), eventos[0]?.practica);
                         return ci ? (
-                          <div className="cal-chip cal-chip-checkin" title={new Date(ci).toLocaleString("es-MX")}>
-                            ✓ Check-in {horaCorta(ci)}
+                          <div className="cal-chip cal-chip-checkin" title={new Date(ci.hora).toLocaleString("es-MX")}>
+                            {ci.amonestado ? <span className="tarjeta-amarilla" style={{ marginRight: 4 }} title="Activado manualmente por el Host — amonestado" /> : "✓ Auto"} {horaCorta(ci.hora)}
                           </div>
                         ) : null;
                       })()}
@@ -490,7 +495,13 @@ export default function Calendario({ session, perfiles }) {
                         const ci = checkinDeFecha(t.fecha, t.practica);
                         return ci ? (
                           <span>
-                            Check-in: <span className="cal-ganancia-inline">{horaCorta(ci)}</span>
+                            Check-in:{" "}
+                            {ci.amonestado ? (
+                              <span className="tarjeta-amarilla" title="Activado manualmente por el Host — amonestado" />
+                            ) : (
+                              <span className="cal-ganancia-inline">Auto</span>
+                            )}{" "}
+                            <span className="cal-ganancia-inline">{horaCorta(ci.hora)}</span>
                           </span>
                         ) : null;
                       })()}

@@ -236,6 +236,19 @@ export default function MiPerfil({ session }) {
           <h1>Mi Perfil</h1>
           <p className="subtitle">Actualiza tus datos de contacto y de cobro. Tu nombre, correo y estatus los administra la liga.</p>
         </div>
+        {/* 53ª entrega: Federico pidió mostrar el número de registro (el mismo que se manda por correo
+            de bienvenida y que aparece como "Reg" en la pantalla de Jugadores) bien visible arriba a la
+            derecha, en formato de 2 dígitos y con letra grande, junto con el recordatorio de usarlo como
+            centavos al depositar — para que el jugador no tenga que ir a buscarlo en otro lado. */}
+        {jugador?.id ? (
+          <div className="mp-registro-card">
+            <div className="mp-registro-numero">{String(jugador.id).padStart(2, "0")}</div>
+            <div className="mp-registro-leyenda">
+              Recuerda agregar este número de centavos en cualquier depósito que hagas al Tesorero para
+              identificarlo rápidamente
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {error && <div className="login-error">{error}</div>}

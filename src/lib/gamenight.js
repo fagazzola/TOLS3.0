@@ -158,10 +158,23 @@ export function pagoPorConcepto(tableroMapa, campeonato, nombreConcepto, tipo) {
   return Number(tipo === "Main" ? p.main : p.regular) || 0;
 }
 
+// 53ª entrega: Federico pidió puntos fijos para las partidas de práctica — 3/2/1 para 1er/2do/3er
+// lugar, siempre, sin importar el campeonato activo ni ninguna configuración del Tablero de Control
+// (las prácticas nunca tienen una, ver `recomprasMaxEfectivo()`). Agregó a mano una columna E en la
+// hoja "Puntos_Posiciones" del Excel para documentarlo ahí, pero el sitio no vuelve a leer esa hoja
+// (solo la escribe, por columnas A-D — ver `syncTablero()`/msgraph.js, que nunca toca la E), así que
+// la regla vive acá, fija en el código, como única fuente de verdad real.
+const PUNTOS_PRACTICA_POR_LUGAR = { 1: 3, 2: 2, 3: 1 };
+
 // puntos que un jugador se lleva de ESTE torneo: asistencia (0 si quedó amonestado) + los puntos por
-// posición de salida, si ya se le derivó un lugar
-export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo) {
+// posición de salida, si ya se le derivó un lugar. Para partidas de práctica, la posición usa la tabla
+// fija de arriba en vez de la configuración del Tablero (que las prácticas nunca tienen) — la
+// asistencia sigue en 0 para prácticas, como ya era antes de esta entrega.
+export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo, campeonato) {
   const asistencia = amonestado ? 0 : Number((tipo === "Main" ? tableroDatos?.puntos?.asistencia?.main : tableroDatos?.puntos?.asistencia?.regular) || 0);
+  if (campeonato === PRACTICA_CAMPEONATO) {
+    return asistencia + (lugar ? PUNTOS_PRACTICA_POR_LUGAR[lugar] || 0 : 0);
+  }
   const posEntry = lugar ? (tableroDatos?.puntos?.posiciones || []).find((p) => p.pos === lugar) : null;
   const posPuntos = posEntry ? Number((tipo === "Main" ? posEntry.main : posEntry.regular) || 0) : 0;
   return asistencia + posPuntos;
@@ -214,7 +227,7 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, or
       premioBurbuja,
       premioMano,
       premioTotal,
-      puntos: calcularPuntos({ lugar, amonestado: j.amonestado }, datosTablero, tipo),
+      puntos: calcularPuntos({ lugar, amonestado: j.amonestado }, datosTablero, tipo, campeonato),
     };
   }
 

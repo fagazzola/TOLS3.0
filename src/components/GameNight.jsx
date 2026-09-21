@@ -668,7 +668,13 @@ export default function GameNight({ session, perfiles, esHost }) {
             </div>
           </div>
 
-          {/* ───────── Jugadores habilitados (check-in) ───────── */}
+          {/* ───────── Jugadores habilitados (check-in) ─────────
+              53ª entrega: el rol Jugador ya no ve esta misma tabla completa con los botones
+              deshabilitados — Federico pidió un espejo simplificado, de solo lectura, con solo las 6
+              columnas que le importan a un jugador (sin hora de check-in, sin Lugar/Mejor
+              mano/Debe/Premio, con "Killer" en vez de "Eliminar"). El Host (`editable`) sigue viendo la
+              tabla completa de siempre, sin cambios. */}
+          {editable ? (
           <div className="section">
             <div className="section-head">
               <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
@@ -801,6 +807,46 @@ export default function GameNight({ session, perfiles, esHost }) {
               {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
             </div>
           </div>
+          ) : (
+            <div className="section">
+              <div className="section-head">
+                <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
+              </div>
+              <div className="tbl">
+                <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }}>
+                  <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buy</div><div>Add-on</div><div>Killer</div><div>Puntos</div>
+                </div>
+                {habilitados.map((j) => {
+                  const gn = j.gn || {};
+                  const eliminado = Boolean(gn.lugar) && !gn.esCampeon;
+                  return (
+                    <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }} key={j.correo}>
+                      <div>
+                        {nombreCorto(j)}
+                        {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
+                        {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
+                      </div>
+                      <div>
+                        {gn.amonestado ? (
+                          <span className="tarjeta-amarilla" title="Activado manualmente por el Host — amonestado, pierde el punto de asistencia" />
+                        ) : (
+                          "Auto"
+                        )}
+                      </div>
+                      <div className="num">{gn.buyIn ? 1 : 0}</div>
+                      <div className="num">{gn.rebuys || 0}</div>
+                      <div className="num">{gn.addon ? 1 : 0}</div>
+                      <div>
+                        {eliminado ? (gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—") : <span className="muted">En juego</span>}
+                      </div>
+                      <div className="num right">{gn.puntos ?? 0}</div>
+                    </div>
+                  );
+                })}
+                {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
+              </div>
+            </div>
+          )}
 
           {/* ───────── Jugadores sin check-in ───────── */}
           <div className="section">

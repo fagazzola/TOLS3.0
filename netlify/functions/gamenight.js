@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { syncGameNight } from "./lib/msgraph.js";
-import { upsertVariosDesdeGameNight } from "./cobranza.js";
+import { upsertVariosDesdeGameNight, eliminarMovimientosDeGameNight } from "./cobranza.js";
 import { tipoDeFecha, estadoTorneo, PRACTICA_CAMPEONATO, horaInicioProgramada, torneoCalendarioDe, recomprasMaxEfectivo } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -19,6 +19,15 @@ function normalizarJugadorGN(j) {
     horaEliminacion: String(j?.horaEliminacion || "").trim(),
     mejorMano: Boolean(j?.mejorMano),
     actualizado: String(j?.actualizado || "").trim(),
+    // 50ª entrega: "caché" del último resultado calculado (lugar de salida, premio total, puntos) —
+    // se recalcula y se vuelve a guardar en cada acción sobre ESTE torneo (ver el bloque que llama a
+    // `estadoTorneo()` justo antes de guardar, en el handler principal), así que para un torneo ya
+    // Concluido queda congelado con sus cifras finales sin necesidad de rehacer el cálculo cada vez
+    // que se sincroniza a Excel. Nunca se edita a mano — es puramente derivado.
+    lugar: j?.lugar ? Number(j.lugar) : null,
+    premioTotal: Number(j?.premioTotal) || 0,
+    puntos: Number(j?.puntos) || 0,
+    esCampeon: Boolean(j?.esCampeon),
   };
 }
 
@@ -30,7 +39,16 @@ function normalizarTorneo(t) {
   const ordenEliminados = Array.isArray(t?.ordenEliminados)
     ? t.ordenEliminados.map((c) => String(c || "").trim().toLowerCase()).filter(Boolean)
     : [];
-  return { horaInicio: String(t?.horaInicio || "").trim(), jugadores, ordenEliminados };
+  // 50ª entrega: una vez "Concluida" (acción `"concluir"`), el torneo queda cerrado formalmente — el
+  // servidor rechaza cualquier otra acción sobre él (ver el guardia al principio del PUT/POST) y el
+  // combo de campeonato en el cliente usa este mismo campo para saber qué ya se puede dar por jugado.
+  return {
+    horaInicio: String(t?.horaInicio || "").trim(),
+    jugadores,
+    ordenEliminados,
+    concluido: Boolean(t?.concluido),
+    concluidoEn: String(t?.concluidoEn || "").trim(),
+  };
 }
 
 function normalizarMapa(raw) {
@@ -85,15 +103,18 @@ async function leerMapaConReintento(store) {
 
 function getTorneo(mapa, campeonato, fecha) {
   if (!mapa[campeonato]) mapa[campeonato] = {};
-  if (!mapa[campeonato][fecha]) mapa[campeonato][fecha] = { horaInicio: "", jugadores: {}, ordenEliminados: [] };
+  if (!mapa[campeonato][fecha]) {
+    mapa[campeonato][fecha] = { horaInicio: "", jugadores: {}, ordenEliminados: [], concluido: false, concluidoEn: "" };
+  }
   return mapa[campeonato][fecha];
 }
 
 // refleja el torneo completo (todos sus jugadores) en Cobranza — se llama después de cualquier acción
 // que pueda mover subtotales o posiciones, para que el Tesorero siempre vea lo mismo que se vivió en
-// la mesa sin depender de que alguien copie datos a mano de un módulo a otro
-async function espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo) {
-  const estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo, ordenEliminados: torneo.ordenEliminados });
+// la mesa sin depender de que alguien copie datos a mano de un módulo a otro. Recibe `estado` ya
+// calculado (50ª entrega) para no recalcularlo dos veces — el handler principal ya lo necesita para
+// "congelar" lugar/premio/puntos en cada jugador antes de guardar.
+async function espejarEnCobranza(campeonato, fecha, estado) {
   // se espejan TODOS los jugadores que ya tuvieron alguna vez un registro en este torneo, no solo los
   // que siguen con check-in activo — así, si el Host quita un check-in por error, el movimiento que ya
   // se había reflejado en Cobranza también se pone en $0 en vez de quedarse con el valor viejo
@@ -181,7 +202,37 @@ export default async (req) => {
 
     let avisoAmonestacion = "";
 
-    if (body.accion === "checkin") {
+    // 50ª entrega: un torneo ya "Concluido" queda cerrado formalmente y su acción no se puede
+    // deshacer — el servidor rechaza cualquier otra acción sobre él, salvo "reiniciarTorneo" (limpieza
+    // administrativa explícita, ver más abajo), para que quede protegido incluso si alguien deja
+    // abierta la pantalla de Game Night en ese torneo.
+    if (torneo.concluido && body.accion !== "reiniciarTorneo") {
+      return new Response(
+        JSON.stringify({ error: "Este torneo ya quedó concluido y no se puede modificar." }),
+        { status: 409, headers: HEADERS }
+      );
+    }
+
+    if (body.accion === "concluir") {
+      // cierra formalmente el torneo con las cifras que ya están calculadas en este momento (lugares,
+      // premios, killers, etc. — todo ya vive en `torneo`, no hace falta recalcular nada especial) y
+      // dispara un último sync a Excel para dejar esas cifras finales registradas ahí también.
+      torneo.concluido = true;
+      torneo.concluidoEn = ahora;
+    } else if (body.accion === "reiniciarTorneo") {
+      // 49ª/50ª entrega: limpieza administrativa explícita — Federico la pidió para poder deshacer un
+      // torneo cuyos datos quedaron mezclados con otro por el bug de lectura en null de la 47ª/48ª
+      // entrega. Borra por completo el torneo (jugadores, orden de eliminación, hora de inicio,
+      // concluido) y lo deja como si nunca se hubiera tocado. Es la única acción que se permite incluso
+      // sobre un torneo ya Concluido, precisamente para poder deshacer un cierre hecho por error. Se
+      // muta el mismo objeto `torneo` (no se reemplaza la entrada del mapa) para que el resto del
+      // código — sobre todo el espejo hacia Cobranza, más abajo — vea el torneo ya vacío.
+      torneo.jugadores = {};
+      torneo.ordenEliminados = [];
+      torneo.horaInicio = "";
+      torneo.concluido = false;
+      torneo.concluidoEn = "";
+    } else if (body.accion === "checkin") {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (!correo) return new Response(JSON.stringify({ error: "Falta el correo del jugador." }), { status: 400, headers: HEADERS });
       const manual = Boolean(body.manual);
@@ -284,19 +335,56 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Acción no reconocida." }), { status: 400, headers: HEADERS });
     }
 
-    await store.setJSON("data", mapa);
-    await syncGameNight(mapa);
-    // el reflejo en Cobranza se guarda con su propio store/sync — si por lo que sea falla, no debe
-    // tumbar la respuesta de Game Night (el Host ya vio su cambio aplicado en el tablero). Las
-    // partidas de práctica (43ª entrega) NUNCA se reflejan en Cobranza: no pertenecen a ningún
-    // campeonato real, así que no deben generar movimientos de cobro ni premio.
-    if (campeonato !== PRACTICA_CAMPEONATO) {
-      try {
-        await espejarEnCobranza(campeonato, fecha, torneo, tableroMapa, tipo);
-      } catch (e) {
-        console.error("[gamenight] no se pudo espejar en Cobranza:", e.message || e);
+    // 50ª entrega: se calcula el estado derivado (lugar de salida, premio total, puntos, campeón,
+    // burbuja) UNA sola vez aquí y se "congela" en cada jugador antes de guardar — así, cuando el
+    // torneo quede Concluido, `GameNight_Jugadores` en Excel ya trae esas cifras finales sin depender
+    // de que alguien vuelva a tocar el torneo para que se recalculen. Se salta para "reiniciarTorneo"
+    // porque ese torneo ya quedó vacío (nada que calcular).
+    let estado = null;
+    if (body.accion !== "reiniciarTorneo") {
+      estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo, ordenEliminados: torneo.ordenEliminados });
+      for (const correo of Object.keys(torneo.jugadores)) {
+        const j = estado.porJugador[correo];
+        if (!j) continue;
+        torneo.jugadores[correo] = {
+          ...torneo.jugadores[correo],
+          lugar: j.lugar || null,
+          premioTotal: j.premioTotal || 0,
+          puntos: j.puntos || 0,
+          esCampeon: Boolean(j.esCampeon),
+        };
       }
     }
+
+    await store.setJSON("data", mapa);
+
+    // 50ª entrega: Federico reportó que un solo clic de Re-buy/Add-on "se demora mucho" — la causa es
+    // que cada acción espera a que termine de escribirse en Excel (reescribe hojas completas vía Graph
+    // API) antes de responder. `syncGameNight` y el espejo en Cobranza escriben hojas DISTINTAS del
+    // mismo Excel, así que no hace falta esperar a que termine una para empezar la otra — lanzarlas en
+    // paralelo (en vez de una tras otra, como antes) recorta a la mitad esa espera para cualquier
+    // torneo de un campeonato real. `syncGameNight` ya nunca tira error (usa `safe()` internamente);
+    // el espejo en Cobranza sí se protege aquí para no tumbar la respuesta de Game Night si falla. Las
+    // partidas de práctica (43ª entrega) NUNCA se reflejan en Cobranza: no pertenecen a ningún
+    // campeonato real, así que no deben generar movimientos de cobro ni premio.
+    const tareasSync = [syncGameNight(mapa)];
+    if (body.accion === "reiniciarTorneo") {
+      // limpieza administrativa: también hay que borrar el espejo viejo en Cobranza para esa fecha,
+      // sea cual sea el campeonato (incluida una práctica, por si alguna vez llegó a espejarse por
+      // error) — nunca generar uno nuevo a partir del torneo ya vacío.
+      tareasSync.push(
+        eliminarMovimientosDeGameNight(campeonato, fecha).catch((e) => {
+          console.error("[gamenight] no se pudo limpiar el espejo en Cobranza:", e.message || e);
+        })
+      );
+    } else if (campeonato !== PRACTICA_CAMPEONATO) {
+      tareasSync.push(
+        espejarEnCobranza(campeonato, fecha, estado).catch((e) => {
+          console.error("[gamenight] no se pudo espejar en Cobranza:", e.message || e);
+        })
+      );
+    }
+    await Promise.all(tareasSync);
 
     return new Response(JSON.stringify({ ...mapa, avisoAmonestacion }), { headers: HEADERS });
   }

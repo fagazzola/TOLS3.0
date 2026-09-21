@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
-import { estadoTorneo, tipoDeFecha, PRACTICA_CAMPEONATO, recomprasMaxEfectivo } from "../lib/gamenight.js";
+import { estadoTorneo, tipoDeFecha, PRACTICA_CAMPEONATO, recomprasMaxEfectivo, torneoBloqueante } from "../lib/gamenight.js";
 
 function nombreCorto(j) {
   return (j.aliasPokerStars || "").trim() || j.nombre;
@@ -51,6 +51,15 @@ export default function GameNight({ session, perfiles, esHost }) {
   // (ej. `buyin:correo@x.com`) y se actualiza de forma optimista en pantalla antes de que responda el
   // servidor, para que se sientan ágiles aunque el torneo tenga muchos jugadores.
   const [pendientes, setPendientes] = useState(new Set());
+  const [concluirModal, setConcluirModal] = useState(false);
+  const [reiniciarModal, setReiniciarModal] = useState(false);
+  // 50ª entrega: cola de reintentos para las acciones "ágiles" (Buy-in/Re-buys/Add-on/Amonestado) —
+  // si el Host hace varios clics seguidos sobre el MISMO control antes de que el servidor responda al
+  // primero (la respuesta tarda porque cada guardado espera a que termine de escribirse en Excel), en
+  // vez de mandar una llamada por clic (cada una con su propia espera completa) se junta la intención
+  // más reciente y se manda una sola vez que la anterior termine — la pantalla ya se actualizó al
+  // toque de forma optimista en cada clic, así que el Host no pierde nada, solo se ahorran llamadas.
+  const colaAgilRef = useRef({});
 
   useEffect(() => {
     cargar();
@@ -69,13 +78,20 @@ export default function GameNight({ session, perfiles, esHost }) {
       .then(([camp, cal, jug, tablero, gn]) => {
         const nombres = camp?.nombres || [];
         setCampeonatos(camp || { nombres: [], activo: "" });
-        setTorneosCal(cal?.torneos || []);
+        const torneos = cal?.torneos || [];
+        setTorneosCal(torneos);
         setJugadoresSitio((jug?.jugadores || []).filter((j) => j.estatus === "Activo"));
         setTableroMapa(tablero || {});
-        setGnMapa(gn || {});
+        const gnData = gn || {};
+        setGnMapa(gnData);
 
+        // 50ª entrega: si el campeonato activo del Tablero ya no se puede trabajar todavía (hay una
+        // partida anterior por orden cronológico sin concluir), arranca directo en esa partida
+        // pendiente en vez de en el activo — para que Federico vea de una vez cuál le falta cerrar.
         const activo = camp?.activo || nombres[0] || "";
-        setCampeonatoSel((prev) => prev || activo);
+        const bloqueanteInicial = torneoBloqueante(torneos, gnData, iso(new Date()));
+        const default_ = bloqueanteInicial && bloqueanteInicial.campeonato !== activo ? bloqueanteInicial.campeonato : activo;
+        setCampeonatoSel((prev) => prev || default_);
       })
       .catch((e) => setError(e.message || "No se pudo cargar Game Night."))
       .finally(() => setLoading(false));
@@ -110,7 +126,27 @@ export default function GameNight({ session, perfiles, esHost }) {
 
   const torneoCal = fechasDelCampeonato.find((t) => t.fecha === fechaSel) || null;
   const tipo = tipoDeFecha(torneosCal, fechaSel);
-  const torneoState = gnMapa?.[campeonatoSel]?.[fechaSel] || { horaInicio: "", jugadores: {}, ordenEliminados: [] };
+  const torneoState = gnMapa?.[campeonatoSel]?.[fechaSel] || { horaInicio: "", jugadores: {}, ordenEliminados: [], concluido: false };
+  // 50ª entrega: una vez que el torneo quedó "Concluido" (acción irreversible), ningún control de
+  // edición debe seguir funcionando — el servidor ya lo rechaza, pero además se ocultan/deshabilitan
+  // en pantalla para que quede claro que el torneo está cerrado. `editable` (el permiso del rol) se
+  // deja intacto para el botón "Reiniciar este torneo" y el badge de "Jugada concluida", que sí deben
+  // seguir funcionando/mostrándose para quien tiene permiso, aunque el torneo ya esté cerrado.
+  const editableAhora = editable && !torneoState.concluido;
+  // 50ª entrega: cuál es, cronológicamente, la partida vencida (fecha <= hoy) más antigua que
+  // todavía no está Concluida — mientras exista, ningún otro campeonato/práctica posterior se puede
+  // seleccionar en el combo, para respetar el orden real en el que se jugaron/juegan las partidas.
+  const bloqueante = useMemo(() => torneoBloqueante(torneosCal, gnMapa, iso(new Date())), [torneosCal, gnMapa]);
+
+  // si el combo queda seleccionado en un campeonato/práctica que se vuelve bloqueado (ej. se creó una
+  // partida de práctica con fecha anterior mientras la pantalla ya estaba abierta en el Regular), lo
+  // regresa solo al que sí corresponde jugar primero.
+  useEffect(() => {
+    if (bloqueante && campeonatoSel && campeonatoSel !== bloqueante.campeonato) {
+      setCampeonatoSel(bloqueante.campeonato);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bloqueante]);
   const toleranciaMin = tableroMapa?.[campeonatoSel]?.toleranciaCheckinMin ?? 10;
   const recomprasMax = recomprasMaxEfectivo(tableroMapa, campeonatoSel);
 
@@ -136,7 +172,7 @@ export default function GameNight({ session, perfiles, esHost }) {
   const miCorreo = (session.usuario || "").trim().toLowerCase();
   const miEntrada = jugadoresSitio.find((j) => j.correo === miCorreo);
   const yaHiceCheckin = Boolean(torneoState.jugadores[miCorreo]?.checkin);
-  const puedoAutoCheckin = !editable && Boolean(miEntrada) && fechaSel === iso(new Date()) && !yaHiceCheckin;
+  const puedoAutoCheckin = !editable && Boolean(miEntrada) && fechaSel === iso(new Date()) && !yaHiceCheckin && !torneoState.concluido;
 
   function hacerMiCheckin() {
     if (!miEntrada) return;
@@ -206,9 +242,25 @@ export default function GameNight({ session, perfiles, esHost }) {
   // puntual que se está usando (por `key`), no toda la tabla — pensada para Buy-in/Re-buys/Add-on/
   // Amonestado, que un Host puede necesitar tocar muy seguido durante una partida en vivo. Si el
   // servidor rechaza el cambio, se descarta el optimismo recargando desde el servidor.
-  async function llamarAgil(key, body, cambiosOptimistas) {
+  //
+  // 50ª entrega: cada guardado tarda varios segundos porque espera a que termine de escribirse en
+  // Excel — Federico reportó que por eso un solo "+1" de Re-buy "se demora mucho" en verse reflejado.
+  // La pantalla ya se actualiza al toque (optimista), pero antes cada clic mandaba SU PROPIA llamada
+  // al servidor y esperaba turno una detrás de otra si el Host clickeaba varias veces seguido. Ahora,
+  // si ya hay una llamada de este mismo control en camino, el clic nuevo no dispara otra en paralelo —
+  // se guarda (y, para Re-buys, se SUMA con `combinar`) como "la próxima" y se manda en cuanto la
+  // anterior responda, así 5 clics rápidos de "+1" terminan en como máximo 2 llamadas al servidor en
+  // vez de 5, sin perder ninguno.
+  async function llamarAgil(key, body, cambiosOptimistas, combinar) {
     if (!campeonatoSel || !fechaSel) return;
     if (cambiosOptimistas && body.correo) actualizarJugadorLocal(body.correo, cambiosOptimistas);
+
+    const cola = colaAgilRef.current;
+    if (cola[key]) {
+      cola[key].siguiente = combinar && cola[key].siguiente ? combinar(cola[key].siguiente, body) : body;
+      return;
+    }
+    cola[key] = { siguiente: null };
     setPendientes((prev) => new Set(prev).add(key));
     setError("");
     try {
@@ -224,11 +276,14 @@ export default function GameNight({ session, perfiles, esHost }) {
       setError(e.message || "No se pudo guardar.");
       cargar(); // se descarta el cambio optimista y se recarga el estado real del servidor
     } finally {
+      const siguiente = cola[key]?.siguiente;
+      delete colaAgilRef.current[key];
       setPendientes((prev) => {
         const next = new Set(prev);
         next.delete(key);
         return next;
       });
+      if (siguiente) llamarAgil(key, siguiente, null, combinar);
     }
   }
 
@@ -273,7 +328,14 @@ export default function GameNight({ session, perfiles, esHost }) {
   }
   function cambiarRebuy(j, delta) {
     const nuevo = Math.max(0, Math.min(recomprasMax, (j.gn?.rebuys || 0) + delta));
-    llamarAgil(`rebuy:${j.correo}`, { accion: "rebuy", correo: j.correo, delta }, { rebuys: nuevo });
+    llamarAgil(
+      `rebuy:${j.correo}`,
+      { accion: "rebuy", correo: j.correo, delta },
+      { rebuys: nuevo },
+      // si ya hay un +1/-1 de este jugador en camino, el siguiente clic se SUMA al que ya está en cola
+      // (en vez de reemplazarlo) para que 3 clics de "+1" terminen mandando un solo delta de +3
+      (colaDelta, nuevoBody) => ({ ...nuevoBody, delta: (colaDelta.delta || 0) + (nuevoBody.delta || 0) })
+    );
   }
   function toggleAddon(j) {
     const nuevo = !j.gn?.addon;
@@ -300,6 +362,14 @@ export default function GameNight({ session, perfiles, esHost }) {
   }
   function moverLugar(j, nuevoLugar) {
     llamar({ accion: "moverLugar", correo: j.correo, lugar: Number(nuevoLugar) });
+  }
+  async function confirmarConcluir() {
+    await llamar({ accion: "concluir" });
+    setConcluirModal(false);
+  }
+  async function confirmarReiniciar() {
+    await llamar({ accion: "reiniciarTorneo" });
+    setReiniciarModal(false);
   }
 
   function nombrePorCorreo(correo) {
@@ -335,6 +405,19 @@ export default function GameNight({ session, perfiles, esHost }) {
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Game Night</h1>
         </div>
+        {/* 50ª entrega: cierre formal del torneo — una vez confirmado, queda registrado en el Excel con
+            las cifras finales y ya no se puede modificar (el servidor rechaza cualquier otra acción). */}
+        {fechaSel && editable && (
+          torneoState.concluido ? (
+            <span className="badge badge-campeon" title={hora(torneoState.concluidoEn) ? `Concluido a las ${hora(torneoState.concluidoEn)}` : "Concluido"}>
+              ✅ Jugada concluida
+            </span>
+          ) : (
+            <button className="btn btn-primary" onClick={() => setConcluirModal(true)} disabled={guardando}>
+              Jugada Concluida
+            </button>
+          )
+        )}
       </div>
 
       {hostActual && <p className="gn-host-line">🎙 Host de la jugada: <strong>{hostActual.nombre}</strong></p>}
@@ -357,11 +440,24 @@ export default function GameNight({ session, perfiles, esHost }) {
           siendo un combo. */}
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20, flexWrap: "wrap", alignItems: "center" }}>
         <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
-          {campeonatos.nombres.map((n) => (
-            <option key={n} value={n}>{n}{n === campeonatos.activo ? " (activo)" : ""}</option>
-          ))}
-          <option value={PRACTICA_CAMPEONATO}>🎯 Partidas de práctica</option>
+          {campeonatos.nombres.map((n) => {
+            const bloqueado = Boolean(bloqueante) && bloqueante.campeonato !== n;
+            return (
+              <option key={n} value={n} disabled={bloqueado}>
+                {n}{n === campeonatos.activo ? " (activo)" : ""}{bloqueado ? " — pendiente de concluir partida anterior" : ""}
+              </option>
+            );
+          })}
+          <option value={PRACTICA_CAMPEONATO} disabled={Boolean(bloqueante) && bloqueante.campeonato !== PRACTICA_CAMPEONATO}>
+            🎯 Partidas de práctica{Boolean(bloqueante) && bloqueante.campeonato !== PRACTICA_CAMPEONATO ? " — pendiente de concluir partida anterior" : ""}
+          </option>
         </select>
+        {bloqueante && bloqueante.campeonato !== campeonatoSel && (
+          <span className="campeonato-banner campeonato-banner-alerta" style={{ margin: 0 }}>
+            Hay una partida del {bloqueante.fecha} sin concluir — hay que cerrarla antes de trabajar en otra
+            posterior.
+          </span>
+        )}
         {fechaSel ? (
           <>
             <span className="field field-readonly" style={{ maxWidth: 160 }}>{fechaSel}</span>
@@ -371,6 +467,17 @@ export default function GameNight({ session, perfiles, esHost }) {
               >
                 {campeonatoSel === PRACTICA_CAMPEONATO ? "Práctica" : tipo}
               </span>
+            )}
+            {editable && (
+              <button
+                className="btn-icon-remove"
+                style={{ marginLeft: "auto", width: "auto", padding: "4px 10px", fontSize: 11 }}
+                title="Borra por completo este torneo (jugadores, killers, lugares) y lo deja como si nunca se hubiera tocado"
+                disabled={guardando}
+                onClick={() => setReiniciarModal(true)}
+              >
+                Reiniciar este torneo
+              </button>
             )}
           </>
         ) : (
@@ -467,7 +574,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                       {nombreCorto(j)}
                       {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
                       {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
-                      {editable && !eliminado && (
+                      {editableAhora && !eliminado && (
                         <button
                           className="btn-icon-remove"
                           style={{ marginLeft: 6, width: 20, height: 20 }}
@@ -481,11 +588,10 @@ export default function GameNight({ session, perfiles, esHost }) {
                     </div>
                     <div style={{ fontSize: 13 }}>
                       {hora(gn.horaCheckin)} · {gn.manual ? "Manual" : "Usuario"}
-                      {editable ? (
+                      {editableAhora ? (
                         <button
-                          className={"gn-toggle gn-toggle-chico" + (gn.amonestado ? " on" : "")}
+                          className={"gn-toggle gn-toggle-chico" + (gn.amonestado ? " on" : "") + (pendientes.has(`amonestar:${j.correo}`) ? " gn-en-camino" : "")}
                           style={{ marginLeft: 6 }}
-                          disabled={pendientes.has(`amonestar:${j.correo}`)}
                           title={gn.amonestado ? "Quitar la amonestación" : "Marcar amonestado a mano (pierde el punto de asistencia)"}
                           onClick={() => toggleAmonestado(j)}
                         >
@@ -497,23 +603,23 @@ export default function GameNight({ session, perfiles, esHost }) {
                     </div>
                     <div>
                       <button
-                        className={"gn-toggle" + (gn.buyIn ? " on" : "")}
-                        disabled={!editable || pendientes.has(`buyin:${j.correo}`)}
+                        className={"gn-toggle" + (gn.buyIn ? " on" : "") + (pendientes.has(`buyin:${j.correo}`) ? " gn-en-camino" : "")}
+                        disabled={!editableAhora}
                         onClick={() => toggleBuyIn(j)}
                       >
                         {gn.buyIn ? "Sí" : "No"}
                       </button>
                     </div>
-                    <div className="gn-stepper">
-                      <button
-                        disabled={!editable || pendientes.has(`rebuy:${j.correo}`) || (gn.rebuys || 0) <= 0}
-                        onClick={() => cambiarRebuy(j, -1)}
-                      >
+                    {/* 50ª entrega: ya no se deshabilita mientras hay un guardado en camino — varios
+                        clics seguidos se juntan solos en llamarAgil() en vez de esperar turno uno por
+                        uno, así que el Host puede seguir clickeando "+"/"−" sin sentir que "no responde" */}
+                    <div className={"gn-stepper" + (pendientes.has(`rebuy:${j.correo}`) ? " gn-en-camino" : "")}>
+                      <button disabled={!editableAhora || (gn.rebuys || 0) <= 0} onClick={() => cambiarRebuy(j, -1)}>
                         −
                       </button>
                       <span className="gn-stepper-val">{gn.rebuys || 0}</span>
                       <button
-                        disabled={!editable || pendientes.has(`rebuy:${j.correo}`) || (gn.rebuys || 0) >= recomprasMax}
+                        disabled={!editableAhora || (gn.rebuys || 0) >= recomprasMax}
                         title={Number.isFinite(recomprasMax) ? `Máximo ${recomprasMax} recompras` : "Sin límite configurado para este campeonato"}
                         onClick={() => cambiarRebuy(j, 1)}
                       >
@@ -522,8 +628,8 @@ export default function GameNight({ session, perfiles, esHost }) {
                     </div>
                     <div>
                       <button
-                        className={"gn-toggle" + (gn.addon ? " on" : "")}
-                        disabled={!editable || pendientes.has(`addon:${j.correo}`)}
+                        className={"gn-toggle" + (gn.addon ? " on" : "") + (pendientes.has(`addon:${j.correo}`) ? " gn-en-camino" : "")}
+                        disabled={!editableAhora}
                         onClick={() => toggleAddon(j)}
                       >
                         {gn.addon ? "Sí" : "No"}
@@ -533,12 +639,12 @@ export default function GameNight({ session, perfiles, esHost }) {
                       {eliminado ? (
                         <>
                           {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}
-                          {editable && (
+                          {editableAhora && (
                             <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer eliminación" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
                           )}
                         </>
                       ) : (
-                        editable && enJuego.length > 1 ? (
+                        editableAhora && enJuego.length > 1 ? (
                           <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirKiller(j)}>Eliminar</button>
                         ) : (
                           <span className="muted">En juego</span>
@@ -549,7 +655,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                       {gn.esCampeon ? (
                         <span className="badge badge-campeon">1</span>
                       ) : eliminado ? (
-                        editable ? (
+                        editableAhora ? (
                           <select
                             className="field gn-select"
                             style={{ minWidth: 64, padding: "2px 4px" }}
@@ -570,7 +676,7 @@ export default function GameNight({ session, perfiles, esHost }) {
                       )}
                     </div>
                     <div>
-                      <button className={"gn-toggle" + (gn.mejorMano ? " on" : "")} disabled={!editable || guardando} onClick={() => toggleMejorMano(j)} title="Solo un jugador por torneo">
+                      <button className={"gn-toggle" + (gn.mejorMano ? " on" : "")} disabled={!editableAhora || guardando} onClick={() => toggleMejorMano(j)} title="Solo un jugador por torneo">
                         {gn.mejorMano ? "Sí" : "No"}
                       </button>
                     </div>
@@ -588,7 +694,7 @@ export default function GameNight({ session, perfiles, esHost }) {
           <div className="section">
             <div className="section-head">
               <div className="section-title">Jugadores sin check-in <span className="section-title-campeonato">· {deshabilitados.length}</span></div>
-              {editable && seleccionados.size > 0 && (
+              {editableAhora && seleccionados.size > 0 && (
                 <button className="btn btn-primary btn-filtro" disabled={guardando} onClick={pedirActivarSeleccionados}>
                   Activar seleccionados ({seleccionados.size})
                 </button>
@@ -605,7 +711,7 @@ export default function GameNight({ session, perfiles, esHost }) {
             <div className="tbl">
               <div className="trow thead" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }}>
                 <div>
-                  {editable && deshabilitados.length > 0 && (
+                  {editableAhora && deshabilitados.length > 0 && (
                     <input
                       type="checkbox"
                       checked={seleccionados.size === deshabilitados.length}
@@ -619,14 +725,14 @@ export default function GameNight({ session, perfiles, esHost }) {
               {deshabilitados.map((j) => (
                 <div className="trow" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }} key={j.correo}>
                   <div>
-                    {editable && (
+                    {editableAhora && (
                       <input type="checkbox" checked={seleccionados.has(j.correo)} onChange={() => toggleSeleccionado(j.correo)} />
                     )}
                   </div>
                   <div>{nombreCorto(j)}</div>
                   <div style={{ fontSize: 12 }}>{j.correo}</div>
                   <div>
-                    {editable && (
+                    {editableAhora && (
                       <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirActivar(j)}>
                         Activar (manual)
                       </button>
@@ -689,6 +795,50 @@ export default function GameNight({ session, perfiles, esHost }) {
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setKillerModal(null)} disabled={guardando}>Cancelar</button>
               <button className="btn btn-primary" disabled={guardando} onClick={confirmarKiller}>{guardando ? "Un momento…" : "Confirmar eliminación"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {concluirModal && (
+        <div className="modal-backdrop" onClick={() => !guardando && setConcluirModal(false)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">✅</div>
+            <div className="modal-title">Concluir esta jugada</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              El torneo va a quedar <b>formalmente cerrado</b>, registrado en el Excel con sus cifras
+              finales (lugares, premios, killers, puntos, etc.). Desde ese momento ya <b>no se va a poder
+              modificar nada</b> de esta jugada — ni check-ins, ni buy-ins/re-buys/add-ons, ni killers ni
+              lugares. Esta acción no se puede deshacer.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConcluirModal(false)} disabled={guardando}>Cancelar</button>
+              <button className="btn btn-primary" disabled={guardando} onClick={confirmarConcluir}>
+                {guardando ? "Un momento…" : "Sí, concluir jugada"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reiniciarModal && (
+        <div className="modal-backdrop" onClick={() => !guardando && setReiniciarModal(false)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">⚠</div>
+            <div className="modal-title">Reiniciar este torneo</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Se va a <b>borrar por completo</b> el torneo del {fechaSel} en{" "}
+              {campeonatoSel === PRACTICA_CAMPEONATO ? "Partidas de práctica" : campeonatoSel}: todos los
+              check-ins, buy-ins/re-buys/add-ons, killers y lugares de salida ya guardados, incluido el
+              cierre si ya estaba Concluido. También se borra el reflejo que ya tuviera en Cobranza para
+              esta fecha. Úsalo solo para corregir un torneo con datos mezclados o equivocados — esta
+              acción no se puede deshacer.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setReiniciarModal(false)} disabled={guardando}>Cancelar</button>
+              <button className="btn btn-primary" disabled={guardando} onClick={confirmarReiniciar}>
+                {guardando ? "Un momento…" : "Sí, reiniciar este torneo"}
+              </button>
             </div>
           </div>
         </div>

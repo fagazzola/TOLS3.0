@@ -49,6 +49,29 @@ export function torneoCalendarioDe(torneosCal, campeonato, fecha) {
   return (torneosCal || []).find((t) => t.temporada === campeonato && t.fecha === fecha) || null;
 }
 
+// 50ª entrega: Federico pidió que Game Night respete el orden cronológico real de las partidas —
+// si por fecha corresponde jugar primero una partida de práctica (o de cualquier otro campeonato),
+// no se debe poder trabajar en un torneo posterior hasta que esa partida quede "Concluida" (ver
+// acción `"concluir"` en netlify/functions/gamenight.js). Junta TODAS las fechas ya vencidas
+// (`fecha <= hoy`) de TODOS los campeonatos y de las partidas de práctica en una sola línea de
+// tiempo, y devuelve la más antigua que todavía no esté concluida — esa es la que "bloquea" el
+// combo de campeonato en la pantalla de Game Night para cualquier otro valor. `null` si no hay
+// ninguna partida vencida pendiente de concluir (todo al día).
+export function torneoBloqueante(torneosCal, gnMapa, hoy) {
+  const candidatos = (torneosCal || [])
+    .filter((t) => (t.practica || t.temporada) && t.fecha && t.fecha <= hoy)
+    .map((t) => {
+      const campeonato = t.practica ? PRACTICA_CAMPEONATO : t.temporada;
+      return {
+        campeonato,
+        fecha: t.fecha,
+        concluido: Boolean(gnMapa?.[campeonato]?.[t.fecha]?.concluido),
+      };
+    })
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return candidatos.find((c) => !c.concluido) || null;
+}
+
 // arma la lista de posiciones de salida a partir del orden de eliminación guardado en el torneo
 // (`ordenEliminados`, un arreglo de correos del primero en salir al último). El servidor mantiene este
 // arreglo solo (agrega al eliminar con "killer", quita al deshacer con "quitarKiller"), pero desde la

@@ -540,6 +540,10 @@ h1 {
    pero en rojo/alerta cuando está activo, para distinguirlo de los Sí/No de buy-in/add-on. */
 .gn-toggle-chico { padding: 3px 7px; font-size: 10px; }
 .gn-toggle-chico.on { background: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
+/* 50ª entrega: se pone en un control ágil (Buy-in/Re-buys/Add-on/Amonestado) mientras su guardado más
+   reciente sigue en camino — el control NO se deshabilita (se puede seguir clickeando, los clics se
+   juntan solos), esto es solo una señal visual sutil de "todavía guardando". */
+.gn-en-camino { opacity: 0.55; }
 
 .gn-host-line { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft); margin: 2px 0 0; }
 .gn-row-eliminado { color: var(--ink-soft); opacity: 0.85; }

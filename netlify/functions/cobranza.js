@@ -187,6 +187,24 @@ export async function upsertVariosDesdeGameNight(campeonato, fecha, lista) {
   return completa;
 }
 
+// 50ª entrega: usada por la acción "reiniciarTorneo" de Game Night — al reiniciar un torneo desde cero
+// (limpieza administrativa, ej. datos que quedaron mezclados entre dos fechas por el bug de la 47ª/48ª
+// entrega), hay que borrar también los movimientos que ya se habían espejado en Cobranza para ese
+// campeonato+fecha (`gn-{campeonato}-{fecha}-{correo}`) — si no, quedarían "huérfanos" mostrando
+// buy-in/premios de la partida que se acaba de invalidar.
+export async function eliminarMovimientosDeGameNight(campeonato, fecha) {
+  const store = getStore({ name: "tols-cobranza", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
+  const actual = normalizar(raw);
+  const prefijo = `gn-${campeonato}-${fecha}-`;
+  const antes = actual.movimientos.length;
+  actual.movimientos = actual.movimientos.filter((m) => !String(m.id || "").startsWith(prefijo));
+  if (actual.movimientos.length === antes) return; // nada que borrar, no hace falta re-guardar
+  await store.setJSON("data", actual);
+  const completa = await respuestaCompleta(actual);
+  await syncCobranza(filasParaExcel(completa));
+}
+
 // usada por campeonatos.js al renombrar un campeonato: remapea movimientos[].campeonato de "de" a "a".
 // También renombra el id de los movimientos generados por Game Night (`gn-{campeonato}-{fecha}-{correo}`)
 // para que sigan siendo el mismo registro la próxima vez que se guarde ese Game Night con el nombre nuevo

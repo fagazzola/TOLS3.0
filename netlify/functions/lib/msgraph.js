@@ -127,18 +127,26 @@ async function readSheetAcotado(sheetName, { maxRows = 4000, maxCols = 32 } = {}
 // crea la hoja si todavía no existe en el Excel maestro y le escribe el encabezado — usado por Game
 // Night (MOD 5), que es el primer módulo cuyas hojas no se arman a mano de antemano. El resto de los
 // módulos (Cobranza, Tablero, etc.) siguen esperando que la hoja ya exista, como hasta ahora.
+//
+// 50ª entrega: a diferencia de esas otras hojas, "GameNight_Sesiones"/"GameNight_Jugadores" son 100%
+// administradas por el sitio — Federico nunca las arma ni las edita a mano — así que, a diferencia del
+// resto del Excel, aquí SÍ es seguro reescribir el encabezado cada vez que cambie (por ejemplo, al
+// agregar columnas nuevas como "Concluido" o "Lugar"/"Premio"/"Puntos" en esta entrega): siempre se
+// vuelve a escribir la fila 1 completa con el encabezado actual, no solo la primera vez que se crea la
+// hoja. Así una hoja ya existente de una entrega anterior no se queda con columnas de datos nuevas sin
+// encabezado.
 async function asegurarHoja(sheetName, headers) {
   const existentes = await graphFetch(`/workbook/worksheets`, { method: "GET" });
   const yaExiste = (existentes?.value || []).some((h) => h.name === sheetName);
   if (!yaExiste) {
     await graphFetch(`/workbook/worksheets/add`, { method: "POST", body: JSON.stringify({ name: sheetName }) });
-    const lastCol = colLetter(headers.length);
-    const sheet = encodeURIComponent(sheetName);
-    await graphFetch(`/workbook/worksheets('${sheet}')/range(address='A1:${lastCol}1')`, {
-      method: "PATCH",
-      body: JSON.stringify({ values: [headers] }),
-    });
   }
+  const lastCol = colLetter(headers.length);
+  const sheet = encodeURIComponent(sheetName);
+  await graphFetch(`/workbook/worksheets('${sheet}')/range(address='A1:${lastCol}1')`, {
+    method: "PATCH",
+    body: JSON.stringify({ values: [headers] }),
+  });
 }
 
 // aplica un formato de número que oculta el valor real de una columna de texto (muestra siempre
@@ -379,23 +387,35 @@ export function syncGameNight(mapa) {
     const jugadores = [];
     for (const [campeonato, fechas] of Object.entries(mapa || {})) {
       for (const [fecha, torneo] of Object.entries(fechas || {})) {
-        sesiones.push([campeonato, fecha, torneo.horaInicio || ""]);
+        // 50ª entrega: "Concluido"/"Concluido En" quedan registrados en Excel apenas se cierra
+        // formalmente el torneo (acción "concluir" en netlify/functions/gamenight.js) — antes de eso
+        // van vacíos/en "No".
+        sesiones.push([
+          campeonato, fecha, torneo.horaInicio || "",
+          torneo.concluido ? "Sí" : "No", torneo.concluidoEn || "",
+        ]);
         for (const [correo, j] of Object.entries(torneo.jugadores || {})) {
           jugadores.push([
             campeonato, fecha, correo, j.nombre || "",
             j.checkin ? "Sí" : "No", j.manual ? "Sí" : "No", j.amonestado ? "Sí" : "No", j.horaCheckin || "",
             j.buyIn ? "Sí" : "No", j.rebuys || 0, j.addon ? "Sí" : "No",
             j.eliminadoPor || "", j.horaEliminacion || "", j.mejorMano ? "Sí" : "No",
+            // 50ª entrega: Lugar/Premio/Puntos son el "resultado" ya calculado del torneo (congelado
+            // por el servidor en cada guardado, ver `estadoTorneo()` en netlify/functions/gamenight.js)
+            // — quedan aquí para que, al Concluir un torneo, sus cifras finales queden registradas en
+            // Excel sin depender de recalcular nada desde esta hoja.
+            j.lugar || "", j.premioTotal || 0, j.puntos || 0,
             j.actualizado || "",
           ]);
         }
       }
     }
-    await asegurarHoja("GameNight_Sesiones", ["Campeonato", "Fecha", "Hora de Inicio"]);
+    await asegurarHoja("GameNight_Sesiones", ["Campeonato", "Fecha", "Hora de Inicio", "Concluido", "Concluido En"]);
     await writeSheetTable("GameNight_Sesiones", sesiones);
     await asegurarHoja("GameNight_Jugadores", [
       "Campeonato", "Fecha", "Correo", "Nombre", "Check-in", "Manual", "Amonestado", "Hora Check-in",
-      "Buy-in", "Re-buys", "Add-on", "Eliminado Por", "Hora Eliminación", "Mejor Mano", "Actualizado",
+      "Buy-in", "Re-buys", "Add-on", "Eliminado Por", "Hora Eliminación", "Mejor Mano",
+      "Lugar", "Premio", "Puntos", "Actualizado",
     ]);
     await writeSheetTable("GameNight_Jugadores", jugadores, { maxRows: 600 });
   });

@@ -237,21 +237,29 @@ export default async (req) => {
       if (!correo) return new Response(JSON.stringify({ error: "Falta el correo del jugador." }), { status: 400, headers: HEADERS });
       const manual = Boolean(body.manual);
       // 48ª entrega: la activación ya NO amonesta sola por pasarse del tiempo de tolerancia — Federico
-      // pidió que el tiempo sea "simplemente ilustrativo". El Host decide a mano con la acción
-      // "amonestar" si corresponde o no. Se conserva el valor de amonestado que ya tuviera el jugador
-      // (por si el Host ya lo había marcado antes de quitarle el check-in por error).
+      // pidió que el tiempo sea "simplemente ilustrativo".
+      // 51ª entrega: Federico confirmó la regla que habíamos quedado — si el Host tiene que activar a
+      // mano a un jugador (`manual: true`, botón "Activar (manual)"/"Activar seleccionados"), eso en sí
+      // ya significa que no hizo su propio check-in a tiempo, así que queda amonestado automáticamente
+      // (pierde el punto de asistencia). El check-in de autoservicio del propio jugador (`manual:
+      // false`, el botón "Hacer mi check-in") nunca amonesta solo. El toggle "Amonestar" de la tabla
+      // sigue existiendo como corrección manual, por si el Host necesita revertir un caso puntual (ej.
+      // activó manual por error, o el jugador sí avisó a tiempo por otro medio).
       torneo.jugadores[correo] = normalizarJugadorGN({
         ...torneo.jugadores[correo],
         nombre: body.nombre || torneo.jugadores[correo]?.nombre || "",
         checkin: true,
         manual,
+        amonestado: manual ? true : Boolean(torneo.jugadores[correo]?.amonestado),
         horaCheckin: ahora,
         buyIn: true,
         actualizado: ahora,
       });
     } else if (body.accion === "checkinMasivo") {
-      // activación manual de varios jugadores al mismo tiempo (45ª entrega) — sin amonestación
-      // automática (48ª entrega), igual que la activación individual.
+      // activación manual de varios jugadores al mismo tiempo (45ª entrega) — desde la 51ª entrega
+      // también amonesta automáticamente a cada uno, igual que la activación individual manual (ver
+      // nota arriba), porque `checkinMasivo` siempre es una activación hecha por el Host, nunca
+      // autoservicio.
       const lista = Array.isArray(body.jugadores) ? body.jugadores : [];
       if (!lista.length) return new Response(JSON.stringify({ error: "No se seleccionó ningún jugador." }), { status: 400, headers: HEADERS });
       for (const j of lista) {
@@ -262,6 +270,7 @@ export default async (req) => {
           nombre: j.nombre || torneo.jugadores[correo]?.nombre || "",
           checkin: true,
           manual: true,
+          amonestado: true,
           horaCheckin: ahora,
           buyIn: true,
           actualizado: ahora,

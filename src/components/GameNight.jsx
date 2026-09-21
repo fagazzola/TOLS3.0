@@ -53,13 +53,22 @@ export default function GameNight({ session, perfiles, esHost }) {
   const [pendientes, setPendientes] = useState(new Set());
   const [concluirModal, setConcluirModal] = useState(false);
   const [reiniciarModal, setReiniciarModal] = useState(false);
-  // 50ª entrega: cola de reintentos para las acciones "ágiles" (Buy-in/Re-buys/Add-on/Amonestado) —
-  // si el Host hace varios clics seguidos sobre el MISMO control antes de que el servidor responda al
-  // primero (la respuesta tarda porque cada guardado espera a que termine de escribirse en Excel), en
-  // vez de mandar una llamada por clic (cada una con su propia espera completa) se junta la intención
-  // más reciente y se manda una sola vez que la anterior termine — la pantalla ya se actualizó al
-  // toque de forma optimista en cada clic, así que el Host no pierde nada, solo se ahorran llamadas.
-  const colaAgilRef = useRef({});
+  // 50ª/51ª entrega: cola de guardado para las acciones "ágiles" (Buy-in/Re-buys/Add-on/Amonestado/
+  // checkin). En la 50ª entrega esta cola era UNA POR CONTROL (`rebuy:correo`, `addon:correo`, etc.),
+  // lo que dejaba que dos acciones DISTINTAS (ej. un Re-buy de un jugador y un Add-on de otro) se
+  // mandaran en paralelo. Eso era justo la causa de que "se demorara y volviera al valor anterior"
+  // que reportó Federico en la 51ª: como cada guardado relee y reescribe TODO el mapa de Game Night
+  // (jugadores, killers, lugares — no solo el campo tocado), dos llamadas en vuelo al mismo tiempo se
+  // pisan entre sí — la segunda en responder (la más lenta, porque cada una espera a Excel) llega con
+  // una copia del torneo que todavía no tenía el cambio de la primera, y al guardarla de vuelta lo
+  // borra sin que nadie lo note hasta que la pantalla se actualiza con esa respuesta.
+  // Ahora la cola es UNA SOLA para toda la pantalla: como máximo una llamada a `/api/gamenight` en
+  // vuelo a la vez, sin importar cuántos controles distintos se toquen. La pantalla se sigue sintiendo
+  // ágil porque cada clic se ve al toque (optimista) y los clics repetidos sobre el MISMO control se
+  // siguen combinando (`combinar`, ej. sumar los deltas de Re-buy) — solo que ahora, si se tocan
+  // controles distintos, se procesan uno detrás de otro en vez de en paralelo, evitando la pisada.
+  const colaGlobalRef = useRef([]); // [{ key, body, combinar }]
+  const enVueloRef = useRef(false);
 
   useEffect(() => {
     cargar();
@@ -203,24 +212,18 @@ export default function GameNight({ session, perfiles, esHost }) {
     .map(([, lugar]) => lugar)
     .sort((a, b) => a - b);
 
+  // 51ª entrega: `llamar()` (checkin, killer, moverLugar, concluir, reiniciar…) ahora pasa por la
+  // MISMA cola global que las acciones ágiles (ver `encolar()` abajo), en vez de mandar su propio
+  // fetch por separado. Antes, mientras un Re-buy/Add-on estaba en vuelo (que no ponía `guardando` en
+  // true), los botones que sí dependen de `guardando` (Eliminar, checkin, etc.) seguían habilitados y
+  // podían disparar OTRO PUT al mismo tiempo — dos guardados en paralelo sobre el mismo torneo se
+  // pisan entre sí (cada uno relee y reescribe TODO el mapa). Con una sola cola para toda la pantalla,
+  // nunca hay más de un PUT en vuelo a la vez, venga de donde venga.
   async function llamar(body) {
-    if (!campeonatoSel || !fechaSel) return;
-    setGuardando(true);
-    setError("");
     try {
-      const r = await fetch(API, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ campeonato: campeonatoSel, fecha: fechaSel, ...body }),
-      });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
-      setGnMapa(json);
-      setAviso(json.avisoAmonestacion || "");
+      await encolar(`accion-${Date.now()}-${Math.random().toString(36).slice(2)}`, body);
     } catch (e) {
-      setError(e.message || "No se pudo guardar.");
-    } finally {
-      setGuardando(false);
+      // el error ya quedó reflejado en `error` (y la pantalla recargada) dentro de `procesarColaGlobal`
     }
   }
 
@@ -251,39 +254,69 @@ export default function GameNight({ session, perfiles, esHost }) {
   // se guarda (y, para Re-buys, se SUMA con `combinar`) como "la próxima" y se manda en cuanto la
   // anterior responda, así 5 clics rápidos de "+1" terminan en como máximo 2 llamadas al servidor en
   // vez de 5, sin perder ninguno.
-  async function llamarAgil(key, body, cambiosOptimistas, combinar) {
-    if (!campeonatoSel || !fechaSel) return;
+  function llamarAgil(key, body, cambiosOptimistas, combinar) {
+    encolar(key, body, cambiosOptimistas, combinar).catch(() => {});
+  }
+
+  // punto único de entrada a la cola global (usado tanto por `llamar()` como por `llamarAgil()`).
+  // Si ya hay una entrada con la misma `key` esperando turno (todavía no se mandó), se combina con
+  // ella en vez de agregar una nueva — así varios clics de "+1" sobre el mismo jugador, mientras la
+  // cola está ocupada con OTRA acción, terminan sumados en un solo delta. Cada llamada devuelve una
+  // promesa propia que se resuelve/rechaza cuando a ESE item le toca su turno y el servidor responde,
+  // así `llamar()` (usado en modales que hacen `await`) sigue funcionando igual que antes.
+  function encolar(key, body, cambiosOptimistas, combinar) {
+    if (!campeonatoSel || !fechaSel) return Promise.reject(new Error("No hay campeonato/fecha seleccionados."));
     if (cambiosOptimistas && body.correo) actualizarJugadorLocal(body.correo, cambiosOptimistas);
 
-    const cola = colaAgilRef.current;
-    if (cola[key]) {
-      cola[key].siguiente = combinar && cola[key].siguiente ? combinar(cola[key].siguiente, body) : body;
-      return;
-    }
-    cola[key] = { siguiente: null };
-    setPendientes((prev) => new Set(prev).add(key));
+    return new Promise((resolve, reject) => {
+      const cola = colaGlobalRef.current;
+      const enCola = cola.find((it) => it.key === key);
+      if (enCola) {
+        enCola.body = combinar ? combinar(enCola.body, body) : body;
+        enCola.resolvers.push({ resolve, reject });
+      } else {
+        cola.push({ key, body, combinar, resolvers: [{ resolve, reject }] });
+      }
+      setPendientes((prev) => new Set(prev).add(key));
+      setGuardando(true);
+      procesarColaGlobal();
+    });
+  }
+
+  // procesa la cola global de a una llamada por vez — si ya hay una en vuelo, no hace nada; cuando esa
+  // termine (éxito o error), se llama sola otra vez para seguir con lo que se haya acumulado mientras
+  // tanto. Esto es lo que garantiza que nunca haya dos PUT a `/api/gamenight` en vuelo al mismo tiempo
+  // desde esta pantalla, sin importar qué controles distintos se hayan tocado (ver nota en `colaGlobalRef`).
+  async function procesarColaGlobal() {
+    if (enVueloRef.current) return;
+    const item = colaGlobalRef.current.shift();
+    if (!item) return;
+    enVueloRef.current = true;
     setError("");
     try {
       const r = await fetch(API, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ campeonato: campeonatoSel, fecha: fechaSel, ...body }),
+        body: JSON.stringify({ campeonato: campeonatoSel, fecha: fechaSel, ...item.body }),
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
       setGnMapa(json);
+      setAviso(json.avisoAmonestacion || "");
+      item.resolvers.forEach((p) => p.resolve(json));
     } catch (e) {
       setError(e.message || "No se pudo guardar.");
       cargar(); // se descarta el cambio optimista y se recarga el estado real del servidor
+      item.resolvers.forEach((p) => p.reject(e));
     } finally {
-      const siguiente = cola[key]?.siguiente;
-      delete colaAgilRef.current[key];
+      enVueloRef.current = false;
       setPendientes((prev) => {
         const next = new Set(prev);
-        next.delete(key);
+        next.delete(item.key);
         return next;
       });
-      if (siguiente) llamarAgil(key, siguiente, null, combinar);
+      if (!colaGlobalRef.current.length) setGuardando(false);
+      procesarColaGlobal();
     }
   }
 
@@ -372,8 +405,12 @@ export default function GameNight({ session, perfiles, esHost }) {
     setReiniciarModal(false);
   }
 
+  // 51ª entrega: usaba el nombre completo — Federico pidió que, igual que en el resto de la pantalla
+  // (tabla, combo de verdugo), se muestre siempre el Alias PokerStars (killer/verdugo, podio, burbuja,
+  // Campeón).
   function nombrePorCorreo(correo) {
-    return jugadoresSitio.find((j) => j.correo === correo)?.nombre || correo || "";
+    const j = jugadoresSitio.find((j) => j.correo === correo);
+    return j ? nombreCorto(j) : correo || "";
   }
 
   function podiumSpot(lugar) {
@@ -397,6 +434,31 @@ export default function GameNight({ session, perfiles, esHost }) {
   const lugaresPago = estado.numLugaresPago || 0;
   const burbujaNombre = estado.burbujaCorreo ? nombrePorCorreo(estado.burbujaCorreo) : "";
   const campeonNombre = estado.campeon ? nombrePorCorreo(estado.campeon) : "";
+
+  // 51ª entrega: bloque de totales de Buy-in/Re-buys/Add-on que pidió Federico para que el Host pueda
+  // validar rápido, de un vistazo, cuánto lleva cobrado/registrado en la mesa sin tener que sumar la
+  // tabla completa a mano. Se calcula sobre los jugadores habilitados (con check-in) — igual que la
+  // tabla de abajo — usando las cifras ya calculadas por `estadoTorneo()` (`gn.debeBuyIn`, etc.), así
+  // que respeta las mismas tarifas del Tablero de Control (incluido el caso de partidas de práctica
+  // sin configuración, que siempre dan $0).
+  const totalesAgiles = habilitados.reduce(
+    (acc, j) => {
+      const gn = j.gn;
+      if (!gn) return acc;
+      if (gn.buyIn) {
+        acc.buyIns += 1;
+        acc.buyInsUSD += gn.debeBuyIn || 0;
+      }
+      acc.rebuys += Number(gn.rebuys) || 0;
+      acc.rebuysUSD += gn.debeRebuys || 0;
+      if (gn.addon) {
+        acc.addons += 1;
+        acc.addonsUSD += gn.debeAddon || 0;
+      }
+      return acc;
+    },
+    { buyIns: 0, buyInsUSD: 0, rebuys: 0, rebuysUSD: 0, addons: 0, addonsUSD: 0 }
+  );
 
   return (
     <div>
@@ -487,6 +549,35 @@ export default function GameNight({ session, perfiles, esHost }) {
 
       {fechaSel && (
         <>
+          {/* ───────── Totales de Buy-in/Re-buys/Add-on (51ª entrega) — para que el Host valide rápido
+              cuánto lleva registrado en la mesa, sin tener que sumar la tabla completa a mano. ───────── */}
+          <div className="stats gn-stats-row" style={{ margin: "20px 0" }}>
+            <div className="stat">
+              <div className="stat-label">Buy-ins</div>
+              <div className="stat-value">{totalesAgiles.buyIns}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">$ por Buy-ins</div>
+              <div className="stat-value">{money(totalesAgiles.buyInsUSD)}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Re-buys</div>
+              <div className="stat-value">{totalesAgiles.rebuys}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">$ por Re-buys</div>
+              <div className="stat-value">{money(totalesAgiles.rebuysUSD)}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Add-ons</div>
+              <div className="stat-value">{totalesAgiles.addons}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">$ por Add-ons</div>
+              <div className="stat-value">{money(totalesAgiles.addonsUSD)}</div>
+            </div>
+          </div>
+
           {/* ───────── Podio de premios en efectivo ───────── */}
           <div className="gn-podium">
             {lugaresPago >= 2 && (
@@ -756,15 +847,18 @@ export default function GameNight({ session, perfiles, esHost }) {
             {activarModal.masivo ? (
               <p className="section-sub" style={{ marginTop: 0 }}>
                 Vas a activar manualmente a <b>{activarModal.masivo.map((j) => j.nombre).join(", ")}</b>, con
-                buy-in asignado a cada uno. El tiempo de tolerancia ({toleranciaMin} min desde la hora
-                programada) es solo informativo — si corresponde una amonestación, la marcas después a mano
-                desde la tabla de habilitados.
+                buy-in asignado a cada uno. Por ser una activación manual del Host, quedan{" "}
+                <b>amonestados automáticamente</b> (pierden el punto de asistencia) — si alguno no debería
+                quedar amonestado, lo corriges después con el toggle "Amonestar" de la tabla de habilitados.
+                El tiempo de tolerancia ({toleranciaMin} min desde la hora programada) es solo informativo.
               </p>
             ) : (
               <p className="section-sub" style={{ marginTop: 0 }}>
-                Vas a activar manualmente a <b>{activarModal.nombre}</b> en el tablero, con buy-in asignado. El
-                tiempo de tolerancia ({toleranciaMin} min desde la hora programada) es solo informativo — si
-                corresponde una amonestación, la marcas después a mano desde la tabla de habilitados.
+                Vas a activar manualmente a <b>{activarModal.nombre}</b> en el tablero, con buy-in asignado.
+                Por ser una activación manual del Host, queda <b>amonestado automáticamente</b> (pierde el
+                punto de asistencia) — si no debería quedar amonestado, lo corriges después con el toggle
+                "Amonestar" de la tabla de habilitados. El tiempo de tolerancia ({toleranciaMin} min desde la
+                hora programada) es solo informativo.
               </p>
             )}
             <div className="modal-actions">

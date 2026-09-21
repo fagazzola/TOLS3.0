@@ -753,27 +753,29 @@ export default function Calendario({ session, perfiles }) {
                 🏆 Resultado final — {diasCortos[d.getDay()]} {d.getDate()} {mesesLargos[d.getMonth()]} {d.getFullYear()}
                 {resultadoModal.practica && <span className="badge badge-practica" style={{ marginLeft: 8 }}>Práctica</span>}
               </div>
-              <div className="tbl">
+              <div className="tbl cal-resultado-tbl">
                 <div className="trow thead" style={{ gridTemplateColumns: "0.6fr 1.6fr 0.8fr 0.8fr" }}>
                   <div>Lugar</div><div>Alias PokerStars</div><div>Puntos</div><div>Premio $</div>
                 </div>
-                {filas.map((f) => (
-                  <div
-                    className={"trow" + (f.lugar <= 3 ? " cal-resultado-podio" : "")}
-                    style={{ gridTemplateColumns: "0.6fr 1.6fr 0.8fr 0.8fr" }}
-                    key={f.correo}
-                  >
-                    <div className="num">{f.lugar}º</div>
-                    <div>{nombreCorto(jugadoresSitio.find((j) => j.correo === f.correo)) || f.correo}</div>
-                    <div className="num">{f.puntos}</div>
-                    <div className="num">{money(f.premio)}</div>
-                  </div>
-                ))}
-                {filas.length === 0 && (
-                  <div className="section-sub" style={{ padding: "14px 18px", margin: 0 }}>
-                    Todavía no hay lugares registrados para este torneo.
-                  </div>
-                )}
+                <div className="cal-resultado-tbl-body">
+                  {filas.map((f) => (
+                    <div
+                      className={"trow" + (f.lugar <= 3 ? " cal-resultado-podio" : "")}
+                      style={{ gridTemplateColumns: "0.6fr 1.6fr 0.8fr 0.8fr" }}
+                      key={f.correo}
+                    >
+                      <div className="num">{f.lugar}º</div>
+                      <div>{nombreCorto(jugadoresSitio.find((j) => j.correo === f.correo)) || f.correo}</div>
+                      <div className="num">{f.puntos}</div>
+                      <div className="num">{money(f.premio)}</div>
+                    </div>
+                  ))}
+                  {filas.length === 0 && (
+                    <div className="section-sub" style={{ padding: "14px 18px", margin: 0 }}>
+                      Todavía no hay lugares registrados para este torneo.
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="modal-actions">
                 <button className="btn btn-secondary" onClick={() => setResultadoModal(null)}>Cerrar</button>

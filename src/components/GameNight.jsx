@@ -997,8 +997,9 @@ export default function GameNight({ session, perfiles, esHost }) {
               {campeonatoSel === PRACTICA_CAMPEONATO ? "Partidas de práctica" : campeonatoSel}: todos los
               check-ins, buy-ins/re-buys/add-ons, killers y lugares de salida ya guardados, incluido el
               cierre si ya estaba Concluido. También se borra el reflejo que ya tuviera en Cobranza para
-              esta fecha. Úsalo solo para corregir un torneo con datos mezclados o equivocados — esta
-              acción no se puede deshacer.
+              esta fecha, y esta fecha deja de aparecer en las hojas de Excel de Game Night (ya no queda
+              un renglón vacío pegado ahí). Úsalo solo para corregir un torneo con datos mezclados o
+              equivocados — esta acción no se puede deshacer.
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setReiniciarModal(false)} disabled={guardando}>Cancelar</button>

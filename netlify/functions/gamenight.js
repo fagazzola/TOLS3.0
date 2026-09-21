@@ -255,16 +255,22 @@ export default async (req) => {
     } else if (body.accion === "reiniciarTorneo") {
       // 49ª/50ª entrega: limpieza administrativa explícita — Federico la pidió para poder deshacer un
       // torneo cuyos datos quedaron mezclados con otro por el bug de lectura en null de la 47ª/48ª
-      // entrega. Borra por completo el torneo (jugadores, orden de eliminación, hora de inicio,
-      // concluido) y lo deja como si nunca se hubiera tocado. Es la única acción que se permite incluso
-      // sobre un torneo ya Concluido, precisamente para poder deshacer un cierre hecho por error. Se
-      // muta el mismo objeto `torneo` (no se reemplaza la entrada del mapa) para que el resto del
-      // código — sobre todo el espejo hacia Cobranza, más abajo — vea el torneo ya vacío.
-      torneo.jugadores = {};
-      torneo.ordenEliminados = [];
-      torneo.horaInicio = "";
-      torneo.concluido = false;
-      torneo.concluidoEn = "";
+      // entrega. Deja el torneo como si nunca se hubiera tocado. Es la única acción que se permite
+      // incluso sobre un torneo ya Concluido, precisamente para poder deshacer un cierre hecho por error.
+      //
+      // 57ª entrega: Federico pidió borrar por completo un torneo de práctica de "cualquier parte que
+      // exista en el Excel" porque lo iba a volver a crear de cero — al probarlo se encontró que esta
+      // acción, hasta ahora, solo VACIABA los campos del torneo (`torneo.jugadores = {}`, etc.) pero
+      // dejaba la llave `mapa[campeonato][fecha]` viva en el store, así que `GameNight_Sesiones` en
+      // Excel seguía sincronizando un renglón "fantasma" para esa fecha (sesión vacía, sin jugadores)
+      // para siempre, sin ninguna acción que lo hiciera desaparecer. Ahora se borra la llave del mapa
+      // por completo — `getTorneo()` (arriba) ya sabe recrear una entrada vacía sola la próxima vez que
+      // alguien la necesite (ej. si Federico vuelve a usar la misma fecha), así que no hace falta dejar
+      // un objeto vacío de relleno. El resto del código de abajo (espejo hacia Cobranza, sync a Excel)
+      // sigue funcionando igual porque sigue teniendo la referencia a `torneo` en esta variable, aunque
+      // ya no esté colgada del mapa.
+      delete mapa[campeonato][fecha];
+      if (Object.keys(mapa[campeonato]).length === 0) delete mapa[campeonato];
     } else if (body.accion === "checkin") {
       const correo = String(body.correo || "").trim().toLowerCase();
       if (!correo) return new Response(JSON.stringify({ error: "Falta el correo del jugador." }), { status: 400, headers: HEADERS });

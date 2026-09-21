@@ -5,6 +5,7 @@ import seed from "../data/tablero.json";
 const API = "/api/tablero";
 const API_CAMP = "/api/campeonatos";
 const API_CAL = "/api/calendario";
+const API_PARAM = "/api/parametros";
 
 function isoHoy() {
   const d = new Date();
@@ -120,6 +121,14 @@ export default function Tablero({ session, perfiles }) {
   const [saveError, setSaveError] = useState("");
   const [saveOk, setSaveOk] = useState(false);
 
+  // 59ª entrega: "Parámetros Generales" — a diferencia de todo lo demás en esta pantalla, esto NO es
+  // por campeonato, es global al sitio completo (por eso vive en su propio estado/endpoint, no dentro
+  // de `data`/`draft`). Por ahora solo el interruptor de acceso al portal.
+  const [parametros, setParametros] = useState(null);
+  const [paramGuardando, setParamGuardando] = useState(false);
+  const [paramError, setParamError] = useState("");
+  const [confirmPortal, setConfirmPortal] = useState(false);
+
   const [gestionAbierta, setGestionAbierta] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [renombres, setRenombres] = useState({});
@@ -140,12 +149,16 @@ export default function Tablero({ session, perfiles }) {
       // el Calendario es "best effort" aquí — solo se usa para saber si el campeonato activo ya está
       // en curso (y por lo tanto bloquear el cambio); si falla, simplemente no se bloquea nada
       fetch(API_CAL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      // Parámetros Generales también es "best effort" — si falla, el interruptor simplemente no se
+      // muestra en vez de tronar toda la pantalla del Tablero.
+      fetch(API_PARAM).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ])
-      .then(([camp, tab, cal]) => {
+      .then(([camp, tab, cal, param]) => {
         const nombres = camp.nombres || [];
         setCampeonatos(nombres);
         setTableroMap(tab || {});
         setTorneosCal(Array.isArray(cal?.torneos) ? cal.torneos : []);
+        if (param) setParametros(param);
         // el campeonato que gobierna el sitio es "activo" (guardado en tols-campeonatos) — el Tablero
         // arranca mostrando ese, no simplemente el primero de la lista, para que Calendario y cualquier
         // otra pantalla que dependa de "cuál es el torneo vigente" siempre coincidan con esto
@@ -284,6 +297,37 @@ export default function Tablero({ session, perfiles }) {
     setDraft(data);
     setSaveError("");
     setSaveOk(false);
+  }
+
+  // apagar el portal bloquea a todos los jugadores de inmediato (App.jsx revisa esto en cada carga) —
+  // se pide confirmación antes de apagarlo por lo delicado que es; encenderlo no necesita confirmación.
+  function pedirCambiarPortal() {
+    if (!parametros) return;
+    if (parametros.portalActivo) {
+      setConfirmPortal(true);
+    } else {
+      cambiarPortal(true);
+    }
+  }
+
+  async function cambiarPortal(nuevoValor) {
+    setParamGuardando(true);
+    setParamError("");
+    try {
+      const r = await fetch(API_PARAM, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion: "guardar", portalActivo: nuevoValor }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
+      setParametros(json);
+    } catch (e) {
+      setParamError(e.message || "No se pudo guardar el estado del portal.");
+    } finally {
+      setParamGuardando(false);
+      setConfirmPortal(false);
+    }
   }
 
   function pedirAgregarCampeonato() {
@@ -457,6 +501,58 @@ export default function Tablero({ session, perfiles }) {
           </p>
         </div>
       </div>
+
+      {/* ───────── Parámetros Generales ───────── */}
+      {parametros && (
+        <div className="section" style={{ marginTop: 24 }}>
+          <div className="section-head"><div className="section-title">Parámetros Generales</div></div>
+          <div className="section-sub" style={{ marginTop: 0 }}>
+            A diferencia del resto de esta pantalla, esto no depende del campeonato — aplica a todo el sitio.
+          </div>
+          <div className="login-field-row" style={{ alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Acceso al portal</div>
+              <div className="section-note">
+                {parametros.portalActivo
+                  ? "Encendido — todos los jugadores pueden entrar normalmente."
+                  : "Apagado — los jugadores ven un aviso de mantenimiento y no pueden entrar. Los administradores sí pueden."}
+              </div>
+            </div>
+            {editable && (
+              <button
+                type="button"
+                className={"btn " + (parametros.portalActivo ? "btn-secondary" : "btn-primary")}
+                disabled={paramGuardando}
+                onClick={pedirCambiarPortal}
+              >
+                {paramGuardando ? "Un momento…" : parametros.portalActivo ? "Apagar portal (ON)" : "Encender portal (OFF)"}
+              </button>
+            )}
+          </div>
+          {paramError && <div className="login-error">{paramError}</div>}
+        </div>
+      )}
+
+      {confirmPortal && (
+        <div className="modal-backdrop" onClick={() => !paramGuardando && setConfirmPortal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge danger">⚠</div>
+            <div className="modal-title">Apagar el portal</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Vas a dejar TOLS 3.0 en <b>mantenimiento</b>: ningún jugador va a poder entrar hasta que lo
+              vuelvas a encender desde aquí. Los administradores sí van a poder seguir entrando.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmPortal(false)} disabled={paramGuardando}>
+                Cancelar
+              </button>
+              <button className="btn btn-danger" disabled={paramGuardando} onClick={() => cambiarPortal(false)}>
+                {paramGuardando ? "Un momento…" : "Sí, apagar el portal"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="section" style={{ marginTop: 24 }}>
         <div className="login-field" style={{ maxWidth: 320 }}>

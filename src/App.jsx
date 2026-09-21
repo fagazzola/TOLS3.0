@@ -20,6 +20,7 @@ const API_PERFILES = "/api/perfiles";
 const API_JUGADORES = "/api/jugadores";
 const API_CALENDARIO = "/api/calendario";
 const API_CAMPEONATOS = "/api/campeonatos";
+const API_PARAMETROS = "/api/parametros";
 
 function isoHoy() {
   const d = new Date();
@@ -60,6 +61,13 @@ export default function App() {
   // recalcula cada vez que hay sesión — por eso hay que salir y volver a entrar para que se refleje un
   // cambio reciente). faltaHost: si quien entró puede gestionar Jugadores y no hay Host asignado todavía.
   const [hostInfo, setHostInfo] = useState({ esHost: false, faltaHost: false, proximaFecha: "" });
+  // 59ª entrega: interruptor de acceso al portal (Parámetros Generales, dentro de Tablero de Control).
+  // parametros === null mientras carga (o si la función aún no existe) — se trata igual que "portal
+  // encendido" para no dejar a nadie fuera por un error de red o un despliegue a medias.
+  const [parametros, setParametros] = useState(null);
+  // en la pantalla de mantenimiento, deja al administrador "colarse" al formulario de login normal —
+  // el interruptor vive dentro del sitio, así que un administrador SIEMPRE necesita poder entrar.
+  const [mostrarLoginAdmin, setMostrarLoginAdmin] = useState(false);
 
   useEffect(() => {
     const onPop = () => setRuta(window.location.pathname);
@@ -85,6 +93,7 @@ export default function App() {
       // localStorage no disponible — se pedirá login normalmente
     }
     cargarPerfiles();
+    cargarParametros();
   }, []);
 
   // mientras hay sesión activa, cualquier interacción del usuario marca actividad; cada minuto se
@@ -162,6 +171,15 @@ export default function App() {
       .finally(() => setPerfilesLoading(false));
   }
 
+  function cargarParametros() {
+    // "best effort" a propósito — si falla o la función no existe todavía, parametros se queda en null
+    // y se trata como portal encendido (ver comentario en el estado de arriba).
+    fetch(API_PARAMETROS)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => setParametros(json))
+      .catch(() => setParametros(null));
+  }
+
   function esAdmin(rol) {
     return rol === "Administrador General" || rol === "Administrador";
   }
@@ -205,7 +223,9 @@ export default function App() {
     irARuta("/");
   }
 
-  if (ruta === "/registro" && !session) {
+  // el autorregistro crea cuentas nuevas de "Jugador" — con el portal apagado tampoco tiene sentido
+  // dejar que alguien se registre, así que también ve el aviso de mantenimiento en vez del formulario.
+  if (ruta === "/registro" && !session && parametros?.portalActivo !== false) {
     return (
       <>
         <Decor />
@@ -243,12 +263,60 @@ export default function App() {
     );
   }
 
+  const portalApagado = parametros?.portalActivo === false;
+
+  // portal apagado y todavía no hay sesión: se muestra el aviso de mantenimiento en vez del login,
+  // salvo que alguien pida explícitamente entrar como administrador (el interruptor solo se puede
+  // volver a encender desde dentro del sitio, así que un administrador siempre necesita poder entrar).
+  if (!session && portalApagado && !mostrarLoginAdmin) {
+    return (
+      <>
+        <Decor />
+        <VersionBadge />
+        <div className="login-shell">
+          <div className="login-card">
+            <div className="login-eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
+            <div className="login-title">Portal en mantenimiento</div>
+            <p className="section-sub" style={{ textAlign: "center" }}>{parametros?.mensajeMantenimiento}</p>
+            <div className="login-hint">
+              <button type="button" className="link-btn" onClick={() => setMostrarLoginAdmin(true)}>
+                ¿Eres administrador? Inicia sesión aquí
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   if (!session) {
     return (
       <>
         <Decor />
         <VersionBadge />
         <Login perfiles={perfiles} onLogin={handleLogin} />
+      </>
+    );
+  }
+
+  // ya hay sesión, pero el portal está apagado y quien entró no es administrador: se corta el paso al
+  // resto del sitio con el mismo aviso — no se cierra la sesión (si el administrador vuelve a encender
+  // el portal, basta con recargar para recuperar el acceso, sin tener que iniciar sesión de nuevo).
+  if (portalApagado && !esAdmin(session.rol)) {
+    return (
+      <>
+        <Decor />
+        <VersionBadge />
+        <div className="login-shell">
+          <div className="login-card">
+            <div className="login-eyebrow">♣ Torrente On Line Series - TOLS 3.0</div>
+            <div className="login-title">Portal en mantenimiento</div>
+            <p className="section-sub" style={{ textAlign: "center" }}>{parametros?.mensajeMantenimiento}</p>
+            <div className="login-hint">
+              <button type="button" className="link-btn" onClick={handleLogout}>Salir</button>
+            </div>
+          </div>
+        </div>
       </>
     );
   }
@@ -271,6 +339,13 @@ export default function App() {
       <VersionBadge />
       <div className="wrap">
         <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} esHost={hostInfo.esHost} />
+        {portalApagado && (
+          <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
+            ⚠ El portal está APAGADO para los jugadores (modo mantenimiento) — solo los administradores
+            pueden entrar en este momento. Enciéndelo desde Tablero de Control · Parámetros Generales
+            cuando quieras abrir el acceso de nuevo.
+          </div>
+        )}
         {hostInfo.faltaHost && (
           <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
             ⚠ No hay Host asignado para el próximo torneo ({hostInfo.proximaFecha}). Sin Host no se puede

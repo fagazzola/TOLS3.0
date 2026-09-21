@@ -483,6 +483,19 @@ export function syncCierres(registros) {
   });
 }
 
+// 59ª entrega: "Parametros_Generales" es una hoja nueva que el sitio arma sola (como las de Game
+// Night) — Federico nunca la arma a mano, así que siempre se reescribe el encabezado completo.
+export function syncParametros(data) {
+  return safe(async () => {
+    await asegurarHoja("Parametros_Generales", ["Parámetro", "Valor"]);
+    const filas = [
+      ["Portal activo", data.portalActivo ? "Sí" : "No"],
+      ["Mensaje de mantenimiento", data.mensajeMantenimiento || ""],
+    ];
+    await writeSheetTable("Parametros_Generales", filas, { maxRows: 20 });
+  });
+}
+
 export function syncPerfiles(data) {
   return safe(async () => {
     // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el

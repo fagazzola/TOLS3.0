@@ -102,10 +102,16 @@ async function graphFetch(pathSuffix, options = {}) {
 
 // escribe una tabla completa en una hoja: limpia un rango amplio (para que filas que ya no existen no
 // se queden con datos viejos) y escribe los valores nuevos a partir de startRow. No toca el encabezado.
-async function writeSheetTable(sheetName, values, { startRow = 2, maxRows = 400 } = {}) {
+// `minClearCols` (58ª entrega): cuando una hoja pierde columnas de una entrega a otra (ej.
+// Cobranza_Resumen, que dejó de mandar Cuenta/Banco/Tipo de Cuenta), el rango que se limpia por default
+// solo cubre las columnas que se van a escribir AHORA — las columnas viejas que quedaron más a la
+// derecha (con el pago/depósito/saldo corrido, en este caso) nunca se tocarían y se quedarían con datos
+// obsoletos para siempre. Pasar `minClearCols` fuerza a limpiar por lo menos esa cantidad de columnas,
+// aunque se estén escribiendo menos.
+async function writeSheetTable(sheetName, values, { startRow = 2, maxRows = 400, minClearCols = 0 } = {}) {
   const numCols = values[0] ? values[0].length : 1;
   const lastCol = colLetter(numCols);
-  const clearRange = `A${startRow}:${lastCol}${startRow + maxRows - 1}`;
+  const clearRange = `A${startRow}:${colLetter(Math.max(numCols, minClearCols))}${startRow + maxRows - 1}`;
   const sheet = encodeURIComponent(sheetName);
 
   await graphFetch(`/workbook/worksheets('${sheet}')/range(address='${clearRange}')/clear`, {
@@ -386,7 +392,12 @@ export function syncJugadores(jugadores) {
 // las vuelve a escribir completas con los valores ya calculados.
 export function syncCobranza({ resumenRows, movimientoRows }) {
   return safe(async () => {
-    await writeSheetTable("Cobranza_Resumen", resumenRows);
+    // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de esta hoja — esos datos ya viven
+    // (y se editan) solo en la hoja "Jugadores" (ver `filasJugadoresUnificadas()` más abajo). `resumenRows`
+    // ya no trae esas 3 columnas (ver `filasParaExcel()` en cobranza.js), pero `minClearCols: 8` asegura
+    // que las columnas C/D/E, que hasta la 57ª entrega tenían esos datos (y F/G/H el pago/depósito/saldo
+    // corrido), queden vacías en vez de con lo último que se alcanzó a escribir ahí.
+    await writeSheetTable("Cobranza_Resumen", resumenRows, { minClearCols: 8 });
     await writeSheetTable("Cobranza", movimientoRows);
   });
 }

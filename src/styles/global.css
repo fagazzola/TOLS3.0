@@ -282,6 +282,14 @@ h1 {
 .right { text-align: right; }
 .muted { opacity: 0.6; }
 
+/* 58ª entrega: link discreto en texto (sin fondo ni borde) para acciones secundarias dentro de una fila
+   de controles — ej. "Mostrar todos" junto al combo de campeonato de Game Night. */
+.btn-link {
+  background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+  color: var(--ink-soft); text-decoration: underline; font-family: inherit;
+}
+.btn-link:hover { color: var(--ink); }
+
 .badge { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; display: inline-block; }
 .badge-main { color: var(--burgundy); background: color-mix(in srgb, var(--burgundy) 14%, transparent); border-color: color-mix(in srgb, var(--burgundy) 30%, transparent); }
 .badge-regular { color: var(--ink-soft); background: var(--surface-2); }

@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/cobranza.json";
-import { syncCobranza, syncCierres, celdaTexto } from "./lib/msgraph.js";
+import { syncCobranza, syncCierres } from "./lib/msgraph.js";
 import { conMontos, resumenPorJugador, tieneAdeudoBloqueante } from "../../src/lib/cobranza.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -128,12 +128,15 @@ async function respuestaCompleta(data) {
 }
 
 function filasParaExcel({ movimientos, resumen }) {
+  // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de "Cobranza_Resumen" — ese dato
+  // (con el fix de la 56ª, `celdaTexto()`) ya solo vive en la hoja "Jugadores"
+  // (`filasJugadoresUnificadas()` en msgraph.js), que es donde se edita desde Mi Perfil/Cobranza. Tenerlo
+  // en dos hojas era justo lo que Federico no quería. `syncCobranza()` en msgraph.js limpia las columnas
+  // C/D/E que antes ocupaban estos tres campos (`minClearCols: 8`) para que no se queden con el último
+  // valor que alcanzaron a tener.
   const resumenRows = Object.values(resumen)
     .sort((a, b) => a.nombre.localeCompare(b.nombre))
-    // 56ª entrega: `celdaTexto()` antepone un apóstrofo a la CLABE/Tarjeta (puros dígitos) para que
-    // Excel la guarde como texto en vez de convertirla a número y mostrarla en notación científica —
-    // ver la nota junto a `celdaTexto()` en msgraph.js.
-    .map((r) => [r.correo, r.nombre, celdaTexto(r.cuenta), r.banco, r.tipoCuenta, r.pago, r.deposito, r.saldo]);
+    .map((r) => [r.correo, r.nombre, r.pago, r.deposito, r.saldo]);
   const movimientoRows = [...movimientos]
     .sort((a, b) => (a.campeonato + a.fecha).localeCompare(b.campeonato + b.fecha))
     .map((m) => [

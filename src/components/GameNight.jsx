@@ -53,6 +53,15 @@ export default function GameNight({ session, perfiles, esHost }) {
   const [pendientes, setPendientes] = useState(new Set());
   const [concluirModal, setConcluirModal] = useState(false);
   const [reiniciarModal, setReiniciarModal] = useState(false);
+  // 58ª entrega: Federico reportó que, con una partida pendiente por orden cronológico (`bloqueante`),
+  // el combo de campeonato/práctica solo dejaba ver esa una opción — así que si lo que necesitaba
+  // reiniciar/corregir era OTRO torneo (ej. una práctica ya jugada, mezclada con datos viejos, que no es
+  // la que bloquea ahora mismo), no había forma de llegar a esa pantalla para usar "Reiniciar este
+  // torneo", aunque el servidor sí permite esa acción sobre cualquier torneo (bloqueado o no). Este
+  // interruptor, oculto salvo cuando hay `bloqueante`, revela el combo completo para poder navegar a
+  // cualquier campeonato/práctica con fines de corrección — la restricción de la 51ª/52ª entrega (guiar
+  // el orden real de juego) se mantiene por default, apagada.
+  const [mostrarTodos, setMostrarTodos] = useState(false);
   // 50ª/51ª entrega: cola de guardado para las acciones "ágiles" (Buy-in/Re-buys/Add-on/Amonestado/
   // checkin). En la 50ª entrega esta cola era UNA POR CONTROL (`rebuy:correo`, `addon:correo`, etc.),
   // lo que dejaba que dos acciones DISTINTAS (ej. un Re-buy de un jugador y un Add-on de otro) se
@@ -154,11 +163,11 @@ export default function GameNight({ session, perfiles, esHost }) {
   // partida de práctica con fecha anterior mientras la pantalla ya estaba abierta en el Regular), lo
   // regresa solo al que sí corresponde jugar primero.
   useEffect(() => {
-    if (bloqueante && campeonatoSel && campeonatoSel !== bloqueante.campeonato) {
+    if (bloqueante && !mostrarTodos && campeonatoSel && campeonatoSel !== bloqueante.campeonato) {
       setCampeonatoSel(bloqueante.campeonato);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bloqueante]);
+  }, [bloqueante, mostrarTodos]);
   const toleranciaMin = tableroMapa?.[campeonatoSel]?.toleranciaCheckinMin ?? 10;
   const recomprasMax = recomprasMaxEfectivo(tableroMapa, campeonatoSel);
 
@@ -505,13 +514,18 @@ export default function GameNight({ session, perfiles, esHost }) {
           siendo un combo. */}
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20, flexWrap: "wrap", alignItems: "center" }}>
         <select className="field" style={{ maxWidth: 220 }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
-          {/* 51ª entrega: mientras haya una partida pendiente por orden cronológico (`bloqueante`), el
+          {/* 51ª/52ª entrega: mientras haya una partida pendiente por orden cronológico (`bloqueante`), el
               combo muestra SOLO esa opción — ya no se listan las demás deshabilitadas. Antes, con todas
               visibles (aunque disabled), el campeonato activo seguía "apareciendo" en el combo y podía
               confundir; ahora no hay forma de ver ni de intentar elegir nada que no sea lo que toca jugar
               primero. En cuanto esa partida queda "Concluida", `bloqueante` pasa a `null` y el combo
-              vuelve a mostrar todos los campeonatos + práctica, para poder revisar cualquiera. */}
-          {bloqueante ? (
+              vuelve a mostrar todos los campeonatos + práctica, para poder revisar cualquiera.
+              58ª entrega: Federico reportó que esto le impedía llegar a OTRO torneo (ej. una práctica ya
+              jugada, no la que bloquea ahora mismo) para usar "Reiniciar este torneo" ahí — el servidor sí
+              permite esa acción sobre cualquier torneo, bloqueado o no, pero el combo no dejaba ni
+              seleccionarlo. `mostrarTodos` (el link de abajo) revela la lista completa sin quitar la
+              restricción por default. */}
+          {bloqueante && !mostrarTodos ? (
             <option value={bloqueante.campeonato}>
               {bloqueante.campeonato === PRACTICA_CAMPEONATO
                 ? "🎯 Partidas de práctica"
@@ -534,6 +548,18 @@ export default function GameNight({ session, perfiles, esHost }) {
             {bloqueante.campeonato === PRACTICA_CAMPEONATO ? " (práctica)" : ` (${bloqueante.campeonato})`} —
             por eso el combo solo deja elegir esa por ahora.
           </span>
+        )}
+        {bloqueante && (
+          <button
+            type="button"
+            className="btn-link"
+            style={{ fontSize: 12.5 }}
+            onClick={() => setMostrarTodos((v) => !v)}
+          >
+            {mostrarTodos
+              ? "Volver a mostrar solo la pendiente"
+              : "¿Necesitas reiniciar o corregir otro torneo? Mostrar todos"}
+          </button>
         )}
         {fechaSel ? (
           <>

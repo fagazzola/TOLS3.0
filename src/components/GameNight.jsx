@@ -1,6 +1,57 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import { puedeEditar } from "../lib/permisos.js";
 import { estadoTorneo, tipoDeFecha, PRACTICA_CAMPEONATO, recomprasMaxEfectivo, torneoBloqueante } from "../lib/gamenight.js";
+
+// 63ª entrega: Federico puede pedirle a PokerStars, después de cada torneo, un Excel de resultados
+// ("Tournament_<id>.xlsx") con una fila por jugador. Trae dos filas de encabezado (una arriba con
+// nombres de columna genéricos como "Award"/"Num", y una debajo que aclara el detalle real de esa
+// columna para varias de ellas) y después una fila por jugador ya jugado. Esta función busca esas dos
+// filas de encabezado (por si PokerStars llega a mover de lugar las columnas en otro formato de
+// exportación) y arma, por cada jugador, `{ alias, place, rebuys, addon }` — sin tocar nada del sitio
+// todavía; el resto (matchear contra los Jugadores del sitio y mandar la importación) lo hace
+// `abrirImportarResultados`/`confirmarImportar` en el componente.
+function leerExcelResultadosPokerStars(filas) {
+  let filaHeader = -1;
+  let filaSubHeader = -1;
+  for (let i = 0; i < filas.length; i++) {
+    const fila = filas[i] || [];
+    const textos = fila.map((c) => String(c ?? "").trim().toLowerCase());
+    if (textos.includes("place") && textos.includes("user id")) {
+      filaHeader = i;
+      filaSubHeader = i + 1;
+      break;
+    }
+  }
+  if (filaHeader < 0) return { jugadores: [], error: 'No se encontraron las columnas "Place" / "User ID" en el archivo — ¿es el Excel de resultados que exporta PokerStars?' };
+
+  const header = (filas[filaHeader] || []).map((c) => String(c ?? "").trim().toLowerCase());
+  const sub = (filas[filaSubHeader] || []).map((c) => String(c ?? "").trim().toLowerCase());
+  const colPlace = header.indexOf("place");
+  const colAlias = header.indexOf("user id");
+  // Rebuys/Addons no tienen su propio encabezado en la fila principal (comparten "Num"/"Award" con
+  // otras columnas) — el nombre real está en la fila de abajo, así que se busca ahí.
+  const colRebuys = sub.findIndex((c) => c === "rebuys");
+  const colAddon = sub.findIndex((c) => c === "addons" || c === "addon");
+
+  const jugadores = [];
+  for (let i = filaSubHeader + 1; i < filas.length; i++) {
+    const fila = filas[i] || [];
+    const placeTexto = String(fila[colPlace] ?? "").replace(/ /g, " ").trim();
+    // Después de la última fila de jugador, PokerStars agrega un bloque "SUMMARY" con totales — ahí
+    // termina la lista de jugadores (todo lo que sigue son subtotales, no personas).
+    if (placeTexto.toLowerCase() === "summary") break;
+    const alias = String(fila[colAlias] ?? "").replace(/ /g, " ").trim();
+    const place = Number(placeTexto) || null;
+    // una fila real de jugador siempre trae un lugar numérico — si no lo tiene (fila en blanco, u otra
+    // fila de resumen que se haya colado) se descarta en vez de importarla como si fuera un jugador.
+    if (!alias || !place) continue;
+    const rebuys = colRebuys >= 0 ? Number(String(fila[colRebuys] ?? "").trim()) || 0 : 0;
+    const addon = colAddon >= 0 ? Number(String(fila[colAddon] ?? "").trim()) === 1 : false;
+    jugadores.push({ alias, place, rebuys, addon });
+  }
+  return { jugadores, error: jugadores.length ? "" : "El archivo no trae ningún jugador reconocible." };
+}
 
 function nombreCorto(j) {
   return (j.aliasPokerStars || "").trim() || j.nombre;
@@ -53,11 +104,19 @@ export default function GameNight({ session, perfiles, esHost }) {
   const [pendientes, setPendientes] = useState(new Set());
   const [concluirModal, setConcluirModal] = useState(false);
   const [reiniciarModal, setReiniciarModal] = useState(false);
-  // 62ª entrega: manipular Re-buys/Add-on/Kill/Lugar/Amonestación/Mejor mano fila por fila directo en
-  // la tabla larga era muy poco práctico para el Host (mucho scroll horizontal, controles chiquitos) —
-  // Federico pidió que toda esa edición se mueva a un modal dedicado, invocado con un botón, y que la
-  // tabla de la pantalla se quede solo mostrando datos (sin controles), más limpia.
-  const [editorAbierto, setEditorAbierto] = useState(false);
+  // 63ª entrega: "Importar resultados (Excel)" — Federico consigue de PokerStars, después de cada
+  // torneo, un Excel con Buy-in/Re-buys/Add-on por jugador y quiere que ese archivo actualice de un
+  // solo click la tabla de "Jugadores habilitados" (en vez de ir marcando Re-buys/Add-on uno por uno
+  // durante la partida). El Host solo sigue tocando Killer y Mejor mano a mano. `importPreview` guarda
+  // el resultado ya matcheado contra los Jugadores del sitio, para que el Host lo revise antes de
+  // confirmar.
+  const [importPreview, setImportPreview] = useState(null); // { matched: [...], sinMatch: [...] }
+  const [importando, setImportando] = useState(false);
+  const [importError, setImportError] = useState("");
+  const importInputRef = useRef(null);
+  // 62ª entrega: se había movido toda la edición fila por fila a un modal dedicado ("Editar
+  // jugadores"), pero Federico lo probó y decidió que fue mala idea — la 63ª entrega lo quitó y la
+  // tabla de la pantalla volvió a tener todos sus controles editables, como antes de la 62ª.
   // 58ª entrega: Federico reportó que, con una partida pendiente por orden cronológico (`bloqueante`),
   // el combo de campeonato/práctica solo dejaba ver esa una opción — así que si lo que necesitaba
   // reiniciar/corregir era OTRO torneo (ej. una práctica ya jugada, mezclada con datos viejos, que no es
@@ -416,6 +475,59 @@ export default function GameNight({ session, perfiles, esHost }) {
   function moverLugar(j, nuevoLugar) {
     llamar({ accion: "moverLugar", correo: j.correo, lugar: Number(nuevoLugar) });
   }
+  function abrirImportarResultados() {
+    setImportError("");
+    importInputRef.current?.click();
+  }
+  async function onArchivoImportSeleccionado(e) {
+    const archivo = e.target.files?.[0];
+    e.target.value = ""; // permite volver a elegir el mismo archivo si hace falta reintentar
+    if (!archivo) return;
+    setImportError("");
+    setImportando(true);
+    try {
+      const buffer = await archivo.arrayBuffer();
+      const libro = XLSX.read(buffer, { type: "array" });
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: null });
+      const { jugadores, error } = leerExcelResultadosPokerStars(filas);
+      if (error) {
+        setImportError(error);
+        return;
+      }
+      const norm = (s) => (s || "").trim().toLowerCase();
+      const matched = [];
+      const sinMatch = [];
+      for (const fila of jugadores) {
+        const sitio = jugadoresSitio.find((j) => norm(nombreCorto(j)) === norm(fila.alias) || norm(j.aliasPokerStars) === norm(fila.alias));
+        if (sitio) {
+          matched.push({ correo: sitio.correo, nombre: sitio.nombre, alias: fila.alias, place: fila.place, rebuys: fila.rebuys, addon: fila.addon });
+        } else {
+          sinMatch.push(fila.alias);
+        }
+      }
+      setImportPreview({ matched, sinMatch });
+    } catch (err) {
+      setImportError("No se pudo leer el archivo. ¿Seguro que es un .xlsx exportado de PokerStars?");
+    } finally {
+      setImportando(false);
+    }
+  }
+  async function confirmarImportar() {
+    if (!importPreview?.matched?.length) return;
+    setImportando(true);
+    try {
+      await llamar({
+        accion: "importarResultados",
+        jugadores: importPreview.matched.map(({ correo, nombre, rebuys, addon, place }) => ({ correo, nombre, rebuys, addon, place })),
+      });
+      setImportPreview(null);
+    } catch (err) {
+      // el error ya queda reflejado en `error` por `llamar()`/`procesarColaGlobal`
+    } finally {
+      setImportando(false);
+    }
+  }
   async function confirmarConcluir() {
     await llamar({ accion: "concluir" });
     setConcluirModal(false);
@@ -452,8 +564,6 @@ export default function GameNight({ session, perfiles, esHost }) {
   }
 
   const lugaresPago = estado.numLugaresPago || 0;
-  const burbujaNombre = estado.burbujaCorreo ? nombrePorCorreo(estado.burbujaCorreo) : "";
-  const campeonNombre = estado.campeon ? nombrePorCorreo(estado.campeon) : "";
 
   // 51ª entrega: bloque de totales de Buy-in/Re-buys/Add-on que pidió Federico para que el Host pueda
   // validar rápido, de un vistazo, cuánto lleva cobrado/registrado en la mesa sin tener que sumar la
@@ -720,20 +830,6 @@ export default function GameNight({ session, perfiles, esHost }) {
             </div>
           )}
 
-          {/* ───────── Subtotales de la partida ───────── */}
-          {/* 62ª entrega: "Bolsa total" y "Jugadores en juego" se movieron al recuadro de "Totales de la
-              mesa" de arriba (con más énfasis visual) — aquí solo quedan Burbuja y Campeón. */}
-          <div className="stats gn-stats-row" style={{ margin: "20px 0" }}>
-            <div className="stat">
-              <div className="stat-label">Burbuja</div>
-              <div className="stat-value" style={{ fontSize: 16 }}>{burbujaNombre || "—"}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Campeón</div>
-              <div className="stat-value" style={{ fontSize: 16 }}>{campeonNombre || "En juego"}</div>
-            </div>
-          </div>
-
           {/* ───────── Jugadores habilitados (check-in) ─────────
               53ª entrega: el rol Jugador ya no ve esta misma tabla completa con los botones
               deshabilitados — Federico pidió un espejo simplificado, de solo lectura, con solo las 6
@@ -742,185 +838,37 @@ export default function GameNight({ session, perfiles, esHost }) {
               54ª entrega: la columna/botón de sacar a un jugador del torneo se renombró de
               "Eliminar" a "Killer" (encabezado) / "Kill" (botón y modal) en toda la pantalla del Host —
               ya lo tenía la vista Jugador desde la 53ª.
-              62ª entrega: Federico reportó que manipular todo por lote (Re-buys, Add-on, Kill, Lugar,
-              Amonestación, Mejor mano) directo en esta tabla, fila por fila, era muy poco práctico
-              (mucho scroll horizontal, controles chiquitos). Toda esa edición se movió a un modal
-              dedicado ("Editar jugadores", más abajo) — esta tabla, la que se ve siempre en pantalla
-              para el Host, ahora solo MUESTRA los mismos datos, sin ningún control, quedando más limpia
-              (mismas 11 columnas de siempre, mismo orden). */}
+              63ª entrega: Federico probó el modal "Editar jugadores" de la 62ª entrega y decidió que fue
+              mala idea ("Elimina el artefacto, fue mala idea") — se quitó, y esta tabla vuelve a ser la
+              única y a tener todos los controles editables directo en la fila, como antes de la 62ª.
+              Además, ahora que Federico puede importar Buy-in/Re-buys/Add-on/Lugar desde el Excel de
+              resultados de PokerStars (botón "Importar resultados (Excel)" en el encabezado de esta
+              sección — el lugar que trae el archivo se usa tal cual, reemplazando cualquier orden de
+              salida armado a mano), esos campos normalmente ya vienen resueltos por la importación, pero
+              los controles (Kill/Lugar/Buy-in/Re-buys/Add-on) se dejan disponibles por si hace falta una
+              corrección manual puntual. Mejor mano sigue siendo exclusivamente manual, no viene en el
+              archivo de PokerStars. */}
           {editable ? (
           <div className="section">
             <div className="section-head">
               <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
               <button
                 type="button"
-                className="btn btn-primary btn-filtro"
-                disabled={habilitados.length === 0}
-                onClick={() => setEditorAbierto(true)}
+                className="btn btn-secondary btn-filtro"
+                disabled={!editableAhora || guardando}
+                onClick={abrirImportarResultados}
               >
-                ✏️ Editar jugadores
+                📥 Importar resultados (Excel)
               </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx"
+                style={{ display: "none" }}
+                onChange={onArchivoImportSeleccionado}
+              />
             </div>
-            <div className="tbl">
-              <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
-                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
-              </div>
-              {habilitados.map((j) => {
-                const gn = j.gn || {};
-                const eliminado = Boolean(gn.lugar) && !gn.esCampeon;
-                return (
-                  <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }} key={j.correo}>
-                    <div>
-                      {nombreCorto(j)}
-                      {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
-                      {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
-                    </div>
-                    <div style={{ fontSize: 13 }}>
-                      {hora(gn.horaCheckin)} · {gn.manual ? "Manual" : "Usuario"}
-                      {gn.amonestado && <span title="Perdió el punto de asistencia"> · ⚠ Amonestado</span>}
-                    </div>
-                    <div>{gn.buyIn ? "Sí" : "No"}</div>
-                    <div className="num">{gn.rebuys || 0}</div>
-                    <div>{gn.addon ? "Sí" : "No"}</div>
-                    <div>
-                      {eliminado ? (gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—") : <span className="muted">En juego</span>}
-                    </div>
-                    <div>
-                      {gn.esCampeon ? (
-                        <span className="badge badge-campeon">1</span>
-                      ) : eliminado ? (
-                        <span className="badge badge-regular">Lugar {gn.lugar}</span>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </div>
-                    <div>{gn.mejorMano ? "Sí" : "No"}</div>
-                    <div className="num right">{money(gn.debeTotal)}</div>
-                    <div className="num right">{gn.premioTotal > 0 ? money(gn.premioTotal) : "—"}</div>
-                    <div className="num right">{gn.puntos ?? 0}</div>
-                  </div>
-                );
-              })}
-              {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
-            </div>
-          </div>
-          ) : (
-            <div className="section">
-              <div className="section-head">
-                <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
-              </div>
-              <div className="tbl">
-                <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }}>
-                  <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buy</div><div>Add-on</div><div>Killer</div><div>Puntos</div>
-                </div>
-                {habilitados.map((j) => {
-                  const gn = j.gn || {};
-                  const eliminado = Boolean(gn.lugar) && !gn.esCampeon;
-                  return (
-                    <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }} key={j.correo}>
-                      <div>
-                        {nombreCorto(j)}
-                        {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
-                        {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
-                      </div>
-                      <div>
-                        {gn.amonestado ? (
-                          <span className="tarjeta-amarilla" title="Activado manualmente por el Host — amonestado, pierde el punto de asistencia" />
-                        ) : (
-                          "Auto"
-                        )}
-                      </div>
-                      <div className="num">{gn.buyIn ? 1 : 0}</div>
-                      <div className="num">{gn.rebuys || 0}</div>
-                      <div className="num">{gn.addon ? 1 : 0}</div>
-                      <div>
-                        {eliminado ? (gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—") : <span className="muted">En juego</span>}
-                      </div>
-                      <div className="num right">{gn.puntos ?? 0}</div>
-                    </div>
-                  );
-                })}
-                {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
-              </div>
-            </div>
-          )}
-
-          {/* ───────── Jugadores sin check-in ───────── */}
-          {/* 60ª entrega: exclusiva del Host/Admin — el rol Jugador no necesita verla (es información
-              operativa para activar manualmente a alguien, no algo que le importe a un jugador). */}
-          {editable && (
-          <div className="section">
-            <div className="section-head">
-              <div className="section-title">Jugadores sin check-in <span className="section-title-campeonato">· {deshabilitados.length}</span></div>
-              {editableAhora && seleccionados.size > 0 && (
-                <button className="btn btn-primary btn-filtro" disabled={guardando} onClick={pedirActivarSeleccionados}>
-                  Activar seleccionados ({seleccionados.size})
-                </button>
-              )}
-            </div>
-            <div className="section-sub" style={{ marginTop: 0 }}>
-              No pueden ver el estatus de la partida en el sitio hasta que hagan check-in. Si un jugador ya
-              está jugando el torneo en PokerStars sin haber hecho su check-in, el Host puede activarlo
-              manualmente aquí (uno por uno, o seleccionando varios a la vez). El tiempo de tolerancia
-              ({toleranciaMin} min desde la hora programada) es solo informativo — si el Host considera que
-              corresponde una amonestación, la marca a mano desde la columna de Check-in de la tabla de
-              arriba.
-            </div>
-            <div className="tbl">
-              <div className="trow thead" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }}>
-                <div>
-                  {editableAhora && deshabilitados.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={seleccionados.size === deshabilitados.length}
-                      onChange={toggleSeleccionarTodos}
-                      title="Seleccionar todos"
-                    />
-                  )}
-                </div>
-                <div>Jugador</div><div>Correo</div><div />
-              </div>
-              {deshabilitados.map((j) => (
-                <div className="trow" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }} key={j.correo}>
-                  <div>
-                    {editableAhora && (
-                      <input type="checkbox" checked={seleccionados.has(j.correo)} onChange={() => toggleSeleccionado(j.correo)} />
-                    )}
-                  </div>
-                  <div>{nombreCorto(j)}</div>
-                  <div style={{ fontSize: 12 }}>{j.correo}</div>
-                  <div>
-                    {editableAhora && (
-                      <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirActivar(j)}>
-                        Activar (manual)
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {deshabilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todos los jugadores activos de la liga ya hicieron check-in.</div>}
-            </div>
-          </div>
-          )}
-        </>
-      )}
-
-      {/* ───────── Modal "Editar jugadores" (62ª entrega) ─────────
-          Toda la edición fila por fila (Buy-in, Re-buys, Add-on, Kill, Lugar, Amonestación, Mejor mano,
-          quitar check-in) que antes vivía directo en la tabla de la pantalla ahora vive aquí — Federico
-          pidió esto porque manipular por lote desde la tabla larga era poco práctico. Es exactamente la
-          misma tabla y las mismas acciones de siempre (mismo `editableAhora`, mismos `onClick`), solo que
-          dentro de un modal aparte que se abre con el botón "✏️ Editar jugadores"; la tabla de la
-          pantalla (arriba) se quedó solo mostrando datos. */}
-      {editorAbierto && editable && (
-        <div className="modal-backdrop" onClick={() => setEditorAbierto(false)}>
-          <div className="modal-card modal-card-xwide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">Editar jugadores en juego</div>
-            {!editableAhora && (
-              <div className="section-sub" style={{ marginTop: -10 }}>
-                Este torneo ya está "Concluido" — los controles de abajo quedan solo de consulta.
-              </div>
-            )}
+            {importError && <div className="section-sub" style={{ color: "#b00020" }}>{importError}</div>}
             <div className="tbl" style={{ overflowX: "auto" }}>
               <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr", minWidth: 900 }}>
                 <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
@@ -1045,8 +993,144 @@ export default function GameNight({ session, perfiles, esHost }) {
               })}
               {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
             </div>
+          </div>
+          ) : (
+            <div className="section">
+              <div className="section-head">
+                <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
+              </div>
+              <div className="tbl">
+                <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }}>
+                  <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buy</div><div>Add-on</div><div>Killer</div><div>Puntos</div>
+                </div>
+                {habilitados.map((j) => {
+                  const gn = j.gn || {};
+                  const eliminado = Boolean(gn.lugar) && !gn.esCampeon;
+                  return (
+                    <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.3fr 1fr 0.7fr 0.9fr 0.7fr 1fr 0.7fr" }} key={j.correo}>
+                      <div>
+                        {nombreCorto(j)}
+                        {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
+                        {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
+                      </div>
+                      <div>
+                        {gn.amonestado ? (
+                          <span className="tarjeta-amarilla" title="Activado manualmente por el Host — amonestado, pierde el punto de asistencia" />
+                        ) : (
+                          "Auto"
+                        )}
+                      </div>
+                      <div className="num">{gn.buyIn ? 1 : 0}</div>
+                      <div className="num">{gn.rebuys || 0}</div>
+                      <div className="num">{gn.addon ? 1 : 0}</div>
+                      <div>
+                        {eliminado ? (gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—") : <span className="muted">En juego</span>}
+                      </div>
+                      <div className="num right">{gn.puntos ?? 0}</div>
+                    </div>
+                  );
+                })}
+                {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* ───────── Jugadores sin check-in ───────── */}
+          {/* 60ª entrega: exclusiva del Host/Admin — el rol Jugador no necesita verla (es información
+              operativa para activar manualmente a alguien, no algo que le importe a un jugador). */}
+          {editable && (
+          <div className="section">
+            <div className="section-head">
+              <div className="section-title">Jugadores sin check-in <span className="section-title-campeonato">· {deshabilitados.length}</span></div>
+              {editableAhora && seleccionados.size > 0 && (
+                <button className="btn btn-primary btn-filtro" disabled={guardando} onClick={pedirActivarSeleccionados}>
+                  Activar seleccionados ({seleccionados.size})
+                </button>
+              )}
+            </div>
+            <div className="section-sub" style={{ marginTop: 0 }}>
+              No pueden ver el estatus de la partida en el sitio hasta que hagan check-in. Si un jugador ya
+              está jugando el torneo en PokerStars sin haber hecho su check-in, el Host puede activarlo
+              manualmente aquí (uno por uno, o seleccionando varios a la vez). El tiempo de tolerancia
+              ({toleranciaMin} min desde la hora programada) es solo informativo — si el Host considera que
+              corresponde una amonestación, la marca a mano desde la columna de Check-in de la tabla de
+              arriba.
+            </div>
+            <div className="tbl">
+              <div className="trow thead" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }}>
+                <div>
+                  {editableAhora && deshabilitados.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={seleccionados.size === deshabilitados.length}
+                      onChange={toggleSeleccionarTodos}
+                      title="Seleccionar todos"
+                    />
+                  )}
+                </div>
+                <div>Jugador</div><div>Correo</div><div />
+              </div>
+              {deshabilitados.map((j) => (
+                <div className="trow" style={{ gridTemplateColumns: "40px 1.6fr 1.6fr 160px" }} key={j.correo}>
+                  <div>
+                    {editableAhora && (
+                      <input type="checkbox" checked={seleccionados.has(j.correo)} onChange={() => toggleSeleccionado(j.correo)} />
+                    )}
+                  </div>
+                  <div>{nombreCorto(j)}</div>
+                  <div style={{ fontSize: 12 }}>{j.correo}</div>
+                  <div>
+                    {editableAhora && (
+                      <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirActivar(j)}>
+                        Activar (manual)
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {deshabilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todos los jugadores activos de la liga ya hicieron check-in.</div>}
+            </div>
+          </div>
+          )}
+        </>
+      )}
+
+      {importPreview && (
+        <div className="modal-backdrop" onClick={() => !importando && setImportPreview(null)}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">Importar resultados de PokerStars</div>
+            <div className="section-sub" style={{ marginTop: -10 }}>
+              Se van a marcar Buy-in, Re-buys, Add-on y Lugar (y check-in, si no lo tenían) de {importPreview.matched.length}{" "}
+              jugador{importPreview.matched.length === 1 ? "" : "es"} encontrados en el archivo, según el lugar final que
+              trae el propio archivo — reemplaza cualquier orden de salida que hubiera antes en esta partida. Mejor mano no
+              se toca — eso lo sigue marcando el Host a mano en la tabla.
+            </div>
+            <div className="tbl" style={{ maxHeight: 300, overflowY: "auto" }}>
+              <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.6fr 0.8fr 0.8fr" }}>
+                <div>Jugador</div><div>Lugar</div><div>Re-buys</div><div>Add-on</div>
+              </div>
+              {importPreview.matched.map((m) => (
+                <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.6fr 0.8fr 0.8fr" }} key={m.correo}>
+                  <div>{m.nombre || m.alias}</div>
+                  <div className="num">{m.place ?? "—"}</div>
+                  <div className="num">{m.rebuys || 0}</div>
+                  <div>{m.addon ? "Sí" : "No"}</div>
+                </div>
+              ))}
+              {importPreview.matched.length === 0 && (
+                <div className="section-sub" style={{ padding: 16 }}>Ningún alias del archivo coincide con un jugador del sitio.</div>
+              )}
+            </div>
+            {importPreview.sinMatch.length > 0 && (
+              <div className="section-sub">
+                No se encontraron en el sitio (revisa el Alias PokerStars en Jugadores): {importPreview.sinMatch.join(", ")}
+              </div>
+            )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setEditorAbierto(false)}>Cerrar</button>
+              <button className="btn btn-secondary" disabled={importando} onClick={() => setImportPreview(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={importando || importPreview.matched.length === 0} onClick={confirmarImportar}>
+                {importando ? "Importando…" : "Confirmar importación"}
+              </button>
             </div>
           </div>
         </div>

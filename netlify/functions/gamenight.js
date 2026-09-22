@@ -315,6 +315,48 @@ export default async (req) => {
           actualizado: ahora,
         });
       }
+    } else if (body.accion === "importarResultados") {
+      // 63ª entrega: Federico consigue de PokerStars, después de cada torneo, un Excel de resultados
+      // con Buy-in/Re-buys/Add-on/Lugar final por jugador — el cliente ya lo lee, lo matchea contra
+      // Jugadores del sitio (por Alias PokerStars) y manda aquí solo la lista ya resuelta. Se trata
+      // igual que un check-in masivo manual (crea o completa el check-in si hacía falta) pero además
+      // fija Re-buys y Add-on con el dato del archivo.
+      // Sobre el Lugar: Federico confirmó explícitamente que "los lugares que vienen en el archivo son
+      // los lugares reales que debes manejar en la hoja" — así que, a diferencia de la primera versión
+      // de esta acción, el Lugar de cada jugador importado SÍ se fija a partir del archivo, reemplazando
+      // cualquier orden de salida que hubiera antes en esta partida. Como el Lugar nunca se guarda
+      // suelto (siempre se deriva de `ordenEliminados`, ver `derivarPosiciones()` en
+      // src/lib/gamenight.js — el primer correo del arreglo es "el primero en salir", el último lugar 2,
+      // y quien no aparece ahí es el Campeón), se reconstruye ese arreglo ordenando a los jugadores
+      // importados de PEOR a MEJOR lugar (excluyendo al Campeón, lugar 1). Mejor mano no se toca — sigue
+      // siendo 100% manual del Host, el archivo de PokerStars no trae ese dato.
+      const lista = Array.isArray(body.jugadores) ? body.jugadores : [];
+      if (!lista.length) return new Response(JSON.stringify({ error: "No se encontró ningún jugador para importar." }), { status: 400, headers: HEADERS });
+      const conLugar = [];
+      for (const j of lista) {
+        const correo = String(j?.correo || "").trim().toLowerCase();
+        if (!correo) continue;
+        const place = Number(j.place) || null;
+        conLugar.push({ correo, place });
+        const previo = torneo.jugadores[correo];
+        torneo.jugadores[correo] = normalizarJugadorGN({
+          ...previo,
+          nombre: j.nombre || previo?.nombre || "",
+          checkin: true,
+          manual: previo?.manual ?? false,
+          amonestado: Boolean(previo?.amonestado),
+          horaCheckin: previo?.horaCheckin || ahora,
+          buyIn: true,
+          rebuys: Math.max(0, Number(j.rebuys) || 0),
+          addon: Boolean(j.addon),
+          actualizado: ahora,
+        });
+      }
+      const ordenNuevo = conLugar
+        .filter((x) => x.place && x.place > 1)
+        .sort((a, b) => b.place - a.place)
+        .map((x) => x.correo);
+      if (ordenNuevo.length) torneo.ordenEliminados = ordenNuevo;
     } else if (body.accion === "amonestar") {
       // 48ª entrega: toggle manual del Host — reemplaza el cálculo automático por tolerancia.
       const correo = String(body.correo || "").trim().toLowerCase();

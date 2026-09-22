@@ -53,6 +53,11 @@ export default function GameNight({ session, perfiles, esHost }) {
   const [pendientes, setPendientes] = useState(new Set());
   const [concluirModal, setConcluirModal] = useState(false);
   const [reiniciarModal, setReiniciarModal] = useState(false);
+  // 62ª entrega: manipular Re-buys/Add-on/Kill/Lugar/Amonestación/Mejor mano fila por fila directo en
+  // la tabla larga era muy poco práctico para el Host (mucho scroll horizontal, controles chiquitos) —
+  // Federico pidió que toda esa edición se mueva a un modal dedicado, invocado con un botón, y que la
+  // tabla de la pantalla se quede solo mostrando datos (sin controles), más limpia.
+  const [editorAbierto, setEditorAbierto] = useState(false);
   // 58ª entrega: Federico reportó que, con una partida pendiente por orden cronológico (`bloqueante`),
   // el combo de campeonato/práctica solo dejaba ver esa una opción — así que si lo que necesitaba
   // reiniciar/corregir era OTRO torneo (ej. una práctica ya jugada, mezclada con datos viejos, que no es
@@ -187,13 +192,16 @@ export default function GameNight({ session, perfiles, esHost }) {
 
   // Check-in de autoservicio: el propio jugador puede activarse a sí mismo (sin amonestación, nunca
   // se manda manual:true) — pero SOLO el día de la jugada según la fecha del Calendario, para que no
-  // se pueda "adelantar" a una fecha futura ni reactivarse en una pasada. Los roles con permiso de
-  // escritura (Host/Administrador) ya tienen su propio botón "Activar (manual)" en la tabla de abajo,
-  // así que este banner solo aparece para quien NO tiene ese permiso — el caso normal de un Jugador.
+  // se pueda "adelantar" a una fecha futura ni reactivarse en una pasada.
+  // 62ª entrega: Federico aclaró que el Host también es jugador y también necesita este mismo botón
+  // explícito — antes se ocultaba para cualquier rol con permiso de escritura (`!editable`), asumiendo
+  // que el Host siempre se activaría a sí mismo desde la tabla de "Jugadores sin check-in" (que manda
+  // `manual: true`, distinto). Ahora la única condición es tener una entrada real en Jugadores y que
+  // sea el día de la jugada — aplica igual para Jugador, Host o Administrador.
   const miCorreo = (session.usuario || "").trim().toLowerCase();
   const miEntrada = jugadoresSitio.find((j) => j.correo === miCorreo);
   const yaHiceCheckin = Boolean(torneoState.jugadores[miCorreo]?.checkin);
-  const puedoAutoCheckin = !editable && Boolean(miEntrada) && fechaSel === iso(new Date()) && !yaHiceCheckin && !torneoState.concluido;
+  const puedoAutoCheckin = Boolean(miEntrada) && fechaSel === iso(new Date()) && !yaHiceCheckin && !torneoState.concluido;
 
   function hacerMiCheckin() {
     if (!miEntrada) return;
@@ -552,16 +560,17 @@ export default function GameNight({ session, perfiles, esHost }) {
             por eso el combo solo deja elegir esa por ahora.
           </span>
         )}
+        {/* 62ª entrega: antes era un link de texto subrayado (parecía una URL) — Federico pidió un botón
+            real, del mismo estilo que el resto de los controles de esta fila. */}
         {editable && bloqueante && (
           <button
             type="button"
-            className="btn-link"
-            style={{ fontSize: 12.5 }}
+            className="btn btn-secondary btn-filtro"
             onClick={() => setMostrarTodos((v) => !v)}
           >
             {mostrarTodos
               ? "Volver a mostrar solo la pendiente"
-              : "¿Necesitas reiniciar o corregir otro torneo? Mostrar todos"}
+              : "¿Necesitas reiniciar o corregir otro torneo?"}
           </button>
         )}
         {fechaSel ? (
@@ -592,10 +601,14 @@ export default function GameNight({ session, perfiles, esHost }) {
                 {guardando ? "Un momento…" : "Check-in al Torneo"}
               </button>
             )}
+            {/* 62ª entrega: antes usaba `.btn-icon-remove` (pensado para un ✕ chiquito, no para un botón
+                con texto) — se veía en otro color y tipo de letra que el resto de los botones de esta
+                fila. Se homologó al mismo tipo de botón (`btn btn-filtro`), solo que en rojo (`btn-danger`)
+                para conservar la señal de que es una acción destructiva. */}
             {editable && (
               <button
-                className="btn-icon-remove"
-                style={{ marginLeft: "auto", width: "auto", padding: "4px 10px", fontSize: 11 }}
+                className="btn btn-danger btn-filtro"
+                style={{ marginLeft: "auto" }}
                 title="Borra por completo este torneo (jugadores, killers, lugares) y lo deja como si nunca se hubiera tocado"
                 disabled={guardando}
                 onClick={() => setReiniciarModal(true)}
@@ -648,10 +661,25 @@ export default function GameNight({ session, perfiles, esHost }) {
 
           {/* ───────── Totales de Buy-in/Re-buys/Add-on (bloque 2, 51ª entrega) — un solo recuadro con
               2 líneas (cantidades arriba, montos en $ abajo) para que el Host valide rápido cuánto lleva
-              registrado en la mesa, sin tener que sumar la tabla completa a mano. ───────── */}
+              registrado en la mesa, sin tener que sumar la tabla completa a mano.
+              62ª entrega: Federico pidió mejorar el diseño y sumar, en el mismo recuadro y con un
+              tratamiento visual que resalte, la Bolsa total (Buy-ins + Re-buys + Add-ons en $, ya
+              calculada como `estado.pot`) y "Jugadores en juego" — antes vivían aparte, en el bloque de
+              subtotales de abajo (ver `gn-stats-row`, de donde se quitaron para no duplicarlas). ───────── */}
           <div className="gn-totales-card">
             <div className="gn-totales-titulo">Totales de la mesa</div>
-            <div className="gn-totales-fila">
+            <div className="gn-totales-destacado">
+              <div className="gn-totales-destacado-item">
+                <div className="gn-totales-item-label">Bolsa total</div>
+                <div className="gn-totales-destacado-valor">{money(estado.pot)}</div>
+              </div>
+              <div className="gn-totales-destacado-sep" />
+              <div className="gn-totales-destacado-item">
+                <div className="gn-totales-item-label">Jugadores en juego</div>
+                <div className="gn-totales-destacado-valor">{enJuego.length} <small>/ {estado.total}</small></div>
+              </div>
+            </div>
+            <div className="gn-totales-fila gn-totales-fila-conteo">
               <div className="gn-totales-item">
                 <div className="gn-totales-item-label">Buy-ins</div>
                 <div className="gn-totales-item-valor">{totalesAgiles.buyIns}</div>
@@ -681,30 +709,21 @@ export default function GameNight({ session, perfiles, esHost }) {
             </div>
           </div>
 
-          {/* ───────── Hora programada del torneo ───────── */}
-          {/* 45ª entrega: ya no hay botón "Iniciar torneo" — la hora sale sola de la hora guardada en
-              el Calendario para esta fecha, y con eso se mide la tolerancia de check-in. */}
-          {torneoCal?.hora ? (
-            <div className="campeonato-banner">
-              Torneo programado para las <strong>{torneoCal.hora}</strong> — tolerancia de check-in: {toleranciaMin} min
-              (dato informativo para el Host; ya no bloquea ni amonesta nada de forma automática).
-            </div>
-          ) : (
+          {/* 62ª entrega: se quitó el recuadro informativo "Torneo programado para las HH:MM — tolerancia
+              de check-in: N min" (Federico pidió quitarlo — la tolerancia ya es solo un dato de
+              referencia que se sigue mostrando donde hace falta, en "Jugadores sin check-in"). Se
+              conserva la alerta cuando a la fecha le falta la hora en el Calendario, porque eso sí sigue
+              siendo un problema de datos que el Host debe notar. */}
+          {!torneoCal?.hora && (
             <div className="campeonato-banner campeonato-banner-alerta">
               Esta fecha no tiene hora guardada en el Calendario.
             </div>
           )}
 
           {/* ───────── Subtotales de la partida ───────── */}
+          {/* 62ª entrega: "Bolsa total" y "Jugadores en juego" se movieron al recuadro de "Totales de la
+              mesa" de arriba (con más énfasis visual) — aquí solo quedan Burbuja y Campeón. */}
           <div className="stats gn-stats-row" style={{ margin: "20px 0" }}>
-            <div className="stat">
-              <div className="stat-label">Bolsa total</div>
-              <div className="stat-value">{money(estado.pot)}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Jugadores en juego</div>
-              <div className="stat-value">{enJuego.length} / {estado.total}</div>
-            </div>
             <div className="stat">
               <div className="stat-label">Burbuja</div>
               <div className="stat-value" style={{ fontSize: 16 }}>{burbujaNombre || "—"}</div>
@@ -722,11 +741,25 @@ export default function GameNight({ session, perfiles, esHost }) {
               mano/Debe/Premio). El Host (`editable`) sigue viendo la tabla completa de siempre.
               54ª entrega: la columna/botón de sacar a un jugador del torneo se renombró de
               "Eliminar" a "Killer" (encabezado) / "Kill" (botón y modal) en toda la pantalla del Host —
-              ya lo tenía la vista Jugador desde la 53ª. */}
+              ya lo tenía la vista Jugador desde la 53ª.
+              62ª entrega: Federico reportó que manipular todo por lote (Re-buys, Add-on, Kill, Lugar,
+              Amonestación, Mejor mano) directo en esta tabla, fila por fila, era muy poco práctico
+              (mucho scroll horizontal, controles chiquitos). Toda esa edición se movió a un modal
+              dedicado ("Editar jugadores", más abajo) — esta tabla, la que se ve siempre en pantalla
+              para el Host, ahora solo MUESTRA los mismos datos, sin ningún control, quedando más limpia
+              (mismas 11 columnas de siempre, mismo orden). */}
           {editable ? (
           <div className="section">
             <div className="section-head">
               <div className="section-title">Jugadores habilitados <span className="section-title-campeonato">· {habilitados.length}</span></div>
+              <button
+                type="button"
+                className="btn btn-primary btn-filtro"
+                disabled={habilitados.length === 0}
+                onClick={() => setEditorAbierto(true)}
+              >
+                ✏️ Editar jugadores
+              </button>
             </div>
             <div className="tbl">
               <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr" }}>
@@ -741,112 +774,27 @@ export default function GameNight({ session, perfiles, esHost }) {
                       {nombreCorto(j)}
                       {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
                       {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
-                      {editableAhora && !eliminado && (
-                        <button
-                          className="btn-icon-remove"
-                          style={{ marginLeft: 6, width: 20, height: 20 }}
-                          title="Quitar check-in (corrección, manual o de usuario)"
-                          disabled={guardando}
-                          onClick={() => quitarCheckin(j)}
-                        >
-                          ✕
-                        </button>
-                      )}
                     </div>
                     <div style={{ fontSize: 13 }}>
                       {hora(gn.horaCheckin)} · {gn.manual ? "Manual" : "Usuario"}
-                      {editableAhora ? (
-                        <button
-                          className={"gn-toggle gn-toggle-chico" + (gn.amonestado ? " on" : "") + (pendientes.has(`amonestar:${j.correo}`) ? " gn-en-camino" : "")}
-                          style={{ marginLeft: 6 }}
-                          title={gn.amonestado ? "Quitar la amonestación" : "Marcar amonestado a mano (pierde el punto de asistencia)"}
-                          onClick={() => toggleAmonestado(j)}
-                        >
-                          {gn.amonestado ? "⚠ Amonestado" : "Amonestar"}
-                        </button>
-                      ) : (
-                        gn.amonestado && <span title="Perdió el punto de asistencia"> · ⚠ Amonestado</span>
-                      )}
+                      {gn.amonestado && <span title="Perdió el punto de asistencia"> · ⚠ Amonestado</span>}
                     </div>
+                    <div>{gn.buyIn ? "Sí" : "No"}</div>
+                    <div className="num">{gn.rebuys || 0}</div>
+                    <div>{gn.addon ? "Sí" : "No"}</div>
                     <div>
-                      <button
-                        className={"gn-toggle" + (gn.buyIn ? " on" : "") + (pendientes.has(`buyin:${j.correo}`) ? " gn-en-camino" : "")}
-                        disabled={!editableAhora}
-                        onClick={() => toggleBuyIn(j)}
-                      >
-                        {gn.buyIn ? "Sí" : "No"}
-                      </button>
-                    </div>
-                    {/* 50ª entrega: ya no se deshabilita mientras hay un guardado en camino — varios
-                        clics seguidos se juntan solos en llamarAgil() en vez de esperar turno uno por
-                        uno, así que el Host puede seguir clickeando "+"/"−" sin sentir que "no responde" */}
-                    <div className={"gn-stepper" + (pendientes.has(`rebuy:${j.correo}`) ? " gn-en-camino" : "")}>
-                      <button disabled={!editableAhora || (gn.rebuys || 0) <= 0} onClick={() => cambiarRebuy(j, -1)}>
-                        −
-                      </button>
-                      <span className="gn-stepper-val">{gn.rebuys || 0}</span>
-                      <button
-                        disabled={!editableAhora || (gn.rebuys || 0) >= recomprasMax}
-                        title={Number.isFinite(recomprasMax) ? `Máximo ${recomprasMax} recompras` : "Sin límite configurado para este campeonato"}
-                        onClick={() => cambiarRebuy(j, 1)}
-                      >
-                        +
-                      </button>
-                    </div>
-                    <div>
-                      <button
-                        className={"gn-toggle" + (gn.addon ? " on" : "") + (pendientes.has(`addon:${j.correo}`) ? " gn-en-camino" : "")}
-                        disabled={!editableAhora}
-                        onClick={() => toggleAddon(j)}
-                      >
-                        {gn.addon ? "Sí" : "No"}
-                      </button>
-                    </div>
-                    <div>
-                      {eliminado ? (
-                        <>
-                          {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}
-                          {editableAhora && (
-                            <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer Kill" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
-                          )}
-                        </>
-                      ) : (
-                        editableAhora && enJuego.length > 1 ? (
-                          <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirKiller(j)}>Kill</button>
-                        ) : (
-                          <span className="muted">En juego</span>
-                        )
-                      )}
+                      {eliminado ? (gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—") : <span className="muted">En juego</span>}
                     </div>
                     <div>
                       {gn.esCampeon ? (
                         <span className="badge badge-campeon">1</span>
                       ) : eliminado ? (
-                        editableAhora ? (
-                          <select
-                            className="field gn-select"
-                            style={{ minWidth: 64, padding: "2px 4px" }}
-                            value={gn.lugar}
-                            disabled={guardando}
-                            onChange={(e) => moverLugar(j, e.target.value)}
-                            title="Corregir el lugar de salida — los demás se reacomodan solos"
-                          >
-                            {lugaresEliminadosDisponibles.map((l) => (
-                              <option key={l} value={l}>{l}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="badge badge-regular">Lugar {gn.lugar}</span>
-                        )
+                        <span className="badge badge-regular">Lugar {gn.lugar}</span>
                       ) : (
                         <span className="muted">—</span>
                       )}
                     </div>
-                    <div>
-                      <button className={"gn-toggle" + (gn.mejorMano ? " on" : "")} disabled={!editableAhora || guardando} onClick={() => toggleMejorMano(j)} title="Solo un jugador por torneo">
-                        {gn.mejorMano ? "Sí" : "No"}
-                      </button>
-                    </div>
+                    <div>{gn.mejorMano ? "Sí" : "No"}</div>
                     <div className="num right">{money(gn.debeTotal)}</div>
                     <div className="num right">{gn.premioTotal > 0 ? money(gn.premioTotal) : "—"}</div>
                     <div className="num right">{gn.puntos ?? 0}</div>
@@ -955,6 +903,153 @@ export default function GameNight({ session, perfiles, esHost }) {
           </div>
           )}
         </>
+      )}
+
+      {/* ───────── Modal "Editar jugadores" (62ª entrega) ─────────
+          Toda la edición fila por fila (Buy-in, Re-buys, Add-on, Kill, Lugar, Amonestación, Mejor mano,
+          quitar check-in) que antes vivía directo en la tabla de la pantalla ahora vive aquí — Federico
+          pidió esto porque manipular por lote desde la tabla larga era poco práctico. Es exactamente la
+          misma tabla y las mismas acciones de siempre (mismo `editableAhora`, mismos `onClick`), solo que
+          dentro de un modal aparte que se abre con el botón "✏️ Editar jugadores"; la tabla de la
+          pantalla (arriba) se quedó solo mostrando datos. */}
+      {editorAbierto && editable && (
+        <div className="modal-backdrop" onClick={() => setEditorAbierto(false)}>
+          <div className="modal-card modal-card-xwide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">Editar jugadores en juego</div>
+            {!editableAhora && (
+              <div className="section-sub" style={{ marginTop: -10 }}>
+                Este torneo ya está "Concluido" — los controles de abajo quedan solo de consulta.
+              </div>
+            )}
+            <div className="tbl" style={{ overflowX: "auto" }}>
+              <div className="trow thead" style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr", minWidth: 900 }}>
+                <div>Jugador</div><div>Check-in</div><div>Buy-in</div><div>Re-buys{Number.isFinite(recomprasMax) ? ` (máx ${recomprasMax})` : ""}</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Mejor mano</div><div>Debe</div><div>Premio</div><div>Puntos</div>
+              </div>
+              {habilitados.map((j) => {
+                const gn = j.gn || {};
+                const eliminado = Boolean(gn.lugar) && !gn.esCampeon;
+                return (
+                  <div className={"trow" + (eliminado ? " gn-row-eliminado" : "")} style={{ gridTemplateColumns: "1.1fr 1fr 0.6fr 0.9fr 0.6fr 1fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr", minWidth: 900 }} key={j.correo}>
+                    <div>
+                      {nombreCorto(j)}
+                      {gn.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
+                      {gn.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
+                      {editableAhora && !eliminado && (
+                        <button
+                          className="btn-icon-remove"
+                          style={{ marginLeft: 6, width: 20, height: 20 }}
+                          title="Quitar check-in (corrección, manual o de usuario)"
+                          disabled={guardando}
+                          onClick={() => quitarCheckin(j)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 13 }}>
+                      {hora(gn.horaCheckin)} · {gn.manual ? "Manual" : "Usuario"}
+                      {editableAhora ? (
+                        <button
+                          className={"gn-toggle gn-toggle-chico" + (gn.amonestado ? " on" : "") + (pendientes.has(`amonestar:${j.correo}`) ? " gn-en-camino" : "")}
+                          style={{ marginLeft: 6 }}
+                          title={gn.amonestado ? "Quitar la amonestación" : "Marcar amonestado a mano (pierde el punto de asistencia)"}
+                          onClick={() => toggleAmonestado(j)}
+                        >
+                          {gn.amonestado ? "⚠ Amonestado" : "Amonestar"}
+                        </button>
+                      ) : (
+                        gn.amonestado && <span title="Perdió el punto de asistencia"> · ⚠ Amonestado</span>
+                      )}
+                    </div>
+                    <div>
+                      <button
+                        className={"gn-toggle" + (gn.buyIn ? " on" : "") + (pendientes.has(`buyin:${j.correo}`) ? " gn-en-camino" : "")}
+                        disabled={!editableAhora}
+                        onClick={() => toggleBuyIn(j)}
+                      >
+                        {gn.buyIn ? "Sí" : "No"}
+                      </button>
+                    </div>
+                    <div className={"gn-stepper" + (pendientes.has(`rebuy:${j.correo}`) ? " gn-en-camino" : "")}>
+                      <button disabled={!editableAhora || (gn.rebuys || 0) <= 0} onClick={() => cambiarRebuy(j, -1)}>
+                        −
+                      </button>
+                      <span className="gn-stepper-val">{gn.rebuys || 0}</span>
+                      <button
+                        disabled={!editableAhora || (gn.rebuys || 0) >= recomprasMax}
+                        title={Number.isFinite(recomprasMax) ? `Máximo ${recomprasMax} recompras` : "Sin límite configurado para este campeonato"}
+                        onClick={() => cambiarRebuy(j, 1)}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <div>
+                      <button
+                        className={"gn-toggle" + (gn.addon ? " on" : "") + (pendientes.has(`addon:${j.correo}`) ? " gn-en-camino" : "")}
+                        disabled={!editableAhora}
+                        onClick={() => toggleAddon(j)}
+                      >
+                        {gn.addon ? "Sí" : "No"}
+                      </button>
+                    </div>
+                    <div>
+                      {eliminado ? (
+                        <>
+                          {gn.eliminadoPor ? nombrePorCorreo(gn.eliminadoPor) : "—"}
+                          {editableAhora && (
+                            <button className="btn-icon-remove" style={{ marginLeft: 6 }} title="Deshacer Kill" disabled={guardando} onClick={() => deshacerKiller(j)}>✕</button>
+                          )}
+                        </>
+                      ) : (
+                        editableAhora && enJuego.length > 1 ? (
+                          <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => pedirKiller(j)}>Kill</button>
+                        ) : (
+                          <span className="muted">En juego</span>
+                        )
+                      )}
+                    </div>
+                    <div>
+                      {gn.esCampeon ? (
+                        <span className="badge badge-campeon">1</span>
+                      ) : eliminado ? (
+                        editableAhora ? (
+                          <select
+                            className="field gn-select"
+                            style={{ minWidth: 64, padding: "2px 4px" }}
+                            value={gn.lugar}
+                            disabled={guardando}
+                            onChange={(e) => moverLugar(j, e.target.value)}
+                            title="Corregir el lugar de salida — los demás se reacomodan solos"
+                          >
+                            {lugaresEliminadosDisponibles.map((l) => (
+                              <option key={l} value={l}>{l}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="badge badge-regular">Lugar {gn.lugar}</span>
+                        )
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </div>
+                    <div>
+                      <button className={"gn-toggle" + (gn.mejorMano ? " on" : "")} disabled={!editableAhora || guardando} onClick={() => toggleMejorMano(j)} title="Solo un jugador por torneo">
+                        {gn.mejorMano ? "Sí" : "No"}
+                      </button>
+                    </div>
+                    <div className="num right">{money(gn.debeTotal)}</div>
+                    <div className="num right">{gn.premioTotal > 0 ? money(gn.premioTotal) : "—"}</div>
+                    <div className="num right">{gn.puntos ?? 0}</div>
+                  </div>
+                );
+              })}
+              {habilitados.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay jugadores con check-in para este torneo.</div>}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setEditorAbierto(false)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {activarModal && (

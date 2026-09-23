@@ -79,6 +79,31 @@ function leerExcelResultadosPokerStars(filas) {
   return { jugadores, error: jugadores.length ? "" : "El archivo no trae ningún jugador reconocible." };
 }
 
+// parser del Excel de referencias de chat que Federico ya tenía armado ("Referencias para Chat -
+// Killers.xlsx"): una fila por jugador con su Alias PokerStars y hasta 3 columnas de referencia (el
+// nombre/apodo con el que puede firmar en el chat de WhatsApp). El encabezado se busca por nombre de
+// columna ("alias" / "referencia"), tolerando que el archivo real las nombre "Referencia1",
+// "Referencia 2", "Referencia 3" (con o sin espacio, y numeración corrida).
+function leerExcelApodos(filas) {
+  if (!filas.length) return { filas: [], error: "El archivo está vacío." };
+  const header = (filas[0] || []).map((c) => String(c ?? "").trim().toLowerCase());
+  const colAlias = header.findIndex((c) => c.includes("alias"));
+  const colsRef = [];
+  header.forEach((c, i) => { if (c.includes("referencia")) colsRef.push(i); });
+  if (colAlias < 0 || !colsRef.length) {
+    return { filas: [], error: 'No se reconocieron las columnas "Alias PokerStars" / "Referencia" en el archivo.' };
+  }
+  const resultado = [];
+  for (let i = 1; i < filas.length; i++) {
+    const fila = filas[i] || [];
+    const alias = String(fila[colAlias] ?? "").trim();
+    if (!alias) continue;
+    const referencias = colsRef.map((c) => String(fila[c] ?? "").trim()).filter(Boolean);
+    resultado.push({ alias, referencias });
+  }
+  return { filas: resultado, error: "" };
+}
+
 function etiquetaTipo(campeonato, tipo) {
   if (campeonato === PRACTICA_CAMPEONATO) return "Práctica";
   return tipo === "Main" ? "Main Event" : "Regular";
@@ -110,6 +135,7 @@ export default function Estadisticas({ session }) {
   const [publicando, setPublicando] = useState(false);
   const excelRef = useRef(null);
   const chatRef = useRef(null);
+  const apodosExcelRef = useRef(null);
 
   // ───────── admin: editor de apodos de chat ─────────
   const [editorApodos, setEditorApodos] = useState(false);
@@ -408,7 +434,7 @@ export default function Estadisticas({ session }) {
   }
 
   // ───────── admin: editor de apodos de chat ─────────
-  function abrirEditorApodos() {
+  function seedApodosBorrador() {
     const borrador = {};
     for (const j of directorio) {
       const alias = nombreCorto(j);
@@ -416,7 +442,10 @@ export default function Estadisticas({ session }) {
       const previos = estData.apodos?.[alias] || [];
       borrador[alias] = [previos[0] || "", previos[1] || "", previos[2] || ""];
     }
-    setApodosBorrador(borrador);
+    return borrador;
+  }
+  function abrirEditorApodos() {
+    setApodosBorrador(seedApodosBorrador());
     setEditorApodos(true);
   }
   function cambiarApodo(alias, i, valor) {
@@ -425,6 +454,45 @@ export default function Estadisticas({ session }) {
       fila[i] = valor;
       return { ...prev, [alias]: fila };
     });
+  }
+
+  // Importa el Excel de referencias de chat que Federico ya tenía armado (Alias PokerStars + hasta 3
+  // referencias) — a pedido explícito, esto NUNCA borra un apodo ya guardado: cada referencia del
+  // archivo se agrega en el primer espacio libre de esa fila (sin duplicar una que ya esté), y un
+  // jugador que no esté en el archivo mantiene intactos los apodos que ya tenía.
+  async function onApodosExcelSeleccionado(e) {
+    const archivo = e.target.files?.[0];
+    e.target.value = "";
+    if (!archivo) return;
+    setError("");
+    try {
+      const buffer = await archivo.arrayBuffer();
+      const libro = XLSX.read(buffer, { type: "array" });
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+      const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: null });
+      const { filas, error: err } = leerExcelApodos(filasCrudas);
+      if (err) {
+        setError(err);
+        return;
+      }
+      setEditorApodos(true);
+      setApodosBorrador((prev) => {
+        const base = Object.keys(prev).length ? { ...prev } : seedApodosBorrador();
+        for (const { alias, referencias } of filas) {
+          const actuales = [...(base[alias] || ["", "", ""])];
+          for (const valor of referencias) {
+            if (!valor || actuales.includes(valor)) continue;
+            const idxVacio = actuales.findIndex((v) => !v);
+            if (idxVacio >= 0) actuales[idxVacio] = valor;
+          }
+          base[alias] = actuales.slice(0, 3);
+        }
+        return base;
+      });
+      setAviso(`Referencias importadas de "${archivo.name}" — revisá y guardá para confirmar.`);
+    } catch {
+      setError("No se pudo leer el archivo de referencias. ¿Seguro que es un .xlsx?");
+    }
   }
   async function guardarApodos() {
     setGuardandoApodos(true);
@@ -530,7 +598,7 @@ export default function Estadisticas({ session }) {
                   {esMainActual && <div>{j.mejorMano ? "Sí" : "No"}</div>}
                   <div className="num right">{j.puntos ?? 0}</div>
                   <div className="num right">{moneyFirmado(-(j.debeTotal || 0))}</div>
-                  <div className="num right">{j.premioTotal > 0 ? money(j.premioTotal) : "—"}</div>
+                  <div className="num right">{money(j.premioTotal)}</div>
                   <div className="num right">{moneyFirmado(saldo)}</div>
                 </div>
               );
@@ -546,15 +614,24 @@ export default function Estadisticas({ session }) {
                 {esMainActual && <div></div>}
                 <div></div>
                 <div className="num right">{moneyFirmado(-totalesTorneo.debe)}</div>
-                <div className="num right">{totalesTorneo.premio > 0 ? money(totalesTorneo.premio) : "—"}</div>
+                <div className="num right">{money(totalesTorneo.premio)}</div>
                 <div className="num right">{moneyFirmado(totalesTorneo.saldo)}</div>
               </div>
             )}
           </div>
           {torneoActual.logKillersNoResueltos?.length > 0 && (
-            <div className="section-sub" style={{ padding: "8px 0" }}>
-              {torneoActual.logKillersNoResueltos.length} killer(s) de este torneo se contabilizaron sin víctima confirmada.
-            </div>
+            <details style={{ margin: "8px 0" }}>
+              <summary>
+                {torneoActual.logKillersNoResueltos.length} killer(s) del chat sin víctima confirmada (se cuentan igual a favor de quien los escribió)
+              </summary>
+              <ul>
+                {torneoActual.logKillersNoResueltos.map((l, i) => (
+                  <li key={i} style={{ fontSize: 13 }}>
+                    [{l.fecha} {l.hora}] {l.remitente}: "{l.mensaje}" — {l.motivo}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
       )}
@@ -592,6 +669,10 @@ export default function Estadisticas({ session }) {
               <button type="button" className="btn btn-secondary" onClick={reiniciarSubida}>✕ Quitar archivos</button>
             )}
             <button type="button" className="btn btn-secondary" onClick={abrirEditorApodos}>✎ Apodos de chat</button>
+            <button type="button" className="btn btn-secondary" onClick={() => apodosExcelRef.current?.click()}>
+              📥 Importar Excel de referencias
+            </button>
+            <input ref={apodosExcelRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={onApodosExcelSeleccionado} />
           </div>
           {excelError && <div className="section-sub" style={{ color: "#b00020" }}>{excelError}</div>}
 
@@ -644,7 +725,7 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(-(j.debeTotal || 0))}</td>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.premioTotal > 0 ? money(j.premioTotal) : "—"}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{money(j.premioTotal)}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado((j.premioTotal || 0) - (j.debeTotal || 0))}</td>
                     </tr>
                   ))}
@@ -660,7 +741,7 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesPreview.debe)}</td>
-                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.premio > 0 ? money(totalesPreview.premio) : "—"}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{money(totalesPreview.premio)}</td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(totalesPreview.saldo)}</td>
                     </tr>
                   </tfoot>
@@ -681,7 +762,7 @@ export default function Estadisticas({ session }) {
             <div className="section-title">Apodos de chat</div>
           </div>
           <p className="section-sub">
-            Hasta 3 nombres o apodos con los que un jugador puede aparecer firmando mensajes en el chat de WhatsApp, además de su Alias PokerStars y su Nombre. Se usan para reconocer quién mató a quién.
+            Hasta 3 nombres o apodos con los que un jugador puede aparecer firmando mensajes en el chat de WhatsApp, además de su Alias PokerStars y su Nombre. Se usan para reconocer quién mató a quién. "Importar Excel de referencias" agrega lo que traiga el archivo sin borrar nada de lo que ya está cargado — recordá tocar "Guardar apodos" para confirmar los cambios.
           </p>
           <div className="tbl" style={{ overflowX: "auto" }}>
             <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 1fr 1fr 1fr" }}>

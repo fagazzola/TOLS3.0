@@ -172,13 +172,29 @@ export default function Estadisticas({ session }) {
   function nombreKillerEnTorneo(alias) {
     if (!alias) return "";
     const encontrado = jugadoresTorneoActual.find((j) => j.alias === alias);
-    return encontrado ? encontrado.nombre || encontrado.alias : alias;
+    return encontrado ? encontrado.alias || encontrado.nombre : alias;
   }
+
+  // fila de totales al pie de la tabla publicada: Buy-ins, Re-buys, Add-ons, Debe, Premios y Saldo
+  const totalesTorneo = useMemo(() => {
+    if (!jugadoresTorneoActual.length) return null;
+    return jugadoresTorneoActual.reduce(
+      (t, j) => ({
+        buyIns: t.buyIns + (j.buyIn ? 1 : 0),
+        rebuys: t.rebuys + (j.rebuys || 0),
+        addons: t.addons + (j.addon ? 1 : 0),
+        debe: t.debe + (j.debeTotal || 0),
+        premio: t.premio + (j.premioTotal || 0),
+        saldo: t.saldo + ((j.premioTotal || 0) - (j.debeTotal || 0)),
+      }),
+      { buyIns: 0, rebuys: 0, addons: 0, debe: 0, premio: 0, saldo: 0 }
+    );
+  }, [jugadoresTorneoActual]);
 
   function exportarExcel() {
     if (!torneoAbierto || !jugadoresTorneoActual.length) return;
     const filas = jugadoresTorneoActual.map((j) => ({
-      Jugador: j.nombre || j.alias,
+      "Alias PokerStars": j.alias || j.nombre,
       "Buy-in": j.buyIn ? 1 : 0,
       "Re-buys": j.rebuys || 0,
       "Add-on": j.addon ? 1 : 0,
@@ -206,12 +222,16 @@ export default function Estadisticas({ session }) {
     const delCampeonato = torneosCal
       .filter((t) => !t.practica && t.temporada === activo && t.fecha)
       .map((t) => ({ campeonato: activo, fecha: t.fecha, tipo: tipoDeFecha(torneosCal, t.fecha) }));
-    return [...delCampeonato, ...practicas].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    // orden del combo invertido a pedido de Federico: antes bajaba de la fecha más reciente a la más
+    // antigua, ahora sube de la más antigua a la más reciente.
+    return [...delCampeonato, ...practicas].sort((a, b) => a.fecha.localeCompare(b.fecha));
   }, [torneosCal, campeonatos]);
 
   useEffect(() => {
     if (!torneoAdminSel && opcionesTorneoAdmin.length) {
-      const o = opcionesTorneoAdmin[0];
+      // por default selecciona el torneo más reciente (aunque el combo se muestre de más cercano a más
+      // lejano, el más útil para subir resultados suele ser el último jugado)
+      const o = opcionesTorneoAdmin.reduce((mas, cur) => (cur.fecha > mas.fecha ? cur : mas), opcionesTorneoAdmin[0]);
       setTorneoAdminSel(`${o.campeonato}|${o.fecha}`);
     }
   }, [opcionesTorneoAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -333,8 +353,24 @@ export default function Estadisticas({ session }) {
   function nombreKillerEnPreview(alias) {
     if (!alias) return "";
     const encontrado = filasPreview.find((j) => j.alias === alias);
-    return encontrado ? encontrado.nombre || encontrado.alias : alias;
+    return encontrado ? encontrado.alias || encontrado.nombre : alias;
   }
+
+  // fila de totales al pie del preview: Buy-ins, Re-buys, Add-ons, Debe, Premios y Saldo
+  const totalesPreview = useMemo(() => {
+    if (!filasPreview.length) return null;
+    return filasPreview.reduce(
+      (t, j) => ({
+        buyIns: t.buyIns + (j.buyIn ? 1 : 0),
+        rebuys: t.rebuys + (j.rebuys || 0),
+        addons: t.addons + (j.addon ? 1 : 0),
+        debe: t.debe + (j.debeTotal || 0),
+        premio: t.premio + (j.premioTotal || 0),
+        saldo: t.saldo + ((j.premioTotal || 0) - (j.debeTotal || 0)),
+      }),
+      { buyIns: 0, rebuys: 0, addons: 0, debe: 0, premio: 0, saldo: 0 }
+    );
+  }, [filasPreview]);
 
   async function publicar() {
     if (!previewCalculado || !torneoAdminInfo) return;
@@ -473,7 +509,7 @@ export default function Estadisticas({ session }) {
           </div>
           <div className="tbl" style={{ overflowX: "auto" }}>
             <div className="trow thead" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880 }}>
-              <div>Jugador</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer</div><div>Lugar</div>
+              <div>Alias PokerStars</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer</div><div>Lugar</div>
               {esMainActual && <div>Mejor mano</div>}
               <div>Puntos</div><div>Debe (-)</div><div>Premio (+)</div><div>Saldo</div>
             </div>
@@ -482,7 +518,7 @@ export default function Estadisticas({ session }) {
               return (
                 <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880 }} key={j.correo || j.alias}>
                   <div>
-                    {j.nombre || j.alias}
+                    {j.alias || j.nombre}
                     {j.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
                     {j.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
                   </div>
@@ -499,6 +535,21 @@ export default function Estadisticas({ session }) {
                 </div>
               );
             })}
+            {totalesTorneo && (
+              <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880, fontWeight: "bold" }}>
+                <div>Totales</div>
+                <div>{totalesTorneo.buyIns}</div>
+                <div className="num">{totalesTorneo.rebuys}</div>
+                <div>{totalesTorneo.addons}</div>
+                <div></div>
+                <div></div>
+                {esMainActual && <div></div>}
+                <div></div>
+                <div className="num right">{moneyFirmado(-totalesTorneo.debe)}</div>
+                <div className="num right">{totalesTorneo.premio > 0 ? money(totalesTorneo.premio) : "—"}</div>
+                <div className="num right">{moneyFirmado(totalesTorneo.saldo)}</div>
+              </div>
+            )}
           </div>
           {torneoActual.logKillersNoResueltos?.length > 0 && (
             <div className="section-sub" style={{ padding: "8px 0" }}>
@@ -570,7 +621,7 @@ export default function Estadisticas({ session }) {
               <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Jugador</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Buy-in</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Re-buys</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Add-on</th>
@@ -585,7 +636,7 @@ export default function Estadisticas({ session }) {
                 <tbody>
                   {filasPreview.map((j) => (
                     <tr key={j.correo || j.alias}>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.nombre || j.alias}{j.esCampeon ? " (Campeón)" : ""}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.alias || j.nombre}{j.esCampeon ? " (Campeón)" : ""}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.buyIn ? 1 : 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.rebuys || 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.addon ? 1 : 0}</td>
@@ -598,6 +649,22 @@ export default function Estadisticas({ session }) {
                     </tr>
                   ))}
                 </tbody>
+                {totalesPreview && (
+                  <tfoot>
+                    <tr style={{ fontWeight: "bold" }}>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}>Totales</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.buyIns}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.rebuys}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.addons}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesPreview.debe)}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.premio > 0 ? money(totalesPreview.premio) : "—"}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(totalesPreview.saldo)}</td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
 
               <button type="button" className="btn btn-primary" disabled={publicando} onClick={publicar}>

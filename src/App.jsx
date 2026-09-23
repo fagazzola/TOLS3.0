@@ -9,42 +9,39 @@ import Perfiles from "./components/Perfiles.jsx";
 import Jugadores from "./components/Jugadores.jsx";
 import Cobranza from "./components/Cobranza.jsx";
 import GameNight from "./components/GameNight.jsx";
+import Estadisticas from "./components/Estadisticas.jsx";
 import MiPerfil from "./components/MiPerfil.jsx";
 import Registro from "./components/Registro.jsx";
-import { puedeVer, puedeEditar } from "./lib/permisos.js";
+import { puedeVer } from "./lib/permisos.js";
 
 const SESSION_KEY = "tols-session";
 const ACTIVITY_KEY = "tols-last-activity";
 const INACTIVIDAD_MS = 30 * 60 * 1000; // 30 minutos sin actividad → se cierra la sesión sola
 const API_PERFILES = "/api/perfiles";
-const API_JUGADORES = "/api/jugadores";
-const API_CALENDARIO = "/api/calendario";
-const API_CAMPEONATOS = "/api/campeonatos";
 const API_PARAMETROS = "/api/parametros";
 
-function isoHoy() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 // Esta pantalla es la administración de toda la liga. El orden de las pestañas es fijo
-// (Tablero de Control, Calendario, Cobranza, Jugadores, Game Night, Usuarios).
+// (Tablero de Control, Calendario, Cobranza, Jugadores, Estadísticas, Usuarios).
 // La pestaña Usuarios (antes "Jugadores") la pueden ver Administrador General y Administrador,
 // sin importar lo que diga la matriz de permisos — es un caso especial fuera de esa tabla. Dentro de la
 // pantalla, solo el Administrador General puede ver/editar contraseñas (42ª entrega) — ver Perfiles.jsx.
 // "Mi Perfil" es otro caso especial: solo la ve quien tiene rol "Jugador" (autoservicio de sus
 // propios datos), sin importar la matriz de permisos tampoco — no es una pantalla de administración.
 // Jugadores (mod6) y Cobranza (mod4) sí siguen la matriz normal de permisos.
-// Game Night (mod5) es un caso especial más de visibilidad: además de la matriz normal de permisos,
-// el Host asignado al próximo torneo SIEMPRE puede entrar a administrar esa partida, tenga o no su rol
-// acceso de escritura a mod5 — por eso puedeVerTab() de abajo también revisa hostInfo.esHost para esta
-// pestaña puntual.
+// 66ª entrega: "Game Night" (mod5) se OCULTA por completo del menú (Federico pidió no borrar el
+// módulo, solo dejar de usarlo en vivo — se reemplazó por el flujo de archivos de "Estadísticas") —
+// se marca `oculto: true` y se filtra más abajo, para cualquier rol, sin tocar su componente ni su
+// backend. El concepto de "Host" (que antes daba acceso especial a esta pestaña) también se eliminó
+// por completo — ver Jugadores.jsx y netlify/functions/jugadores.js.
+// "Estadísticas" es nueva, visible para CUALQUIER perfil con sesión (como Mi Perfil) — dentro de esa
+// pantalla, el botón para subir resultados se limita a Administrador General/Administrador.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
-  { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, permiteHost: true },
+  { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, oculto: true },
+  { key: "estadisticas", modKey: null, label: "Estadísticas", Component: Estadisticas, siempreVisible: true },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];
@@ -57,10 +54,6 @@ export default function App() {
   const [perfilesError, setPerfilesError] = useState("");
   // ruta simple: /registro muestra el autorregistro sin necesidad de login, sin librería de routing
   const [ruta, setRuta] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
-  // esHost: si el usuario en sesión es el Jugador asignado como Host del próximo Game Night (se
-  // recalcula cada vez que hay sesión — por eso hay que salir y volver a entrar para que se refleje un
-  // cambio reciente). faltaHost: si quien entró puede gestionar Jugadores y no hay Host asignado todavía.
-  const [hostInfo, setHostInfo] = useState({ esHost: false, faltaHost: false, proximaFecha: "" });
   // 59ª entrega: interruptor de acceso al portal (Parámetros Generales, dentro de Tablero de Control).
   // parametros === null mientras carga (o si la función aún no existe) — se trata igual que "portal
   // encendido" para no dejar a nadie fuera por un error de red o un despliegue a medias.
@@ -129,35 +122,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  // se recalcula "modo Host" y "falta asignar Host" cada vez que hay una sesión activa (y cuando ya
-  // están los perfiles, para saber si puede gestionar Jugadores) — a propósito no queda "en vivo": si el
-  // Host cambia mientras alguien tiene el sitio abierto, hay que salir y volver a entrar para verlo
-  useEffect(() => {
-    if (!session || !perfiles) return;
-    Promise.all([
-      fetch(API_JUGADORES).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(API_CALENDARIO).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(API_CAMPEONATOS).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([jug, cal, camp]) => {
-      const correo = (session.usuario || "").trim().toLowerCase();
-      const miJugador = (jug?.jugadores || []).find((j) => j.correo === correo);
-      const esHost = miJugador?.host === true;
-
-      const activo = camp?.activo || "";
-      const hoy = isoHoy();
-      // 43ª entrega: una partida de práctica también necesita Host, así que cuenta igual que un torneo
-      // del campeonato activo al buscar "la próxima fecha que necesita Host asignado".
-      const proximos = (cal?.torneos || [])
-        .filter((t) => (t.practica || !activo || t.temporada === activo) && t.fecha >= hoy)
-        .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
-      const hayHost = (jug?.jugadores || []).some((j) => j.host === true);
-      const puedeGestionarJugadores = puedeEditar(perfiles, session, "mod6") || session.rol === "Administrador General";
-      const faltaHost = puedeGestionarJugadores && proximos.length > 0 && !hayHost;
-
-      setHostInfo({ esHost, faltaHost, proximaFecha: proximos[0]?.fecha || "" });
-    });
-  }, [session, perfiles]);
-
   function cargarPerfiles() {
     setPerfilesLoading(true);
     setPerfilesError("");
@@ -185,16 +149,16 @@ export default function App() {
   }
 
   function puedeVerTab(t) {
+    if (t.oculto) return false;
     if (t.siempreVisible) return true;
     if (t.soloAdmins) return esAdmin(session?.rol);
-    if (t.permiteHost && hostInfo.esHost) return true;
     return puedeVer(perfiles, session, t.modKey);
   }
 
   function handleLogin(s) {
     setSession(s);
     const firstAllowed = TABS.find((t) =>
-      t.siempreVisible ? true : t.soloAdmins ? esAdmin(s.rol) : puedeVer(perfiles, s, t.modKey)
+      t.oculto ? false : t.siempreVisible ? true : t.soloAdmins ? esAdmin(s.rol) : puedeVer(perfiles, s, t.modKey)
     );
     setTab(firstAllowed ? firstAllowed.key : "tablero");
     try {
@@ -324,12 +288,12 @@ export default function App() {
   // todas las pestañas se muestran siempre (para tener el panorama completo de la liga);
   // las que el rol no tiene permitidas aparecen deshabilitadas en vez de ocultarse — EXCEPCIÓN: el
   // rol "Jugador" tiene una experiencia reducida a propósito (pedido de Federico) y solo debe ver
-  // Calendario, Game Night y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
-  // no solo se deshabilita.
-  const SOLO_JUGADOR_TABS = ["calendario", "gamenight", "miperfil"];
-  const tabsConPermiso = TABS.map((t) => ({ ...t, permitido: puedeVerTab(t) })).filter(
-    (t) => session.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key)
-  );
+  // Calendario, Estadísticas y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
+  // no solo se deshabilita. (66ª entrega: Game Night salió de esta lista — quedó oculta para todos.)
+  const SOLO_JUGADOR_TABS = ["calendario", "estadisticas", "miperfil"];
+  const tabsConPermiso = TABS.filter((t) => !t.oculto)
+    .map((t) => ({ ...t, permitido: puedeVerTab(t) }))
+    .filter((t) => session.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key));
   const permitidas = tabsConPermiso.filter((t) => t.permitido);
   const active = permitidas.find((t) => t.key === tab) || permitidas[0];
 
@@ -338,7 +302,7 @@ export default function App() {
       <Decor />
       <VersionBadge />
       <div className="wrap">
-        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} esHost={hostInfo.esHost} />
+        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
         {portalApagado && (
           <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
             ⚠ El portal está APAGADO para los jugadores (modo mantenimiento) — solo los administradores
@@ -346,14 +310,8 @@ export default function App() {
             cuando quieras abrir el acceso de nuevo.
           </div>
         )}
-        {hostInfo.faltaHost && (
-          <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
-            ⚠ No hay Host asignado para el próximo torneo ({hostInfo.proximaFecha}). Sin Host no se puede
-            iniciar el Game Night — ve a la pestaña Jugadores para asignarlo.
-          </div>
-        )}
         {active ? (
-          <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} esHost={hostInfo.esHost} />
+          <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} />
         ) : (
           <p className="subtitle">Tu perfil no tiene acceso a ningún módulo todavía. Pídele a un administrador que revise tus permisos.</p>
         )}

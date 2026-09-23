@@ -245,4 +245,83 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, or
   };
 }
 
+// 66ª entrega: Estadísticas ya no deriva el Lugar de un jugador de una cadena de Kills en vivo — llega
+// directo de la columna "Place" del Excel de PokerStars que sube el administrador cada semana. Esta es
+// la misma matemática de `estadoTorneo()` de arriba (bolsa, reparto de premios por lugar/burbuja/mejor
+// mano, puntos), pero tomando el Lugar de cada jugador tal cual como dato de entrada, en vez de
+// derivarlo de `ordenEliminados`. `jugadoresState` va indexado por una llave estable cualquiera
+// (normalmente el correo del jugador, o el Alias PokerStars tal cual si no se pudo matchear con el
+// directorio de Jugadores) y cada valor trae `{ buyIn, rebuys, addon, lugar, mejorMano }` —
+// `buyIn`/`rebuys`/`addon` siempre vienen de la misma fila del Excel de resultados (todo el que
+// aparece ahí tuvo buy-in). El Campeón es quien tiene `lugar === 1`.
+export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeonato, tipo }) {
+  const datosTablero = tableroMapa?.[campeonato] || {};
+  const claves = Object.keys(jugadoresState || {});
+  const total = claves.length;
+
+  const lugares = {};
+  let campeon = null;
+  for (const clave of claves) {
+    const lugar = Number(jugadoresState[clave]?.lugar) || null;
+    if (lugar) {
+      lugares[clave] = lugar;
+      if (lugar === 1) campeon = clave;
+    }
+  }
+
+  const numLugaresPago = (datosTablero.premios?.porTorneo?.lugares || []).length;
+  const burbujaClave = calcularBurbuja(lugares, numLugaresPago, total);
+
+  const pot = calcularPot(
+    claves.map((c) => jugadoresState[c]),
+    tableroMapa,
+    campeonato,
+    tipo
+  );
+  const premiosPorLugar = calcularPremiosPorLugar(pot, tableroMapa, campeonato);
+  const montoBurbuja = pagoPorConcepto(tableroMapa, campeonato, "Sale en la burbuja", tipo);
+  const montoMejorMano = pagoPorConcepto(tableroMapa, campeonato, "Mejor Mano", tipo);
+
+  const porJugador = {};
+  for (const clave of claves) {
+    const j = jugadoresState[clave];
+    const lugar = lugares[clave] || null;
+    const premioLugar = lugar && premiosPorLugar[lugar] ? premiosPorLugar[lugar] : 0;
+    const premioBurbuja = clave === burbujaClave ? montoBurbuja : 0;
+    const premioMano = j.mejorMano ? montoMejorMano : 0;
+    const premioTotal = premioLugar + premioBurbuja + premioMano;
+    const debeBuyIn = j.buyIn ? tarifa(tableroMapa, campeonato, "buyin", tipo) : 0;
+    const debeRebuys = (Number(j.rebuys) || 0) * tarifa(tableroMapa, campeonato, "rebuy", tipo);
+    const debeAddon = j.addon ? tarifa(tableroMapa, campeonato, "addon", tipo) : 0;
+    porJugador[clave] = {
+      ...j,
+      lugar,
+      esCampeon: clave === campeon,
+      esBurbuja: clave === burbujaClave,
+      debeBuyIn,
+      debeRebuys,
+      debeAddon,
+      debeTotal: debeBuyIn + debeRebuys + debeAddon,
+      premioLugar,
+      premioBurbuja,
+      premioMano,
+      premioTotal,
+      puntos: calcularPuntos({ lugar, amonestado: false }, datosTablero, tipo, campeonato),
+    };
+  }
+
+  return {
+    total,
+    lugares,
+    campeon,
+    burbujaCorreo: burbujaClave,
+    numLugaresPago,
+    pot,
+    premiosPorLugar,
+    montoBurbuja,
+    montoMejorMano,
+    porJugador,
+  };
+}
+
 export { tipoDeFecha };

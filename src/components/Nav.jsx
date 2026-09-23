@@ -1,4 +1,4 @@
-export default function Nav({ tabs, active, onChange, session, onLogout, esHost }) {
+export default function Nav({ tabs, active, onChange, session, onLogout }) {
   return (
     <>
       <div className="nav">
@@ -16,7 +16,6 @@ export default function Nav({ tabs, active, onChange, session, onLogout, esHost 
           ))}
         </div>
         <div className="nav-session">
-          {esHost && <span className="badge badge-host" title="Eres el Host del próximo Game Night">🎙 Modo Host</span>}
           {session.nombre} · {session.rol}
           <button className="btn btn-secondary" onClick={onLogout}>
             Cerrar sesión

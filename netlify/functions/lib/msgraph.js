@@ -201,6 +201,10 @@ async function ocultarColumnaTexto(sheetName, columna, startRow, endRow) {
 // 45ª entrega (2026-09-19): se agregaron 3 columnas nuevas al final, confirmadas libres leyendo el
 // encabezado real del Excel de Federico (R, S, T vacías hasta esta entrega) — 17 Cuenta, 18 Banco,
 // 19 Tipo de Cuenta (CLABE/Tarjeta de Débito, centralizados en Jugadores desde la 44ª entrega).
+// 66ª entrega: se eliminó el concepto de "Host" del sitio — las columnas 13/14 (Host, Host Fecha) se
+// dejan físicamente en su lugar (para no correr Contraseña/Perfil/Cuenta/Banco/Tipo de Cuenta, que
+// vienen después) pero ya siempre se escriben en blanco, porque `j.host`/`j.hostFecha` ya no existen
+// en el modelo de datos.
 function filasJugadoresUnificadas(jugadores, perfilesData) {
   const usuarios = perfilesData?.usuarios || [];
   const porCorreo = new Map();
@@ -217,7 +221,7 @@ function filasJugadoresUnificadas(jugadores, perfilesData) {
     filas.push([
       j.id, j.nombre, j.aliasJugador, j.aliasPokerStars, j.padrino || "", j.telefono,
       j.correo, j.tipoUsuario, j.fecNac, j.edad, j.manoFavorita || "", j.fechaRegistro || "",
-      j.estatus || "Activo", j.host ? "Sí" : "No", j.hostFecha || "",
+      j.estatus || "Activo", "", "",
       u ? u.password : "", u ? u.rol : "",
       celdaTexto(j.cuenta), j.banco || "", j.tipoCuenta || "",
     ]);
@@ -303,8 +307,7 @@ export async function leerJugadoresDesdeExcel() {
       manoFavorita: String(f[10] || "").trim(),
       fechaRegistro: fechaExcelAISO(f[11]) || String(f[11] || "").trim(),
       estatus: String(f[12] || "Activo").trim() || "Activo",
-      host: String(f[13] || "").trim().toLowerCase() === "sí" || String(f[13] || "").trim().toLowerCase() === "si",
-      hostFecha: fechaExcelAISO(f[14]) || String(f[14] || "").trim(),
+      // columnas 13/14 (Host, Host Fecha) ya no se leen — el concepto de Host se eliminó (66ª entrega)
       // 45ª entrega: columnas 17/18/19 — cuenta/banco/tipoCuenta (CLABE o Tarjeta de Débito)
       cuenta: String(f[17] || "").trim(),
       banco: String(f[18] || "").trim(),
@@ -493,6 +496,43 @@ export function syncParametros(data) {
       ["Mensaje de mantenimiento", data.mensajeMantenimiento || ""],
     ];
     await writeSheetTable("Parametros_Generales", filas, { maxRows: 20 });
+  });
+}
+
+// 66ª entrega: "Estadísticas" (MOD 7) — reemplazo del flujo en vivo de Game Night por archivos que el
+// administrador sube una vez por torneo (Excel de PokerStars con el orden final + texto del chat con
+// los Killers). Igual que las hojas de Game Night, estas dos se crean solas la primera vez que hay
+// algo que sincronizar. "Estadisticas_Resultados" es una fila por jugador+torneo (publicado o no, con
+// su propia columna "Publicado" para que quede claro en el Excel); "Estadisticas_Apodos" es la tabla
+// de apodos de chat que usa el parser de Killers para reconocer a cada jugador en el WhatsApp.
+export function syncEstadisticas(torneosMapa, apodos) {
+  return safe(async () => {
+    const filas = [];
+    for (const [campeonato, fechas] of Object.entries(torneosMapa || {})) {
+      for (const [fecha, torneo] of Object.entries(fechas || {})) {
+        for (const j of Object.values(torneo.jugadores || {})) {
+          filas.push([
+            campeonato, fecha, torneo.tipo || "", j.alias || "", j.nombre || "",
+            j.buyIn ? "Sí" : "No", j.rebuys || 0, j.addon ? "Sí" : "No", j.lugar || "",
+            j.eliminadoPor || "", j.puntos || 0, j.debeTotal || 0, j.premioTotal || 0,
+            (Number(j.premioTotal) || 0) - (Number(j.debeTotal) || 0),
+            torneo.publicado ? "Sí" : "No", torneo.subidoEn || "", torneo.publicadoEn || "",
+          ]);
+        }
+      }
+    }
+    await asegurarHoja("Estadisticas_Resultados", [
+      "Campeonato", "Fecha", "Tipo", "Alias PokerStars", "Nombre",
+      "Buy-in", "Re-buys", "Add-on", "Lugar", "Killer", "Puntos", "Debe", "Premio", "Saldo",
+      "Publicado", "Subido En", "Publicado En",
+    ]);
+    await writeSheetTable("Estadisticas_Resultados", filas, { maxRows: 2000 });
+
+    const filasApodos = Object.entries(apodos || {}).map(([alias, lista]) => [
+      alias, (lista || [])[0] || "", (lista || [])[1] || "", (lista || [])[2] || "",
+    ]);
+    await asegurarHoja("Estadisticas_Apodos", ["Alias PokerStars", "Apodo 1", "Apodo 2", "Apodo 3"]);
+    await writeSheetTable("Estadisticas_Apodos", filasApodos, { maxRows: 200 });
   });
 }
 

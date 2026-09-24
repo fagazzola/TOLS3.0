@@ -172,3 +172,13 @@ export default async (req) => {
 };
 
 export { PRACTICA_CAMPEONATO };
+
+// FALTABA en la 66ª/67ª entrega: sin este `config`, Netlify Functions v2 solo expone esta función en
+// `/.netlify/functions/estadisticas`, no en `/api/estadisticas` (a diferencia de TODAS las demás
+// funciones del sitio — jugadores.js, tablero.js, calendario.js, etc. — que sí lo tienen). Sin la ruta
+// `/api/*` reconocida, cualquier método que no fuera un GET normal (como el PUT de "guardarApodos" o
+// "guardarTorneo") caía en el redirect estático `/* -> /index.html` de netlify.toml, que para un método
+// distinto de GET/HEAD devuelve un 405 "Method not allowed" en texto plano — de ahí el error
+// "Unexpected token 'M' ... is not valid JSON" que vio Federico al intentar guardar los apodos. Con esta
+// línea la función queda expuesta en `/api/estadisticas` igual que el resto del sitio.
+export const config = { path: "/api/estadisticas" };

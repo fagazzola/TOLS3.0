@@ -133,6 +133,11 @@ export default function Estadisticas({ session }) {
   const [chatNombreArchivo, setChatNombreArchivo] = useState("");
   const [preview, setPreview] = useState(null);
   const [publicando, setPublicando] = useState(false);
+  // asignación manual del administrador para los killers "dudosos" (sin víctima confirmada): clave =
+  // índice dentro de preview.logNoResueltos, valor = Alias PokerStars al que se le acredita ese kill.
+  // Arranca en el killerAlias que ya resolvió extraerKillersDeChat() cuando lo hay (el remitente del
+  // mensaje) y el administrador puede corregirlo o dejarlo "Sin asignar" si prefiere no contarlo.
+  const [dudososAsignacion, setDudososAsignacion] = useState({});
   const excelRef = useRef(null);
   const chatRef = useRef(null);
   const apodosExcelRef = useRef(null);
@@ -200,6 +205,20 @@ export default function Estadisticas({ session }) {
     const encontrado = jugadoresTorneoActual.find((j) => j.alias === alias);
     return encontrado ? encontrado.alias || encontrado.nombre : alias;
   }
+
+  // total de kills hechos por cada jugador en el torneo ya publicado: los confirmados en la tabla más los
+  // "dudosos" que el administrador ya dejó asignados al publicar (campo `asignadoA`, guardado desde la
+  // 68ª entrega — un torneo publicado antes de esa entrega simplemente no tiene ese campo y no suma nada).
+  const killsPorAliasTorneo = useMemo(() => {
+    const tally = {};
+    for (const j of jugadoresTorneoActual) {
+      if (j.eliminadoPor) tally[j.eliminadoPor] = (tally[j.eliminadoPor] || 0) + 1;
+    }
+    (torneoActual?.logKillersNoResueltos || []).forEach((l) => {
+      if (l.asignadoA) tally[l.asignadoA] = (tally[l.asignadoA] || 0) + 1;
+    });
+    return tally;
+  }, [jugadoresTorneoActual, torneoActual]);
 
   // fila de totales al pie de la tabla publicada: Buy-ins, Re-buys, Add-ons, Debe, Premios y Saldo
   const totalesTorneo = useMemo(() => {
@@ -355,6 +374,23 @@ export default function Estadisticas({ session }) {
     setPreview({ porJugador: matched, sinMatchExcel, logNoResueltos: noResueltos });
   }, [excelJugadores, chatTexto, estData.apodos, directorio]);
 
+  // sincroniza la asignación manual de los "dudosos" cada vez que cambia el preview (nuevo torneo, nuevo
+  // archivo, o apodos recién guardados que resuelven más kills): conserva lo que el administrador ya
+  // corrigió a mano y solo rellena los índices nuevos con el killerAlias que resolvió el chat, si lo hay.
+  useEffect(() => {
+    if (!preview) {
+      setDudososAsignacion({});
+      return;
+    }
+    setDudososAsignacion((prev) => {
+      const next = {};
+      preview.logNoResueltos.forEach((l, i) => {
+        next[i] = prev[i] !== undefined ? prev[i] : (l.killerAlias || "");
+      });
+      return next;
+    });
+  }, [preview]);
+
   const previewCalculado = useMemo(() => {
     if (!preview || !torneoAdminInfo) return null;
     const tipoParaCalculo = torneoAdminInfo.campeonato === PRACTICA_CAMPEONATO ? "Regular" : torneoAdminInfo.tipo;
@@ -381,6 +417,23 @@ export default function Estadisticas({ session }) {
     const encontrado = filasPreview.find((j) => j.alias === alias);
     return encontrado ? encontrado.alias || encontrado.nombre : alias;
   }
+
+  // total de kills HECHOS por cada jugador (a quién eliminó, no quién lo eliminó a él): suma los kills ya
+  // confirmados en la tabla (el "eliminadoPor" de cada víctima) más los "dudosos" que el administrador
+  // asignó a mano (o que ya venían con killerAlias resuelto y no se desasignaron).
+  const killsPorAliasPreview = useMemo(() => {
+    const tally = {};
+    for (const j of filasPreview) {
+      if (j.eliminadoPor) tally[j.eliminadoPor] = (tally[j.eliminadoPor] || 0) + 1;
+    }
+    if (preview) {
+      preview.logNoResueltos.forEach((l, i) => {
+        const alias = dudososAsignacion[i];
+        if (alias) tally[alias] = (tally[alias] || 0) + 1;
+      });
+    }
+    return tally;
+  }, [filasPreview, preview, dudososAsignacion]);
 
   // fila de totales al pie del preview: Buy-ins, Re-buys, Add-ons, Debe, Premios y Saldo
   const totalesPreview = useMemo(() => {
@@ -416,7 +469,10 @@ export default function Estadisticas({ session }) {
           fecha: torneoAdminInfo.fecha,
           tipo: torneoAdminInfo.campeonato === PRACTICA_CAMPEONATO ? "Regular" : torneoAdminInfo.tipo,
           jugadores: Object.values(previewCalculado.porJugador),
-          logKillersNoResueltos: preview.logNoResueltos,
+          // se guarda junto con cada entrada a quién quedó acreditado el kill (por default el killerAlias
+          // que ya resolvió el chat, o lo que el administrador haya corregido a mano) — así la vista del
+          // jugador puede mostrar el mismo total de kills por jugador sin tener que volver a calcularlo.
+          logKillersNoResueltos: preview.logNoResueltos.map((l, i) => ({ ...l, asignadoA: dudososAsignacion[i] || "" })),
           publicar: true,
         }),
       });
@@ -526,8 +582,9 @@ export default function Estadisticas({ session }) {
   }
 
   const colsResultados = esMainActual
-    ? "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.7fr 0.6fr 0.8fr 0.8fr 0.8fr"
-    : "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.6fr 0.8fr 0.8fr 0.8fr";
+    ? "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.6fr 0.7fr 0.6fr 0.8fr 0.8fr 0.8fr"
+    : "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.6fr 0.6fr 0.8fr 0.8fr 0.8fr";
+  const anchoMinResultados = esMainActual ? 1040 : 940;
 
   return (
     <div>
@@ -576,15 +633,15 @@ export default function Estadisticas({ session }) {
             )}
           </div>
           <div className="tbl" style={{ overflowX: "auto" }}>
-            <div className="trow thead" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880 }}>
-              <div>Alias PokerStars</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer</div><div>Lugar</div>
+            <div className="trow thead" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados }}>
+              <div>Alias PokerStars</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Kills</div>
               {esMainActual && <div>Mejor mano</div>}
               <div>Puntos</div><div>Debe (-)</div><div>Premio (+)</div><div>Saldo</div>
             </div>
             {jugadoresTorneoActual.map((j) => {
               const saldo = (j.premioTotal || 0) - (j.debeTotal || 0);
               return (
-                <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880 }} key={j.correo || j.alias}>
+                <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados }} key={j.correo || j.alias}>
                   <div>
                     {j.alias || j.nombre}
                     {j.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
@@ -595,6 +652,7 @@ export default function Estadisticas({ session }) {
                   <div>{j.addon ? "1" : "0"}</div>
                   <div>{nombreKillerEnTorneo(j.eliminadoPor)}</div>
                   <div>{j.esCampeon ? <span className="badge badge-campeon">1</span> : j.lugar ? <span className="badge badge-regular">Lugar {j.lugar}</span> : <span className="muted">—</span>}</div>
+                  <div className="num">{killsPorAliasTorneo[j.alias] || 0}</div>
                   {esMainActual && <div>{j.mejorMano ? "Sí" : "No"}</div>}
                   <div className="num right">{j.puntos ?? 0}</div>
                   <div className="num right">{moneyFirmado(-(j.debeTotal || 0))}</div>
@@ -604,13 +662,14 @@ export default function Estadisticas({ session }) {
               );
             })}
             {totalesTorneo && (
-              <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: esMainActual ? 980 : 880, fontWeight: "bold" }}>
+              <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados, fontWeight: "bold" }}>
                 <div>Totales</div>
                 <div>{totalesTorneo.buyIns}</div>
                 <div className="num">{totalesTorneo.rebuys}</div>
                 <div>{totalesTorneo.addons}</div>
                 <div></div>
                 <div></div>
+                <div className="num">{Object.values(killsPorAliasTorneo).reduce((s, n) => s + n, 0)}</div>
                 {esMainActual && <div></div>}
                 <div></div>
                 <div className="num right">{moneyFirmado(-totalesTorneo.debe)}</div>
@@ -628,6 +687,7 @@ export default function Estadisticas({ session }) {
                 {torneoActual.logKillersNoResueltos.map((l, i) => (
                   <li key={i} style={{ fontSize: 13 }}>
                     [{l.fecha} {l.hora}] {l.remitente}: "{l.mensaje}" — {l.motivo}
+                    {l.asignadoA ? <> (asignado a {l.asignadoA})</> : <> (sin asignar)</>}
                   </li>
                 ))}
               </ul>
@@ -684,12 +744,27 @@ export default function Estadisticas({ session }) {
                 </div>
               )}
               {preview.logNoResueltos.length > 0 && (
-                <details style={{ margin: "8px 0" }}>
+                <details style={{ margin: "8px 0" }} open>
                   <summary>{preview.logNoResueltos.length} killer(s) del chat sin víctima confirmada (se cuentan igual a favor de quien los escribió)</summary>
+                  <p className="section-sub" style={{ margin: "6px 0" }}>
+                    Cada uno ya se cuenta a favor de quien escribió el mensaje cuando se lo reconoce — revisá o corregí a quién se le acredita antes de publicar.
+                  </p>
                   <ul>
                     {preview.logNoResueltos.map((l, i) => (
-                      <li key={i} style={{ fontSize: 13 }}>
+                      <li key={i} style={{ fontSize: 13, marginBottom: 6, listStyle: "none" }}>
                         [{l.fecha} {l.hora}] {l.remitente}: "{l.mensaje}" — {l.motivo}
+                        <br />
+                        Asignar kill a:&nbsp;
+                        <select
+                          value={dudososAsignacion[i] || ""}
+                          onChange={(e) => setDudososAsignacion((prev) => ({ ...prev, [i]: e.target.value }))}
+                        >
+                          <option value="">Sin asignar</option>
+                          {directorio.map((j) => {
+                            const a = nombreCorto(j);
+                            return a ? <option key={a} value={a}>{a}</option> : null;
+                          })}
+                        </select>
                       </li>
                     ))}
                   </ul>
@@ -708,6 +783,7 @@ export default function Estadisticas({ session }) {
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Add-on</th>
                     <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Killer</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Kills</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Puntos</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Debe</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Premio</th>
@@ -723,6 +799,7 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.addon ? 1 : 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{nombreKillerEnPreview(j.eliminadoPor)}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{killsPorAliasPreview[j.alias] || 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(-(j.debeTotal || 0))}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{money(j.premioTotal)}</td>
@@ -739,6 +816,9 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesPreview.addons}</td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>
+                        {Object.values(killsPorAliasPreview).reduce((s, n) => s + n, 0)}
+                      </td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesPreview.debe)}</td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{money(totalesPreview.premio)}</td>

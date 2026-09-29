@@ -131,6 +131,7 @@ export default async (req) => {
         tableroMapa,
         campeonato: campKey,
         tipo: String(tipo || "Regular"),
+        fecha: fechaKey,
       });
 
       const yaExistia = actual.torneos[campKey]?.[fechaKey];

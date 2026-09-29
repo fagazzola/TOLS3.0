@@ -10,6 +10,16 @@ import { tarifa, tipoDeFecha } from "./cobranza.js";
 // netlify/functions/gamenight.js usa esta misma constante para saltarse el espejo hacia Cobranza.
 export const PRACTICA_CAMPEONATO = "__practica__";
 
+// 70ª entrega: llave reservada, a nivel del mapa completo del Tablero (`tols-tablero`, hermana de las
+// llaves de campeonato — nunca dentro de `tableroMapa[PRACTICA_CAMPEONATO]`), bajo la que se guarda la
+// configuración de puntos de CADA torneo de práctica por separado: `{ [fecha]: [{ pos, puntos }, ...] }`.
+// A propósito NO vive dentro de `tableroMapa[PRACTICA_CAMPEONATO]` — esa llave, si tuviera datos,
+// pasaría por `normalizarUno()`/`normalizarMapa()` en netlify/functions/tablero.js y heredaría de la
+// plantilla real campos que para las prácticas siempre deben quedar en 0 (cobrosPorTorneo, recomprasMax,
+// etc. — ver `recomprasMaxEfectivo()`/`tarifa()` más abajo), rompiendo la regla de que una práctica nunca
+// cuesta ni cobra nada. Por eso esta configuración vive en su propia llave, ajena a esa normalización.
+export const PUNTOS_PRACTICA_KEY = "__puntosPractica__";
+
 // 48ª entrega: Buy-in/Re-buys/Add-on tienen que funcionar igual aunque el campeonato no tenga
 // configuración en el Tablero de Control (las partidas de práctica NUNCA la tienen, y un campeonato
 // real recién creado tampoco hasta que Federico lo configure) — la diferencia es que no generan $
@@ -19,7 +29,13 @@ export const PRACTICA_CAMPEONATO = "__practica__";
 // existe pero el campo en sí está en 0, se respeta como un límite real que Federico configuró a mano.
 export function recomprasMaxEfectivo(tableroMapa, campeonato) {
   const datos = tableroMapa?.[campeonato];
-  if (!datos) return Infinity;
+  // 70ª entrega: el chequeo pasó de "¿existe una configuración?" a "¿el campo recomprasMax en sí está
+  // presente?" — antes, agregar cualquier dato bajo `tableroMapa[PRACTICA_CAMPEONATO]` (aunque fuera
+  // solo para otro propósito) hacía que este `if` ya no aplicara y el default cambiara de "sin límite" a
+  // "0 recompras" en cuanto esa llave dejara de estar vacía. Con el chequeo puntual sobre el campo, sigue
+  // sin haber límite mientras nadie lo haya configurado explícitamente — se respeta como límite real solo
+  // cuando el campo de verdad está guardado, incluso si vale 0.
+  if (!datos || datos.recomprasMax === undefined || datos.recomprasMax === null) return Infinity;
   return Number(datos.recomprasMax) || 0;
 }
 
@@ -158,22 +174,39 @@ export function pagoPorConcepto(tableroMapa, campeonato, nombreConcepto, tipo) {
   return Number(tipo === "Main" ? p.main : p.regular) || 0;
 }
 
-// 53ª entrega: Federico pidió puntos fijos para las partidas de práctica — 3/2/1 para 1er/2do/3er
-// lugar, siempre, sin importar el campeonato activo ni ninguna configuración del Tablero de Control
-// (las prácticas nunca tienen una, ver `recomprasMaxEfectivo()`). Agregó a mano una columna E en la
-// hoja "Puntos_Posiciones" del Excel para documentarlo ahí, pero el sitio no vuelve a leer esa hoja
-// (solo la escribe, por columnas A-D — ver `syncTablero()`/msgraph.js, que nunca toca la E), así que
-// la regla vive acá, fija en el código, como única fuente de verdad real.
+// puntos fijos de respaldo para partidas de práctica — 1er/2do/3er lugar — usados SOLO cuando esa
+// fecha en particular todavía no tiene su propia configuración guardada bajo `PUNTOS_PRACTICA_KEY`
+// (partidas de antes de la 70ª entrega, o una nueva que Federico todavía no configuró a mano). Antes de
+// la 70ª entrega esta era la única fuente de verdad, siempre, sin excepción — ver el comentario de
+// `calcularPuntos()` más abajo para el esquema nuevo.
 const PUNTOS_PRACTICA_POR_LUGAR = { 1: 3, 2: 2, 3: 1 };
 
+// 70ª entrega: Federico pidió que los puntos de las partidas de práctica sean configurables — cada
+// práctica puede otorgar puntos y un número de lugares distintos (antes era siempre fijo 3/2/1). La
+// configuración vive en `tableroMapa[PUNTOS_PRACTICA_KEY]?.[fecha]` (ver comentario de esa constante,
+// arriba) — un arreglo `[{ pos, puntos }, ...]` propio de esa fecha exacta. Si esa fecha no tiene
+// configuración guardada todavía, se cae de vuelta a la tabla fija de arriba, para no romper partidas ya
+// jugadas antes de esta entrega.
+function puntosPracticaPorLugar(tableroMapa, fecha, lugar) {
+  if (!lugar) return 0;
+  const config = tableroMapa?.[PUNTOS_PRACTICA_KEY]?.[fecha];
+  if (Array.isArray(config) && config.length) {
+    const entry = config.find((p) => p.pos === lugar);
+    return entry ? Number(entry.puntos) || 0 : 0;
+  }
+  return PUNTOS_PRACTICA_POR_LUGAR[lugar] || 0;
+}
+
 // puntos que un jugador se lleva de ESTE torneo: asistencia (0 si quedó amonestado) + los puntos por
-// posición de salida, si ya se le derivó un lugar. Para partidas de práctica, la posición usa la tabla
-// fija de arriba en vez de la configuración del Tablero (que las prácticas nunca tienen) — la
-// asistencia sigue en 0 para prácticas, como ya era antes de esta entrega.
-export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo, campeonato) {
+// posición de salida, si ya se le derivó un lugar. Para partidas de práctica, la posición usa la
+// configuración propia de esa fecha (o la tabla fija de respaldo, ver arriba) en vez de la
+// configuración del Tablero por campeonato (que las prácticas nunca tienen) — la asistencia sigue en 0
+// para prácticas, como ya era antes de esta entrega. `tableroMapa` completo (no solo los datos de un
+// campeonato) hace falta para poder leer `PUNTOS_PRACTICA_KEY`, que vive fuera de cualquier campeonato.
+export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo, campeonato, tableroMapa, fecha) {
   const asistencia = amonestado ? 0 : Number((tipo === "Main" ? tableroDatos?.puntos?.asistencia?.main : tableroDatos?.puntos?.asistencia?.regular) || 0);
   if (campeonato === PRACTICA_CAMPEONATO) {
-    return asistencia + (lugar ? PUNTOS_PRACTICA_POR_LUGAR[lugar] || 0 : 0);
+    return asistencia + puntosPracticaPorLugar(tableroMapa, fecha, lugar);
   }
   const posEntry = lugar ? (tableroDatos?.puntos?.posiciones || []).find((p) => p.pos === lugar) : null;
   const posPuntos = posEntry ? Number((tipo === "Main" ? posEntry.main : posEntry.regular) || 0) : 0;
@@ -183,7 +216,7 @@ export function calcularPuntos({ lugar, amonestado }, tableroDatos, tipo, campeo
 // arma, para un torneo puntual (campeonato+fecha), el estado completo ya calculado que consume la UI
 // y lo que se necesita para reflejar el torneo en Cobranza — un solo lugar con toda la lógica de
 // negocio para que servidor y cliente calculen exactamente lo mismo
-export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, ordenEliminados }) {
+export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, ordenEliminados, fecha }) {
   const datosTablero = tableroMapa?.[campeonato] || {};
   const correosHabilitados = Object.entries(jugadoresState)
     .filter(([, j]) => j.checkin)
@@ -227,7 +260,7 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, or
       premioBurbuja,
       premioMano,
       premioTotal,
-      puntos: calcularPuntos({ lugar, amonestado: j.amonestado }, datosTablero, tipo, campeonato),
+      puntos: calcularPuntos({ lugar, amonestado: j.amonestado }, datosTablero, tipo, campeonato, tableroMapa, fecha),
     };
   }
 
@@ -254,7 +287,7 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, or
 // directorio de Jugadores) y cada valor trae `{ buyIn, rebuys, addon, lugar, mejorMano }` —
 // `buyIn`/`rebuys`/`addon` siempre vienen de la misma fila del Excel de resultados (todo el que
 // aparece ahí tuvo buy-in). El Campeón es quien tiene `lugar === 1`.
-export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeonato, tipo }) {
+export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeonato, tipo, fecha }) {
   const datosTablero = tableroMapa?.[campeonato] || {};
   const claves = Object.keys(jugadoresState || {});
   const total = claves.length;
@@ -306,7 +339,7 @@ export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeona
       premioBurbuja,
       premioMano,
       premioTotal,
-      puntos: calcularPuntos({ lugar, amonestado: false }, datosTablero, tipo, campeonato),
+      puntos: calcularPuntos({ lugar, amonestado: false }, datosTablero, tipo, campeonato, tableroMapa, fecha),
     };
   }
 

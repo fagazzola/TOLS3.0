@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
 import seed from "../data/tablero.json";
+import { PUNTOS_PRACTICA_KEY } from "../lib/gamenight.js";
 
 const API = "/api/tablero";
 const API_CAMP = "/api/campeonatos";
@@ -44,6 +45,15 @@ function sumPct(arr) {
 }
 function nuevoId() {
   return "custom-" + Math.random().toString(36).slice(2, 9);
+}
+function fechaFmt(iso) {
+  const [y, m, d] = String(iso || "").split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso || "";
+}
+// puntos de respaldo para un torneo de práctica que todavía no tiene su propia configuración guardada
+// — mismo default que usaba la tabla fija de antes de esta entrega (ver src/lib/gamenight.js).
+function puntosPracticaDefault() {
+  return [{ pos: 1, puntos: 3 }, { pos: 2, puntos: 2 }, { pos: 3, puntos: 1 }];
 }
 
 // un campeonato NUEVO arranca de cero — nunca hereda los valores de otro campeonato. Se conserva la
@@ -136,6 +146,15 @@ export default function Tablero({ session, perfiles }) {
   const [campActionError, setCampActionError] = useState("");
   const [confirmModal, setConfirmModal] = useState(null); // { tipo: "nuevo" | "eliminar" | "cambiar", nombre }
 
+  // 70ª entrega: "Puntos para torneos de práctica" — igual que Parámetros Generales, esto NO depende
+  // del campeonato elegido en el combo de arriba: cada torneo de práctica (identificado por su fecha en
+  // el Calendario) tiene su propia configuración de puntos, independiente de las demás — aunque esos
+  // puntos sí se suman dentro del campeonato en curso, porque las prácticas son parte de él. Se guarda
+  // bajo PUNTOS_PRACTICA_KEY (ver src/lib/gamenight.js), fuera de `tableroMap[campeonato]`.
+  const [borradorPractica, setBorradorPractica] = useState({}); // fecha -> [{ pos, puntos }, ...]
+  const [guardandoPractica, setGuardandoPractica] = useState({}); // fecha -> bool
+  const [erroresPractica, setErroresPractica] = useState({}); // fecha -> string
+
   useEffect(() => {
     Promise.all([
       fetch(API_CAMP).then((r) => {
@@ -171,6 +190,74 @@ export default function Tablero({ session, perfiles }) {
       .catch((e) => setLoadError(e.message || "Error al cargar el tablero."))
       .finally(() => setLoading(false));
   }, []);
+
+  // siembra el borrador de "Puntos para torneos de práctica" en cuanto están cargados tanto el
+  // Calendario (de ahí salen las fechas de práctica) como el Tablero (de ahí lo ya guardado bajo
+  // PUNTOS_PRACTICA_KEY) — conserva lo que el administrador ya esté editando y solo rellena fechas
+  // nuevas que todavía no tengan un borrador en pantalla.
+  useEffect(() => {
+    if (!tableroMap || !torneosCal.length) return;
+    const fechasPractica = torneosCal.filter((t) => t.practica && t.fecha).map((t) => t.fecha);
+    if (!fechasPractica.length) return;
+    setBorradorPractica((prev) => {
+      let cambio = false;
+      const next = { ...prev };
+      for (const fecha of fechasPractica) {
+        if (next[fecha]) continue;
+        const guardado = tableroMap[PUNTOS_PRACTICA_KEY]?.[fecha];
+        next[fecha] = guardado && guardado.length ? structuredClone(guardado) : puntosPracticaDefault();
+        cambio = true;
+      }
+      return cambio ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableroMap, torneosCal]);
+
+  function cambiarPuntoPractica(fecha, i, valor) {
+    setBorradorPractica((prev) => {
+      const fila = [...(prev[fecha] || [])];
+      fila[i] = { ...fila[i], puntos: Number(valor) };
+      return { ...prev, [fecha]: fila };
+    });
+  }
+  function agregarLugarPractica(fecha) {
+    setBorradorPractica((prev) => {
+      const fila = [...(prev[fecha] || [])];
+      fila.push({ pos: fila.length + 1, puntos: 0 });
+      return { ...prev, [fecha]: fila };
+    });
+  }
+  function quitarLugarPractica(fecha, i) {
+    setBorradorPractica((prev) => {
+      const fila = [...(prev[fecha] || [])];
+      fila.splice(i, 1);
+      fila.forEach((p, j) => (p.pos = j + 1));
+      return { ...prev, [fecha]: fila };
+    });
+  }
+  async function guardarPuntosPractica(fecha) {
+    const lista = borradorPractica[fecha] || [];
+    if (!lista.length) {
+      setErroresPractica((prev) => ({ ...prev, [fecha]: "Debe haber al menos 1 lugar." }));
+      return;
+    }
+    setGuardandoPractica((prev) => ({ ...prev, [fecha]: true }));
+    setErroresPractica((prev) => ({ ...prev, [fecha]: "" }));
+    try {
+      const r = await fetch(API, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion: "guardarPuntosPractica", fecha, lista }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudieron guardar los puntos.");
+      setTableroMap(json);
+    } catch (e) {
+      setErroresPractica((prev) => ({ ...prev, [fecha]: e.message || "No se pudieron guardar los puntos." }));
+    } finally {
+      setGuardandoPractica((prev) => ({ ...prev, [fecha]: false }));
+    }
+  }
 
   if (loading) return <p className="subtitle">Cargando tablero…</p>;
   if (loadError || !draft) {
@@ -459,7 +546,11 @@ export default function Tablero({ session, perfiles }) {
 
       const tieneDatos = tableroMap && Object.prototype.hasOwnProperty.call(tableroMap, nombre);
       let nuevoMapa = tableroMap;
-      if (tieneDatos && Object.keys(tableroMap).length > 1) {
+      // PUNTOS_PRACTICA_KEY (ver src/lib/gamenight.js) siempre está presente en tableroMap y no es un
+      // campeonato — se excluye del conteo, igual que en el backend, para no confundir "queda 1
+      // campeonato real" con "quedan 2 llaves".
+      const campeonatosConDatos = Object.keys(tableroMap || {}).filter((k) => k !== PUNTOS_PRACTICA_KEY);
+      if (tieneDatos && campeonatosConDatos.length > 1) {
         const rt = await fetch(API, {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -784,6 +875,65 @@ export default function Tablero({ session, perfiles }) {
             onClick={() => set((d) => { d.puntos.posiciones.push({ pos: d.puntos.posiciones.length + 1, regular: 0, main: 0 }); })}>
             + Agregar posición
           </button>
+        )}
+      </div>
+
+      {/* ───────── Puntos para torneos de práctica (70ª entrega) — independiente del combo de
+          campeonato de arriba: cada torneo de práctica del Calendario tiene su propia configuración,
+          y esos puntos se suman dentro del campeonato en curso porque las prácticas son parte de él. ───────── */}
+      <div className="section">
+        <div className="section-head"><div className="section-title">Puntos para torneos de práctica</div></div>
+        <div className="section-sub">
+          Independiente del campeonato seleccionado arriba — cada torneo de práctica del Calendario otorga sus propios
+          puntos y su propio número de lugares. Esos puntos se cuentan dentro del campeonato en curso, ya que las
+          prácticas son parte de él.
+        </div>
+        {torneosCal.filter((t) => t.practica && t.fecha).length === 0 ? (
+          <div className="section-sub" style={{ padding: 16 }}>Todavía no hay ningún torneo de práctica en el Calendario.</div>
+        ) : (
+          torneosCal
+            .filter((t) => t.practica && t.fecha)
+            .sort((a, b) => a.fecha.localeCompare(b.fecha))
+            .map((t) => {
+              const fecha = t.fecha;
+              const filas = borradorPractica[fecha] || [];
+              return (
+                <div key={fecha} style={{ margin: "12px 0", paddingTop: 12, borderTop: "1px solid #eee" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{fechaFmt(fecha)}</div>
+                  <div className="tbl">
+                    <div className="trow thead" style={{ gridTemplateColumns: editable ? "60px 100px 40px" : "60px 100px" }}>
+                      <div>Lugar</div><div className="right">Puntos</div>{editable && <div />}
+                    </div>
+                    {filas.map((row, i) => (
+                      <div className="trow" style={{ gridTemplateColumns: editable ? "60px 100px 40px" : "60px 100px" }} key={i}>
+                        <div className="num">{row.pos}º</div>
+                        {editable ? (
+                          <input type="number" className="field right" value={row.puntos}
+                            onChange={(e) => cambiarPuntoPractica(fecha, i, e.target.value)} />
+                        ) : <div className="right num">{row.puntos}</div>}
+                        {editable && (
+                          <button className="btn-icon-remove" title="Quitar lugar" disabled={filas.length <= 1}
+                            onClick={() => quitarLugarPractica(fecha, i)}>✕</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {editable && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                      <button className="btn btn-secondary btn-add" disabled={filas.length >= 15}
+                        onClick={() => agregarLugarPractica(fecha)}>
+                        + Agregar lugar
+                      </button>
+                      <button className="btn btn-primary" disabled={guardandoPractica[fecha]}
+                        onClick={() => guardarPuntosPractica(fecha)}>
+                        {guardandoPractica[fecha] ? "Guardando…" : "Guardar"}
+                      </button>
+                      {erroresPractica[fecha] && <span style={{ color: "#b00020", fontSize: 13 }}>{erroresPractica[fecha]}</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })
         )}
       </div>
 

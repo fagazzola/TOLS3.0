@@ -262,8 +262,9 @@ export default function GameNight({ session, perfiles, esHost }) {
         campeonato: campeonatoSel,
         tipo,
         ordenEliminados: torneoState.ordenEliminados,
+        fecha: fechaSel,
       }),
-    [torneoState, tableroMapa, campeonatoSel, tipo]
+    [torneoState, tableroMapa, campeonatoSel, tipo, fechaSel]
   );
 
   const hostActual = jugadoresSitio.find((j) => j.host);

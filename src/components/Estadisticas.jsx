@@ -183,9 +183,9 @@ export default function Estadisticas({ session }) {
     return lista.sort((a, b) => b.fecha.localeCompare(a.fecha));
   }, [estData]);
 
-  useEffect(() => {
-    if (!torneoAbierto && torneosPublicados.length) setTorneoAbierto(torneosPublicados[0]);
-  }, [torneosPublicados]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 70ª entrega: a pedido de Federico, ya NO se preselecciona el torneo más reciente al entrar — la
+  // pantalla solo muestra los botones de "Torneos publicados"; los resultados se despliegan recién
+  // cuando el usuario elige uno.
 
   const torneoActual = torneoAbierto ? estData.torneos?.[torneoAbierto.campeonato]?.[torneoAbierto.fecha] : null;
   const esMainActual = torneoActual?.tipo === "Main";
@@ -274,9 +274,15 @@ export default function Estadisticas({ session }) {
 
   useEffect(() => {
     if (!torneoAdminSel && opcionesTorneoAdmin.length) {
-      // por default selecciona el torneo más reciente (aunque el combo se muestre de más cercano a más
-      // lejano, el más útil para subir resultados suele ser el último jugado)
-      const o = opcionesTorneoAdmin.reduce((mas, cur) => (cur.fecha > mas.fecha ? cur : mas), opcionesTorneoAdmin[0]);
+      // 70ª entrega: por default selecciona el torneo que sigue cronológicamente al último ya publicado
+      // — no simplemente "el más reciente del combo" (que antes de tener resultados es el mismo torneo
+      // que ya se acaba de publicar). Si no hay ninguno posterior al último publicado (falta cargar
+      // fechas nuevas en el Calendario, o ya se publicó todo), cae de vuelta al más reciente disponible.
+      const ultimaFechaPublicada = torneosPublicados.reduce((mas, t) => (t.fecha > mas ? t.fecha : mas), "");
+      const siguientes = opcionesTorneoAdmin.filter((o) => o.fecha > ultimaFechaPublicada);
+      const o = siguientes.length
+        ? siguientes.reduce((min, cur) => (cur.fecha < min.fecha ? cur : min), siguientes[0])
+        : opcionesTorneoAdmin.reduce((mas, cur) => (cur.fecha > mas.fecha ? cur : mas), opcionesTorneoAdmin[0]);
       setTorneoAdminSel(`${o.campeonato}|${o.fecha}`);
     }
   }, [opcionesTorneoAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -399,6 +405,7 @@ export default function Estadisticas({ session }) {
       tableroMapa,
       campeonato: torneoAdminInfo.campeonato,
       tipo: tipoParaCalculo,
+      fecha: torneoAdminInfo.fecha,
     });
   }, [preview, tableroMapa, torneoAdminInfo]);
 
@@ -581,11 +588,6 @@ export default function Estadisticas({ session }) {
     );
   }
 
-  const colsResultados = esMainActual
-    ? "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.6fr 0.7fr 0.6fr 0.8fr 0.8fr 0.8fr"
-    : "1.3fr 0.6fr 0.7fr 0.6fr 1fr 0.6fr 0.6fr 0.6fr 0.8fr 0.8fr 0.8fr";
-  const anchoMinResultados = esMainActual ? 1040 : 940;
-
   return (
     <div>
       <div className="eyebrow">♠ Torrente On Line Series - TOLS 3.0</div>
@@ -632,52 +634,70 @@ export default function Estadisticas({ session }) {
               </button>
             )}
           </div>
-          <div className="tbl" style={{ overflowX: "auto" }}>
-            <div className="trow thead" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados }}>
-              <div>Alias PokerStars</div><div>Buy-in</div><div>Re-buys</div><div>Add-on</div><div>Killer</div><div>Lugar</div><div>Kills</div>
-              {esMainActual && <div>Mejor mano</div>}
-              <div>Puntos</div><div>Debe (-)</div><div>Premio (+)</div><div>Saldo</div>
-            </div>
-            {jugadoresTorneoActual.map((j) => {
-              const saldo = (j.premioTotal || 0) - (j.debeTotal || 0);
-              return (
-                <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados }} key={j.correo || j.alias}>
-                  <div>
-                    {j.alias || j.nombre}
-                    {j.esCampeon && <span className="badge badge-campeon" style={{ marginLeft: 6 }} title="Campeón">🏆</span>}
-                    {j.esBurbuja && <span className="badge badge-burbuja" style={{ marginLeft: 6 }} title="Burbuja">🫧</span>}
-                  </div>
-                  <div>{j.buyIn ? "1" : "0"}</div>
-                  <div className="num">{j.rebuys || 0}</div>
-                  <div>{j.addon ? "1" : "0"}</div>
-                  <div>{nombreKillerEnTorneo(j.eliminadoPor)}</div>
-                  <div>{j.esCampeon ? <span className="badge badge-campeon">1</span> : j.lugar ? <span className="badge badge-regular">Lugar {j.lugar}</span> : <span className="muted">—</span>}</div>
-                  <div className="num">{killsPorAliasTorneo[j.alias] || 0}</div>
-                  {esMainActual && <div>{j.mejorMano ? "Sí" : "No"}</div>}
-                  <div className="num right">{j.puntos ?? 0}</div>
-                  <div className="num right">{moneyFirmado(-(j.debeTotal || 0))}</div>
-                  <div className="num right">{money(j.premioTotal)}</div>
-                  <div className="num right">{moneyFirmado(saldo)}</div>
-                </div>
-              );
-            })}
+          {/* 70ª entrega: a pedido de Federico, esta tabla dejó de usar la grilla con badges/óvalos
+              (🏆/🫧, "Lugar N") y pasó al mismo formato plano que ya usaba el preview del administrador
+              antes de publicar — a todo el ancho de página, sin recuadros. */}
+          <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Buy-in</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Re-buys</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Add-on</th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Killer</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Kills</th>
+                {esMainActual && <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Mejor mano</th>}
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Puntos</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Debe</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Premio</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jugadoresTorneoActual.map((j) => {
+                const saldo = (j.premioTotal || 0) - (j.debeTotal || 0);
+                return (
+                  <tr key={j.correo || j.alias}>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>
+                      {j.alias || j.nombre}{j.esCampeon ? " (Campeón)" : ""}{j.esBurbuja ? " (Burbuja)" : ""}
+                    </td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.buyIn ? 1 : 0}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.rebuys || 0}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.addon ? 1 : 0}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{nombreKillerEnTorneo(j.eliminadoPor)}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{killsPorAliasTorneo[j.alias] || 0}</td>
+                    {esMainActual && <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.mejorMano ? "Sí" : "No"}</td>}
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(-(j.debeTotal || 0))}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{money(j.premioTotal)}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(saldo)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
             {totalesTorneo && (
-              <div className="trow" style={{ gridTemplateColumns: colsResultados, minWidth: anchoMinResultados, fontWeight: "bold" }}>
-                <div>Totales</div>
-                <div>{totalesTorneo.buyIns}</div>
-                <div className="num">{totalesTorneo.rebuys}</div>
-                <div>{totalesTorneo.addons}</div>
-                <div></div>
-                <div></div>
-                <div className="num">{Object.values(killsPorAliasTorneo).reduce((s, n) => s + n, 0)}</div>
-                {esMainActual && <div></div>}
-                <div></div>
-                <div className="num right">{moneyFirmado(-totalesTorneo.debe)}</div>
-                <div className="num right">{money(totalesTorneo.premio)}</div>
-                <div className="num right">{moneyFirmado(totalesTorneo.saldo)}</div>
-              </div>
+              <tfoot>
+                <tr style={{ fontWeight: "bold" }}>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}>Totales</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesTorneo.buyIns}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesTorneo.rebuys}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{totalesTorneo.addons}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>
+                    {Object.values(killsPorAliasTorneo).reduce((s, n) => s + n, 0)}
+                  </td>
+                  {esMainActual && <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>}
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesTorneo.debe)}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{money(totalesTorneo.premio)}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(totalesTorneo.saldo)}</td>
+                </tr>
+              </tfoot>
             )}
-          </div>
+          </table>
           {torneoActual.logKillersNoResueltos?.length > 0 && (
             <details style={{ margin: "8px 0" }}>
               <summary>

@@ -432,7 +432,7 @@ export default async (req) => {
     // porque ese torneo ya quedó vacío (nada que calcular).
     let estado = null;
     if (body.accion !== "reiniciarTorneo") {
-      estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo, ordenEliminados: torneo.ordenEliminados });
+      estado = estadoTorneo({ jugadoresState: torneo.jugadores, tableroMapa, campeonato, tipo, ordenEliminados: torneo.ordenEliminados, fecha });
       for (const correo of Object.keys(torneo.jugadores)) {
         const j = estado.porJugador[correo];
         if (!j) continue;

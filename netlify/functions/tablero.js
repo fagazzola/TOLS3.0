@@ -1,9 +1,11 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/tablero.json";
 import { syncTablero } from "./lib/msgraph.js";
+import { PUNTOS_PRACTICA_KEY } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const TOL = 0.01; // tolerancia para sumas de porcentaje por redondeo flotante
+const MAX_LUGARES_PRACTICA = 15;
 
 // ids antiguos que cambiaron de nombre entre versiones del esquema — se renombran en vez de
 // duplicarse cuando más abajo se asegura que los conceptos protegidos existan
@@ -62,14 +64,35 @@ function normalizarMapa(raw) {
   }
   const mapa = {};
   for (const [nombre, datos] of Object.entries(raw)) {
+    if (nombre === PUNTOS_PRACTICA_KEY) continue; // no es un campeonato — se normaliza aparte, abajo
     mapa[nombre] = normalizarUno(datos, PLANTILLA);
   }
   if (Object.keys(mapa).length === 0) return structuredCloneSafe(seed);
+  mapa[PUNTOS_PRACTICA_KEY] = normalizarPuntosPractica(raw[PUNTOS_PRACTICA_KEY]);
   return mapa;
 }
 
 function structuredCloneSafe(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+// 70ª entrega: normaliza la configuración de puntos por torneo de práctica — vive bajo su propia llave
+// reservada (`PUNTOS_PRACTICA_KEY`, ver el comentario en src/lib/gamenight.js), a propósito AJENA a
+// `normalizarUno()`/la plantilla de un campeonato real, para que un torneo de práctica nunca herede
+// costos o límites que no le corresponden. Forma: `{ [fecha]: [{ pos, puntos }, ...] }` — un arreglo
+// propio de esa fecha exacta, con el número de lugares que decida el administrador.
+function normalizarPuntosPractica(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [fecha, lista] of Object.entries(raw)) {
+    if (!fecha || !Array.isArray(lista)) continue;
+    const limpio = lista
+      .map((p) => ({ pos: Number(p?.pos) || 0, puntos: Number(p?.puntos) || 0 }))
+      .filter((p) => p.pos > 0)
+      .sort((a, b) => a.pos - b.pos);
+    if (limpio.length) out[fecha] = limpio;
+  }
+  return out;
 }
 
 function validarUno(data) {
@@ -196,12 +219,45 @@ export default async (req) => {
       }
       mapa[a] = mapa[de];
       if (a !== de) delete mapa[de];
+    } else if (body?.accion === "guardarPuntosPractica") {
+      // 70ª entrega: guarda (o reemplaza) la configuración de puntos de UN torneo de práctica en
+      // particular — independiente entre torneos, incluyendo cuántos lugares otorgan puntos. Cada
+      // torneo de práctica se identifica por su fecha (única en el Calendario, ver `practica: true`).
+      const fecha = String(body.fecha || "").trim();
+      if (!fecha) {
+        return new Response(JSON.stringify({ error: "Falta la fecha del torneo de práctica." }), { status: 400, headers: HEADERS });
+      }
+      const lista = Array.isArray(body.lista) ? body.lista : [];
+      const limpio = lista
+        .map((p) => ({ pos: Number(p?.pos) || 0, puntos: Number(p?.puntos) || 0 }))
+        .filter((p) => p.pos > 0)
+        .sort((a, b) => a.pos - b.pos);
+      if (limpio.length < 1 || limpio.length > MAX_LUGARES_PRACTICA) {
+        return new Response(JSON.stringify({ error: `Puntos de práctica: debe haber entre 1 y ${MAX_LUGARES_PRACTICA} lugares.` }), { status: 400, headers: HEADERS });
+      }
+      const posicionesEsperadas = limpio.map((_, i) => i + 1);
+      if (limpio.some((p, i) => p.pos !== posicionesEsperadas[i])) {
+        return new Response(JSON.stringify({ error: "Puntos de práctica: los lugares deben numerarse 1, 2, 3… sin huecos ni repetidos." }), { status: 400, headers: HEADERS });
+      }
+      mapa[PUNTOS_PRACTICA_KEY] = { ...mapa[PUNTOS_PRACTICA_KEY], [fecha]: limpio };
+    } else if (body?.accion === "eliminarPuntosPractica") {
+      // quita la configuración propia de esa fecha — vuelve a caer en la tabla fija de respaldo
+      // (3/2/1, ver src/lib/gamenight.js) hasta que se configure de nuevo.
+      const fecha = String(body.fecha || "").trim();
+      if (!fecha) {
+        return new Response(JSON.stringify({ error: "Falta la fecha del torneo de práctica." }), { status: 400, headers: HEADERS });
+      }
+      const restante = { ...mapa[PUNTOS_PRACTICA_KEY] };
+      delete restante[fecha];
+      mapa[PUNTOS_PRACTICA_KEY] = restante;
     } else if (body?.accion === "eliminar") {
       const campeonato = String(body.campeonato || "").trim();
       if (!campeonato || !mapa[campeonato]) {
         return new Response(JSON.stringify({ error: "Ese campeonato no tiene datos guardados." }), { status: 400, headers: HEADERS });
       }
-      if (Object.keys(mapa).length <= 1) {
+      // Object.keys(mapa) siempre incluye PUNTOS_PRACTICA_KEY (no es un campeonato) — se excluye del
+      // conteo para no permitir borrar el último campeonato real por error.
+      if (Object.keys(mapa).filter((k) => k !== PUNTOS_PRACTICA_KEY).length <= 1) {
         return new Response(JSON.stringify({ error: "Debe quedar al menos un campeonato con datos." }), { status: 400, headers: HEADERS });
       }
       delete mapa[campeonato];

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { NIVEL_LABEL } from "../../../src/lib/permisos.js";
+import { PUNTOS_PRACTICA_KEY } from "../../../src/lib/gamenight.js";
 
 const TOKEN_ENDPOINT = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -333,7 +334,10 @@ export function syncCampeonatos(data) {
 
 export function syncTablero(mapa) {
   return safe(async () => {
-    const nombres = Object.keys(mapa || {});
+    // PUNTOS_PRACTICA_KEY no es un campeonato (ver src/lib/gamenight.js) — a propósito no tiene
+    // premios/puntos/cobrosPorTorneo, así que se excluye de este loop (que sí los espera en cada
+    // entrada) y se sincroniza aparte, más abajo, en su propia hoja.
+    const nombres = Object.keys(mapa || {}).filter((n) => n !== PUNTOS_PRACTICA_KEY);
     const config = [];
     const premiosTorneo = [];
     const premiosCampeonato = [];
@@ -341,6 +345,7 @@ export function syncTablero(mapa) {
     const gastos = [];
     const cobros = [];
     const pagos = [];
+    const puntosPractica = [];
 
     for (const nombre of nombres) {
       const d = mapa[nombre];
@@ -352,6 +357,10 @@ export function syncTablero(mapa) {
       for (const c of d.cobrosPorTorneo) cobros.push([nombre, c.nombre, c.id, c.regular, c.main, c.protegido ? "Sí" : "No"]);
       for (const p of d.pagosPorTorneo) pagos.push([nombre, p.nombre, p.regular, p.main]);
     }
+    // 70ª entrega: puntos por torneo de práctica — independientes entre fechas, ver PUNTOS_PRACTICA_KEY.
+    for (const [fecha, lista] of Object.entries(mapa?.[PUNTOS_PRACTICA_KEY] || {})) {
+      for (const p of lista) puntosPractica.push([fecha, p.pos, p.puntos]);
+    }
 
     await writeSheetTable("Tablero_Config", config);
     await writeSheetTable("Premios_Torneo", premiosTorneo);
@@ -360,6 +369,10 @@ export function syncTablero(mapa) {
     await writeSheetTable("Gastos_Campeonato", gastos);
     await writeSheetTable("Cobros_Torneo", cobros);
     await writeSheetTable("Pagos_Torneo", pagos);
+    // "Puntos_Practica" es una hoja nueva de esta entrega (a diferencia de las demás de esta función,
+    // que ya existían en el Excel maestro de Federico) — se asegura que exista antes de escribirle.
+    await asegurarHoja("Puntos_Practica", ["Fecha", "Lugar", "Puntos"]);
+    await writeSheetTable("Puntos_Practica", puntosPractica);
   });
 }
 

@@ -30,10 +30,36 @@ function normalizarJugadorEst(j) {
   };
 }
 
+// bug encontrado tras la 70ª entrega — Federico reportó que al abrir un torneo publicado la tabla ya
+// no traía los puntos calculados al subirlo. Causa: `normalizarJugadorEst()` de arriba está pensada
+// para sanear el INPUT del administrador ANTES de calcular (ahí los campos calculados nunca deben venir
+// del cliente, así que se descartan a propósito) — pero `normalizarTorneoEst()` reutilizaba esa misma
+// función para sanear los datos YA GUARDADOS al leerlos, así que en cada GET se borraban Puntos/
+// Debe/Premio/Saldo/Campeón/Burbuja de la copia en memoria, y como el GET vuelve a guardar en Blobs en
+// cuanto detecta una diferencia (`JSON.stringify(raw) !== JSON.stringify(normalizado)`), esa pérdida
+// quedaba persistida de forma permanente la primera vez que alguien abría la pantalla después de
+// publicar. Fix: función aparte para los datos ya guardados, que conserva los campos calculados.
+function normalizarJugadorEstGuardado(j) {
+  return {
+    ...normalizarJugadorEst(j),
+    esCampeon: Boolean(j?.esCampeon),
+    esBurbuja: Boolean(j?.esBurbuja),
+    debeBuyIn: Number(j?.debeBuyIn) || 0,
+    debeRebuys: Number(j?.debeRebuys) || 0,
+    debeAddon: Number(j?.debeAddon) || 0,
+    debeTotal: Number(j?.debeTotal) || 0,
+    premioLugar: Number(j?.premioLugar) || 0,
+    premioBurbuja: Number(j?.premioBurbuja) || 0,
+    premioMano: Number(j?.premioMano) || 0,
+    premioTotal: Number(j?.premioTotal) || 0,
+    puntos: Number(j?.puntos) || 0,
+  };
+}
+
 function normalizarTorneoEst(t) {
   const jugadores = {};
   for (const [clave, j] of Object.entries(t?.jugadores || {})) {
-    jugadores[clave] = normalizarJugadorEst(j);
+    jugadores[clave] = normalizarJugadorEstGuardado(j);
   }
   return {
     tipo: String(t?.tipo || "Regular").trim(),

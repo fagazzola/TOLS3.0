@@ -71,6 +71,19 @@ function normalizarMovimiento(m) {
   };
 }
 
+// 74ª entrega: `enviosSaldo` registra, por "campeonato|fecha|correo", cuándo (ISO) se le mandó al
+// jugador el correo de "Saldo Torneo" desde "Resultados de Torneos" — así la tabla puede mostrar "ya se
+// envió" sin depender de nada que viva solo en la sesión del navegador del Tesorero.
+function normalizarEnviosSaldo(v) {
+  const out = {};
+  if (v && typeof v === "object") {
+    for (const [clave, fecha] of Object.entries(v)) {
+      if (typeof fecha === "string" && fecha) out[clave] = fecha;
+    }
+  }
+  return out;
+}
+
 function normalizar(data) {
   const base = data && typeof data === "object" ? data : {};
   const jugadores = {};
@@ -78,7 +91,8 @@ function normalizar(data) {
     jugadores[String(correo).trim().toLowerCase()] = normalizarJugador(j);
   }
   const movimientos = (Array.isArray(base.movimientos) ? base.movimientos : seed.movimientos || []).map(normalizarMovimiento);
-  return { jugadores, movimientos };
+  const enviosSaldo = normalizarEnviosSaldo(base.enviosSaldo);
+  return { jugadores, movimientos, enviosSaldo };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -124,7 +138,21 @@ async function respuestaCompleta(data) {
   for (const correo of Object.keys(resumen)) {
     adeudos[correo] = tieneAdeudoBloqueante(correo, movimientos, jugadoresResumen, proximaFecha);
   }
-  return { jugadores: data.jugadores, movimientos, resumen, adeudos, proximaFecha };
+  return { jugadores: data.jugadores, movimientos, resumen, adeudos, proximaFecha, enviosSaldo: data.enviosSaldo || {} };
+}
+
+// 74ª entrega: usada por netlify/functions/cobranza-enviar-saldo.js justo después de mandar el correo de
+// "Saldo Torneo" — marca esa combinación campeonato+fecha+correo como enviada (con la hora ISO) para que
+// "Resultados de Torneos" pueda mostrar "ya se envió" en la tabla sin depender de estado local del
+// navegador del Tesorero. Nunca se llama si el envío del correo falló.
+export async function marcarSaldoEnviado(campeonato, fecha, correo) {
+  const store = getStore({ name: "tols-cobranza", consistency: "strong" });
+  const raw = await store.get("data", { type: "json", consistency: "strong" });
+  const actual = normalizar(raw);
+  const clave = `${campeonato}|${fecha}|${String(correo).trim().toLowerCase()}`;
+  actual.enviosSaldo[clave] = new Date().toISOString();
+  await store.setJSON("data", actual);
+  return respuestaCompleta(actual);
 }
 
 function filasParaExcel({ movimientos, resumen }) {

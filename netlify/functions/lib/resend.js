@@ -97,6 +97,53 @@ export function plantillaRegistroExitoso(nombre, numeroRegistro) {
   </div>`;
 }
 
+// 74ª entrega: correo de "Saldo Torneo" — lo dispara el Tesorero desde Cobranza ("Resultados de
+// Torneos") para uno o varios jugadores con saldo negativo en un torneo ya publicado. Mismo look & feel
+// que plantillaRegistroExitoso() (mismo layout de tarjeta oscura), pero con el monto de la deuda como
+// protagonista: grande, centrado y en rojo, con los centavos siempre iguales al número de registro del
+// jugador (mismo campo que ya se usa como "id" en tols-jugadores y que ya se le explicó al jugador en el
+// correo de bienvenida) — así el Tesorero identifica de quién es cada depósito.
+export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegistro) {
+  const num = String(numeroRegistro).padStart(2, "0");
+  const monto = Math.round(Math.abs(Number(montoDeuda) || 0)).toLocaleString("en-US");
+  return `
+  <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
+    <div style="max-width:460px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
+      <div style="font-size:13px; letter-spacing:.06em; color:#8fd694; text-transform:uppercase; margin-bottom:8px;">♦ Torrente On Line Series - TOLS 3.0</div>
+      <h2 style="margin:0 0 16px; color:#fff;">Saldo pendiente — Torneo ${torneoLabel}</h2>
+      <p style="margin:0 0 14px; color:#b6c2cd; font-size:14px;">
+        Estimado ${nombre || ""}:
+      </p>
+      <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
+        Nuestros registros indican que, después de cerrado el torneo ${torneoLabel}, tu saldo es de:
+      </p>
+      <div style="font-size:32px; font-weight:800; text-align:center; background:#0f1720; border-radius:10px; padding:18px 12px; color:#ff5c5c; border:1px solid #3a2530; margin:0 0 16px;">
+        ($ ${monto}.${num})
+      </div>
+      <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
+        <strong>Importante:</strong> los dos últimos dígitos de esa cifra (<strong>.${num}</strong>) son tu
+        <strong>número de registro</strong> — inclúyelos siempre como los centavos de tu depósito, para que
+        el Tesorero pueda identificar que el pago es tuyo.
+      </p>
+      <p style="margin:0 0 8px; color:#b6c2cd; font-size:14px;">
+        Te invitamos a depositar a la cuenta <strong style="color:#8fd694;">CLABE 01 21 80 00 44 77 57 11 57</strong>
+        de <strong>BBVA</strong> a nombre de <strong>Oscar del Valle</strong>.
+      </p>
+      <p style="margin:22px 0 4px; color:#b6c2cd; font-size:14px;">
+        Te recordamos que la fecha límite para pagar es el <strong>viernes de esta semana</strong>.
+      </p>
+      <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
+        En caso de no recibir tu pago, estarás inhabilitado para jugar el siguiente torneo.
+      </p>
+      <p style="margin:0; color:#b6c2cd; font-size:14px;">
+        Atentamente,<br />
+        El Comité Organizador<br />
+        TOLS 3.0
+      </p>
+    </div>
+  </div>`;
+}
+
 export function plantillaCodigo(codigo, nombre) {
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">

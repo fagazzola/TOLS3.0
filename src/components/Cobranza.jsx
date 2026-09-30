@@ -1,16 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
 import { finanzasCampeonato, TIPOS_CUENTA, longitudEsperada, validarCuentaCobro } from "../lib/cobranza.js";
+import { mapaNumeracionTorneos } from "../lib/gamenight.js";
 
 const API = "/api/cobranza";
 const API_ENVIAR = "/api/cobranza-enviar-estado";
+const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
 const API_TABLERO = "/api/tablero";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_JUG = "/api/jugadores";
+const API_EST = "/api/estadisticas";
 
 function money(n) {
   return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+}
+// 74ª entrega: mismo formato contable que ya usan Calendario.jsx/Estadisticas.jsx para negativos —
+// "($ #,##0)" en vez de "-$ #,##0" — usado acá en la columna "Resultado" de "Resultados de Torneos".
+function moneyContable(n) {
+  const v = Math.round(Number(n || 0));
+  const abs = Math.abs(v).toLocaleString("en-US");
+  return v < 0 ? `($ ${abs})` : `$ ${abs}`;
+}
+function norm(s) {
+  return (s || "").trim().toLowerCase();
+}
+function nombreCorto(j) {
+  return (j.aliasPokerStars || "").trim() || j.nombre;
+}
+function fechaFmt(iso) {
+  const [y, m, d] = String(iso || "").split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso || "";
+}
+// 74ª entrega: mismo criterio que jugadorEnTorneo() de Estadisticas.jsx (copia propia, no importada, a
+// propósito — cada pantalla que lee `estData.torneos` ya trae su copia de este helper) — busca el
+// registro de un jugador del directorio dentro de un torneo ya publicado, primero por la clave real
+// (correo || alias) y si no aparece, por alias/correo entre todos los valores.
+function jugadorEnTorneo(torneo, jugadorDir) {
+  if (!torneo) return null;
+  const clave = jugadorDir.correo || nombreCorto(jugadorDir);
+  if (torneo.jugadores?.[clave]) return torneo.jugadores[clave];
+  return (
+    Object.values(torneo.jugadores || {}).find(
+      (j) => norm(j.alias) === norm(nombreCorto(jugadorDir)) || (jugadorDir.correo && norm(j.correo) === norm(jugadorDir.correo))
+    ) || null
+  );
+}
+// 74ª entrega: etiqueta corta del torneo para "Resultados de Torneos" — a diferencia de la etiqueta
+// larga de Estadísticas ("N - Regular"/"N - Main"), Federico pidió acá que un Regular muestre solo el
+// número ("1", "2"...) y un Main agregue "- Main" ("3 - Main") para diferenciarlo, sin "- Regular".
+function etiquetaCorta(entry) {
+  if (!entry) return "";
+  return entry.tipo === "Main" ? `${entry.numero} - Main` : `${entry.numero}`;
 }
 
 function movimientoVacio(campeonato, correo) {
@@ -51,12 +92,16 @@ export default function Cobranza({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod4");
 
   const [vista, setVista] = useState("resultado"); // "resultado" | "movimientos" | "estado" | "finanzas"
-  const [fechaResultado, setFechaResultado] = useState("");
-  const [data, setData] = useState(null); // { jugadores, movimientos, resumen, adeudos, proximaFecha }
+  const [fechaSaldoSel, setFechaSaldoSel] = useState(""); // 74ª entrega: fecha del torneo elegido en "Resultados de Torneos"
+  const [seleccionSaldo, setSeleccionSaldo] = useState(() => new Set());
+  const [enviandoSaldo, setEnviandoSaldo] = useState(false);
+  const [envioSaldoAviso, setEnvioSaldoAviso] = useState("");
+  const [data, setData] = useState(null); // { jugadores, movimientos, resumen, adeudos, proximaFecha, enviosSaldo }
   const [tableroMapa, setTableroMapa] = useState({});
   const [torneosCal, setTorneosCal] = useState([]);
   const [campeonatos, setCampeonatos] = useState({ nombres: [], activo: "" });
   const [jugadoresSitio, setJugadoresSitio] = useState([]);
+  const [estData, setEstData] = useState({ torneos: {}, apodos: {} }); // 74ª entrega: /api/estadisticas, para "Resultados de Torneos"
   const [campeonatoSel, setCampeonatoSel] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,13 +145,15 @@ export default function Cobranza({ session, perfiles }) {
       fetch(API_CAL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(API_CAMP).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(API_JUG).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API_EST).then((r) => (r.ok ? r.json() : { torneos: {}, apodos: {} })).catch(() => ({ torneos: {}, apodos: {} })),
     ])
-      .then(([cob, tablero, cal, camp, jug]) => {
+      .then(([cob, tablero, cal, camp, jug, est]) => {
         setData(cob);
         setTableroMapa(tablero || {});
         setTorneosCal(cal?.torneos || []);
         setCampeonatos(camp || { nombres: [], activo: "" });
         setJugadoresSitio(jug?.jugadores || []);
+        setEstData(est || { torneos: {}, apodos: {} });
         setCampeonatoSel((prev) => prev || camp?.activo || (camp?.nombres || [])[0] || "");
       })
       .catch((e) => setError(e.message || "No se pudo cargar Cobranza."))
@@ -130,12 +177,39 @@ export default function Cobranza({ session, perfiles }) {
     [torneosCal, campeonatoSel]
   );
 
-  // 51ª entrega: "Resultado de torneos" — si se cambia de campeonato arriba mientras esta vista está
-  // abierta, la fecha elegida ya no aplica (pertenece a otro campeonato) — se limpia sola para no dejar
-  // una fecha "fantasma" seleccionada que en realidad es de otro torneo.
+  // 51ª entrega: "Resultados de Torneos" — si se cambia de campeonato arriba mientras esta vista está
+  // abierta, el torneo elegido ya no aplica (pertenece a otro campeonato) — se limpia solo para no dejar
+  // un torneo "fantasma" seleccionado que en realidad es de otro campeonato. 74ª entrega: también se
+  // limpia la selección de jugadores y el aviso de envío, por la misma razón.
   useEffect(() => {
-    setFechaResultado("");
+    setFechaSaldoSel("");
+    setSeleccionSaldo(new Set());
+    setEnvioSaldoAviso("");
   }, [campeonatoSel]);
+
+  // 74ª entrega: numeración cronológica 1..n de los torneos Regular/Main de cada campeonato (ver
+  // src/lib/gamenight.js) — misma fuente que ya usan Calendario y Estadísticas, para que el número de un
+  // torneo sea siempre el mismo en toda la app. Las partidas de práctica quedan fuera (no reparten Debe
+  // real, así que no tiene sentido mandarles un "Saldo Torneo").
+  const numeracion = useMemo(() => mapaNumeracionTorneos(torneosCal), [torneosCal]);
+
+  // 74ª entrega: directorio "completo" (con id/aliasPokerStars, no solo correo+nombre) para armar la
+  // tabla de "Resultados de Torneos" — mismo criterio que el `directorio` de Estadisticas.jsx: solo
+  // jugadores Activos, excluyendo "Usuario Domi" (cuenta de pruebas del sitio).
+  const directorioActivo = useMemo(
+    () => jugadoresSitio.filter((j) => j.estatus === "Activo" && norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi"),
+    [jugadoresSitio]
+  );
+
+  // 74ª entrega: combo de "Resultados de Torneos" — solo torneos Regular/Main YA PUBLICADOS del
+  // campeonato activo (nunca práctica, que no tiene Debe real que cobrar), en orden cronológico.
+  const torneosSaldoOpciones = useMemo(() => {
+    return torneosCal
+      .filter((t) => !t.practica && t.temporada === campeonatoSel && t.fecha)
+      .map((t) => ({ fecha: t.fecha, ...(numeracion[`${campeonatoSel}|${t.fecha}`] || {}) }))
+      .filter((t) => t.numero && estData?.torneos?.[campeonatoSel]?.[t.fecha]?.publicado)
+      .sort((a, b) => a.numero - b.numero);
+  }, [torneosCal, campeonatoSel, numeracion, estData]);
 
   const movimientosDelCampeonato = useMemo(
     () => (data?.movimientos || []).filter((m) => m.campeonato === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.correo.localeCompare(b.correo)),
@@ -317,10 +391,6 @@ export default function Cobranza({ session, perfiles }) {
         <div>
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Cobranza</h1>
-          <p className="subtitle">
-            Resultado por torneo, registro de pagos y depósitos, estado de cuenta por jugador, y finanzas
-            generales del campeonato.
-          </p>
         </div>
       </div>
 
@@ -328,7 +398,7 @@ export default function Cobranza({ session, perfiles }) {
 
       <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20 }}>
         {[
-          ["resultado", "Resultado de torneos"],
+          ["resultado", "Resultados de Torneos"],
           ["movimientos", "Registrar pagos y depósitos"],
           ["estado", "Estado de cuenta"],
           ["finanzas", "Finanzas generales"],
@@ -350,67 +420,149 @@ export default function Cobranza({ session, perfiles }) {
       {vista === "resultado" && (
         <div className="section">
           <div className="section-head">
-            <div className="section-title">Resultado del torneo</div>
+            <div className="section-title">Resultados de Torneos</div>
           </div>
-          <select className="field" style={{ maxWidth: 260 }} value={fechaResultado} onChange={(e) => setFechaResultado(e.target.value)}>
-            <option value="">— elegir fecha —</option>
-            {fechasDelCampeonato.map((t) => (
+          <select
+            className="field"
+            style={{ maxWidth: 280 }}
+            value={fechaSaldoSel}
+            onChange={(e) => {
+              setFechaSaldoSel(e.target.value);
+              setSeleccionSaldo(new Set());
+              setEnvioSaldoAviso("");
+            }}
+          >
+            <option value="">— elegir torneo —</option>
+            {torneosSaldoOpciones.map((t) => (
               <option key={t.fecha} value={t.fecha}>
-                {t.fecha} {t.main ? "(Main)" : ""}
+                {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
               </option>
             ))}
           </select>
 
-          {!fechaResultado && <p className="section-sub">Elegí una fecha del campeonato ({campeonatoSel}) para ver su resultado.</p>}
+          {torneosSaldoOpciones.length === 0 && (
+            <p className="section-sub">Todavía no hay torneos publicados en Estadísticas para el campeonato ({campeonatoSel}).</p>
+          )}
+          {!fechaSaldoSel && torneosSaldoOpciones.length > 0 && (
+            <p className="section-sub">Elegí un torneo ya publicado para ver los jugadores con saldo negativo.</p>
+          )}
 
-          {fechaResultado && (() => {
-            const filas = movimientosDelCampeonato
-              .filter((m) => m.fecha === fechaResultado)
-              .sort((a, b) => (data.resumen[a.correo]?.nombre || a.correo).localeCompare(data.resumen[b.correo]?.nombre || b.correo));
+          {fechaSaldoSel && (() => {
+            const entry = torneosSaldoOpciones.find((t) => t.fecha === fechaSaldoSel);
+            const torneo = estData?.torneos?.[campeonatoSel]?.[fechaSaldoSel];
+            const etiquetaSel = etiquetaCorta(entry);
+
+            // 74ª entrega: "prácticamente la tabla de Clasificación General, solo con la columna
+            // Resultado" — mismo cálculo de resultado (premioTotal - debeTotal) que ya usa Estadísticas,
+            // pero acotado a un único torneo, filtrado a saldos negativos y ordenado de menor a mayor
+            // (el más endeudado primero) para que el Tesorero valide de arriba hacia abajo.
+            const filas = directorioActivo
+              .map((j) => ({ jugador: j, alias: nombreCorto(j), resultado: (() => {
+                const jt = jugadorEnTorneo(torneo, j);
+                return jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+              })() }))
+              .filter((f) => f.resultado < 0)
+              .sort((a, b) => a.resultado - b.resultado);
+
             if (!filas.length) {
-              return <p className="section-sub">Todavía no hay movimientos registrados en Cobranza para esta fecha.</p>;
+              return <p className="section-sub">Ningún jugador tiene saldo negativo en el torneo {etiquetaSel} ({fechaFmt(fechaSaldoSel)}).</p>;
             }
-            const totalDebe = filas.reduce((a, m) => a + (m.montoTotal || 0), 0);
-            const totalGano = filas.reduce((a, m) => a + (m.totalGanado || 0), 0);
-            const totalBalance = filas.reduce((a, m) => a + (m.balanceNeto || 0), 0);
+
+            const todosSeleccionados = filas.every((f) => seleccionSaldo.has(f.jugador.correo));
+
+            function toggleTodos() {
+              setSeleccionSaldo(todosSeleccionados ? new Set() : new Set(filas.map((f) => f.jugador.correo)));
+            }
+            function toggleUno(correo) {
+              setSeleccionSaldo((prev) => {
+                const next = new Set(prev);
+                if (next.has(correo)) next.delete(correo);
+                else next.add(correo);
+                return next;
+              });
+            }
+
+            async function enviarSeleccionados() {
+              setEnviandoSaldo(true);
+              setEnvioSaldoAviso("");
+              let ok = 0;
+              const fallidos = [];
+              for (const f of filas) {
+                if (!seleccionSaldo.has(f.jugador.correo)) continue;
+                try {
+                  const r = await fetch(API_ENVIAR_SALDO, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      correo: f.jugador.correo,
+                      nombre: f.jugador.nombre,
+                      campeonato: campeonatoSel,
+                      fecha: fechaSaldoSel,
+                      torneoLabel: etiquetaSel,
+                      monto: f.resultado,
+                      numeroRegistro: f.jugador.id,
+                    }),
+                  });
+                  const json = await r.json();
+                  if (!r.ok) throw new Error(json.error || "No se pudo enviar.");
+                  setData((prev) => ({ ...prev, enviosSaldo: json.enviosSaldo || prev.enviosSaldo }));
+                  ok++;
+                } catch (e) {
+                  fallidos.push(f.alias);
+                }
+              }
+              setEnviandoSaldo(false);
+              setSeleccionSaldo(new Set());
+              setEnvioSaldoAviso(
+                fallidos.length
+                  ? `Se enviaron ${ok} correo(s). No se pudo con: ${fallidos.join(", ")}.`
+                  : `Se enviaron ${ok} correo(s) correctamente.`
+              );
+            }
+
             return (
               <>
                 <div className="tbl" style={{ marginTop: 16 }}>
-                  <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr" }}>
-                    <div>Jugador</div><div>Debe (cobrar)</div><div>Ganó (pagar)</div><div>Balance</div><div>Pagado</div>
-                  </div>
-                  {filas.map((m) => (
-                    <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr" }} key={m.id}>
-                      <div>{data.resumen[m.correo]?.nombre || m.correo}</div>
-                      <div className="num right">{money(m.montoTotal)}</div>
-                      <div className="num right">{money(m.totalGanado)}</div>
-                      <div className="num right">{money(m.balanceNeto)}</div>
-                      <div>
-                        <span className={"badge " + (m.pagado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{m.pagado ? "Sí" : "No"}</span>
-                      </div>
+                  <div className="trow thead" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 0.9fr 1fr" }}>
+                    <div>
+                      <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} title="Seleccionar todos" />
                     </div>
-                  ))}
-                  <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.9fr 0.9fr 0.9fr 0.7fr", fontWeight: 700, background: "var(--surface-2)" }}>
-                    <div>Total</div>
-                    <div className="num right">{money(totalDebe)}</div>
-                    <div className="num right">{money(totalGano)}</div>
-                    <div className="num right">{money(totalBalance)}</div>
-                    <div />
+                    <div>Lugar</div>
+                    <div>Alias PokerStars</div>
+                    <div>Resultado</div>
+                    <div>Correo enviado</div>
                   </div>
+                  {filas.map((f, i) => {
+                    const clave = `${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`;
+                    const enviado = data?.enviosSaldo?.[clave];
+                    return (
+                      <div className="trow" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 0.9fr 1fr" }} key={f.jugador.correo}>
+                        <div>
+                          <input type="checkbox" checked={seleccionSaldo.has(f.jugador.correo)} onChange={() => toggleUno(f.jugador.correo)} />
+                        </div>
+                        <div className="num">{i + 1}</div>
+                        <div>{f.alias}</div>
+                        <div className="num right">{moneyContable(f.resultado)}</div>
+                        <div>
+                          <span className={"badge " + (enviado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{enviado ? "Sí" : "No"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <p className="section-sub">
-                  {/* 51ª entrega: pedido explícito de Federico — un balance final para que el Tesorero pueda
-                      hacer una sola transacción en vez de una por jugador. Si se cobra más de lo que se
-                      paga en premios (balance negativo), la diferencia es lo que sobra para mandar al fondo
-                      acumulado del campeonato; si se paga más de lo cobrado (balance positivo), es lo que
-                      falta cubrir con el fondo o con cobros pendientes. */}
-                  Balance total de la fecha: <b>{money(totalBalance)}</b> —{" "}
-                  {totalBalance < 0
-                    ? "se cobró más de lo que se pagó en premios; la diferencia es lo que se puede mandar de una sola vez al fondo acumulado."
-                    : totalBalance > 0
-                    ? "se pagó más en premios de lo que se cobró; hay que cubrir la diferencia (del fondo acumulado o de cobros todavía pendientes) antes de cerrar la cuenta."
-                    : "cuadra exacto — lo cobrado alcanza justo para cubrir los premios pagados."}
-                </p>
+
+                {editable && (
+                  <div style={{ marginTop: 12 }}>
+                    <button className="btn btn-primary" disabled={enviandoSaldo || seleccionSaldo.size === 0} onClick={enviarSeleccionados}>
+                      {enviandoSaldo ? "Enviando…" : `Enviar correo de saldo (${seleccionSaldo.size})`}
+                    </button>
+                  </div>
+                )}
+                {envioSaldoAviso && (
+                  <div className={envioSaldoAviso.includes("No se pudo") ? "login-error" : "check-line check-ok"} style={{ marginTop: 8 }}>
+                    {envioSaldoAviso}
+                  </div>
+                )}
               </>
             );
           })()}

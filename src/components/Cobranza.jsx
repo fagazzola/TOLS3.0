@@ -28,6 +28,27 @@ function moneyContable(n) {
 function moneyConCentavos(n) {
   return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+// 79ª entrega: convención general de color para dinero, a pedido de Federico — "cuando hablemos de
+// cantidades positivas, despliégalas en verde en formato $ #,##0 y las negativas en rojo y en formato
+// ($ #,##0)". `forzarNegativo` es para un valor que SIEMPRE se guarda positivo en el store pero
+// representa un egreso (ej. un Depósito, TOLS → jugador) — se pinta/formatea como negativo sin tocar
+// el dato real. `centavos` usa moneyConCentavos() en vez de money() (ver 78ª entrega) para las pocas
+// cifras donde los centavos son el dato (la columna "Real" de un Pago, que puede traer la referencia).
+function Monto({ valor, forzarNegativo = false, centavos = false }) {
+  const v = Number(valor) || 0;
+  const negativo = forzarNegativo || v < 0;
+  const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
+  return <span className={negativo ? "money-neg" : "money-pos"}>{negativo ? `(${plano})` : plano}</span>;
+}
+// 79ª entrega: mismo criterio que <Monto/>, pero coloreado por TIPO de transacción (Pago = verde,
+// ingreso para TOLS; Depósito = rojo, egreso) en vez de por el signo del número — los dos montos de
+// "Pagos y depósitos confirmados" siempre se guardan positivos, así que el color tiene que venir del
+// tipo de fila, no del valor.
+function MontoPorTipo({ valor, tipo, centavos = false }) {
+  const esPago = tipo === "Pago";
+  const plano = centavos ? moneyConCentavos(Math.abs(Number(valor) || 0)) : money(Math.abs(Number(valor) || 0));
+  return <span className={esPago ? "money-pos" : "money-neg"}>{esPago ? plano : `(${plano})`}</span>;
+}
 function norm(s) {
   return (s || "").trim().toLowerCase();
 }
@@ -286,13 +307,15 @@ export default function Cobranza({ session, perfiles }) {
       if (!clave.startsWith(prefijo)) continue;
       const [, fechaTorneo, correo] = clave.split("|");
       const entry = numeracion[`${campeonatoSel}|${fechaTorneo}`];
+      // 79ª entrega: a pedido de Federico, el Motivo de un Pago en esta tabla se acorta a "Torneo N"
+      // (sin fecha) — la fecha de CUÁNDO se recibió ya tiene su propia columna ("Registrado").
       filas.push({
         clave,
         tipo: "Pago",
         tipoAccion: "pago",
         motivoTipo: "torneo",
         motivoId: fechaTorneo,
-        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fechaTorneo)})`,
+        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
       });
@@ -328,6 +351,34 @@ export default function Cobranza({ session, perfiles }) {
     }
     return filas.sort((a, b) => (b.registradoEn || "").localeCompare(a.registradoEn || ""));
   }, [data, campeonatoSel, numeracion]);
+
+  // 79ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/Motivo/
+  // Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre los mismos registros
+  // confirmados de `confirmadosCampeonato` (Pagos y Depósitos), en orden cronológico ascendente (el más
+  // viejo primero, para que el saldo corrido tenga sentido de arriba hacia abajo). El primer renglón
+  // siempre arranca en Saldo inicial = 0, como pidió Federico. El signo del Monto sigue el mismo criterio
+  // que "ponlos en verde... es ingreso para TOLS" / depósito = egreso: un Pago SUMA al saldo (ingreso
+  // para TOLS), un Depósito RESTA (egreso de TOLS) — aunque en `pagosTorneo`/`depositosTorneo`/
+  // `depositosGasto` ambos se guarden siempre como números positivos. Se ordena por la fecha que el
+  // Tesorero dejó asentada (`fecha`, opcional en un Pago) y, si no la hay, por la fecha del propio
+  // `registradoEn` (timestamp real del servidor) — nunca se deja un registro sin orden.
+  const estadoCuentaJugador = useMemo(() => {
+    if (!correoEstado) return [];
+    const filas = confirmadosCampeonato
+      .filter((c) => c.correo === correoEstado)
+      .map((c) => ({
+        ...c,
+        fechaOrden: c.fecha || (c.registradoEn || "").slice(0, 10),
+        montoFirmado: c.tipo === "Pago" ? Number(c.monto) || 0 : -(Number(c.monto) || 0),
+      }))
+      .sort((a, b) => a.fechaOrden.localeCompare(b.fechaOrden) || (a.registradoEn || "").localeCompare(b.registradoEn || ""));
+    let saldo = 0;
+    return filas.map((f) => {
+      const saldoInicial = saldo;
+      saldo += f.montoFirmado;
+      return { ...f, saldoInicial, saldoFinal: saldo };
+    });
+  }, [confirmadosCampeonato, correoEstado]);
 
   // 76ª entrega: "monto esperado" del registro que se está editando — se recalcula igual que
   // `montoEsperadoMov` (nunca se confía en el valor guardado, por si Estadísticas/Tablero cambiaron
@@ -791,7 +842,7 @@ export default function Cobranza({ session, perfiles }) {
                         </div>
                         <div className="num">{i + 1}</div>
                         <div>{f.alias}</div>
-                        <div className="num right">{moneyContable(f.resultado)}</div>
+                        <div className="num right"><Monto valor={f.resultado} /></div>
                         <div>
                           <span className={"badge " + (enviado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{enviado ? "Sí" : "No"}</span>
                         </div>
@@ -1023,8 +1074,11 @@ export default function Cobranza({ session, perfiles }) {
                   <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
                   <div><span className={"badge " + (c.tipo === "Pago" ? "badge-regular" : "badge-main")}>{c.tipo}</span></div>
                   <div>{c.motivo}</div>
-                  <div className="num right">{money(c.montoEsperado)}</div>
-                  <div className="num right">{money(c.monto)}</div>
+                  <div className="num center"><MontoPorTipo valor={c.montoEsperado} tipo={c.tipo} /></div>
+                  {/* 79ª entrega: "Real" con centavos (moneyConCentavos) — con money() (redondea a pesos
+                      enteros) el monto editado se veía idéntico al Esperado cuando el jugador paga con la
+                      referencia como centavos, dando la impresión de que la edición "no se desplegaba". */}
+                  <div className="num center"><MontoPorTipo valor={c.monto} tipo={c.tipo} centavos /></div>
                   <div className="num">{c.fecha ? fechaFmt(c.fecha) : "—"}</div>
                   <div>
                     {editable && (
@@ -1106,23 +1160,23 @@ export default function Cobranza({ session, perfiles }) {
               <div className="stats stats-compact" style={{ marginTop: 20 }}>
                 <div className="stat">
                   <div className="stat-label">Total debido</div>
-                  <div className="stat-value">{money(r.pago)}</div>
+                  <div className="stat-value"><Monto valor={r.pago} /></div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Total ganado</div>
-                  <div className="stat-value">{money(r.deposito)}</div>
+                  <div className="stat-value"><Monto valor={r.deposito} forzarNegativo /></div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Saldo</div>
-                  <div className="stat-value">{money(r.saldo)}</div>
+                  <div className="stat-value"><Monto valor={r.saldo} /></div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Pagado confirmado</div>
-                  <div className="stat-value">{money(confirmadoPagadoJugador)}</div>
+                  <div className="stat-value"><Monto valor={confirmadoPagadoJugador} /></div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Depositado confirmado</div>
-                  <div className="stat-value">{money(confirmadoDepositadoJugador)}</div>
+                  <div className="stat-value"><Monto valor={confirmadoDepositadoJugador} forzarNegativo /></div>
                 </div>
               </div>
 
@@ -1190,7 +1244,32 @@ export default function Cobranza({ session, perfiles }) {
                 </div>
               )}
 
-              <div className="tbl" style={{ marginTop: 16 }}>
+              {/* 79ª entrega: "Estado de cuenta" — saldo corrido de los Pagos/Depósitos ya confirmados
+                  de este jugador en el campeonato activo, a pedido de Federico. Un Pago SUMA al saldo
+                  (ingreso para TOLS), un Depósito RESTA (egreso de TOLS) — arranca en 0 y el Saldo final
+                  de un renglón es el Saldo inicial del siguiente. */}
+              <div className="section-sub" style={{ marginTop: 20 }}>Estado de cuenta — {campeonatoSel}</div>
+              <div className="tbl">
+                <div className="trow thead" style={{ gridTemplateColumns: "1fr 0.7fr 1.2fr 1fr 1fr 1fr" }}>
+                  <div>Fecha</div><div>Tipo</div><div>Motivo</div><div>Saldo inicial</div><div>Monto</div><div>Saldo final</div>
+                </div>
+                {estadoCuentaJugador.map((f) => (
+                  <div className="trow" style={{ gridTemplateColumns: "1fr 0.7fr 1.2fr 1fr 1fr 1fr" }} key={f.clave}>
+                    <div className="num">{f.fechaOrden ? fechaFmt(f.fechaOrden) : "—"}</div>
+                    <div><span className={"badge " + (f.tipo === "Pago" ? "badge-regular" : "badge-main")}>{f.tipo}</span></div>
+                    <div>{f.motivo}</div>
+                    <div className="num center"><Monto valor={f.saldoInicial} /></div>
+                    <div className="num center"><Monto valor={f.montoFirmado} /></div>
+                    <div className="num center"><Monto valor={f.saldoFinal} /></div>
+                  </div>
+                ))}
+                {estadoCuentaJugador.length === 0 && (
+                  <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este jugador en este campeonato.</div>
+                )}
+              </div>
+
+              <div className="section-sub" style={{ marginTop: 20 }}>Historial de movimientos (Debe/Ganó por torneo)</div>
+              <div className="tbl">
                 <div className="trow thead" style={{ gridTemplateColumns: "1fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr" }}>
                   <div>Fecha</div><div>Tipo</div><div>Debe</div><div>Ganó</div><div>Balance</div><div>Pagado</div>
                 </div>
@@ -1255,7 +1334,7 @@ export default function Cobranza({ session, perfiles }) {
           <div className="stats">
             <div className="stat">
               <div className="stat-label">Recaudado (cobrado)</div>
-              <div className="stat-value">{money(finanzas.recaudadoCobrado)}</div>
+              <div className="stat-value"><Monto valor={finanzas.recaudadoCobrado} /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Recaudado pendiente</div>
@@ -1263,31 +1342,31 @@ export default function Cobranza({ session, perfiles }) {
             </div>
             <div className="stat">
               <div className="stat-label">Premios pagados</div>
-              <div className="stat-value">{money(finanzas.premiosPagados)}</div>
+              <div className="stat-value"><Monto valor={finanzas.premiosPagados} forzarNegativo /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Gastos fijos del campeonato</div>
-              <div className="stat-value">{money(finanzas.gastosFijos)}</div>
+              <div className="stat-value"><Monto valor={finanzas.gastosFijos} forzarNegativo /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Fondo acumulado estimado</div>
-              <div className="stat-value">{money(finanzas.fondoAcumuladoEstimado)}</div>
+              <div className="stat-value"><Monto valor={finanzas.fondoAcumuladoEstimado} /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Saldo neto de la liga</div>
-              <div className="stat-value">{money(finanzas.saldoNeto)}</div>
+              <div className="stat-value"><Monto valor={finanzas.saldoNeto} /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Pagos confirmados (Cobranza)</div>
-              <div className="stat-value">{money(totalPagosConfirmados)}</div>
+              <div className="stat-value"><Monto valor={totalPagosConfirmados} /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Depósitos confirmados (Cobranza)</div>
-              <div className="stat-value">{money(totalDepositosConfirmados)}</div>
+              <div className="stat-value"><Monto valor={totalDepositosConfirmados} forzarNegativo /></div>
             </div>
             <div className="stat">
               <div className="stat-label">Centavos acumulados</div>
-              <div className="stat-value">{moneyConCentavos(centavosAcumulados)}</div>
+              <div className="stat-value"><Monto valor={centavosAcumulados} centavos /></div>
             </div>
           </div>
           <div className="section-sub">

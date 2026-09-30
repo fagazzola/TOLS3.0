@@ -163,8 +163,10 @@ export default function Estadisticas({ session }) {
   const [torneoAbierto, setTorneoAbierto] = useState(null); // { campeonato, fecha }
 
   // ───────── 72ª entrega: "Clasificación general" ─────────
+  // 72ª entrega (ajuste): Federico pidió que la tabla siempre se muestre completa (todos los torneos,
+  // izquierda a derecha, aunque haya que hacer scroll horizontal) — se quitó el botón/estado de ocultar
+  // torneos individuales que existía en la primera versión de este bloque.
   const [vistaClasificacion, setVistaClasificacion] = useState("puntos"); // "puntos" | "killers" | "resultado"
-  const [mostrarIndividuales, setMostrarIndividuales] = useState(true);
   const [ordenClasif, setOrdenClasif] = useState({ col: "total", dir: "desc" }); // default: Total descendente
 
   // ───────── admin: subir resultados ─────────
@@ -368,7 +370,11 @@ export default function Estadisticas({ session }) {
       .sort((a, b) => a.numero - b.numero)
       .map((t) => ({ ...t, torneo: estData.torneos?.[campeonatoActivoNombre]?.[t.fecha] || null }));
   }, [torneosCal, campeonatoActivoNombre, numeracion, estData]);
-  const columnasClasif = torneosClasifCampeonato.filter((t) => t.torneo?.publicado);
+  // 72ª entrega (ajuste pedido por Federico): la tabla muestra SIEMPRE todos los torneos Regular/Main
+  // numerados del campeonato activo, publicados o no — antes solo aparecían como columna los ya
+  // publicados. Un torneo todavía no publicado simplemente queda en cero en todas las vistas (ver
+  // `filasClasificacion` más abajo, que solo lee valores de un torneo si `torneo.publicado` es true).
+  const columnasClasif = torneosClasifCampeonato;
 
   // columna lumped "Práctica" (solo vista Puntos) — suma de TODAS las partidas de práctica publicadas,
   // indistintamente del campeonato (mismo criterio que ya usa el Calendario para puntos de práctica).
@@ -384,11 +390,14 @@ export default function Estadisticas({ session }) {
       const alias = nombreCorto(j);
       const valores = {};
       columnasClasif.forEach((c) => {
-        const jt = jugadorEnTorneo(c.torneo, j);
+        const publicado = Boolean(c.torneo?.publicado);
+        const jt = publicado ? jugadorEnTorneo(c.torneo, j) : null;
         let v = 0;
-        if (vistaClasificacion === "puntos") v = Number(jt?.puntos) || 0;
-        else if (vistaClasificacion === "killers") v = killsTallyDeTorneo(c.torneo)[alias] || 0;
-        else v = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+        if (publicado) {
+          if (vistaClasificacion === "puntos") v = Number(jt?.puntos) || 0;
+          else if (vistaClasificacion === "killers") v = killsTallyDeTorneo(c.torneo)[alias] || 0;
+          else v = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+        }
         valores[c.fecha] = v;
       });
       const practica =
@@ -715,7 +724,6 @@ export default function Estadisticas({ session }) {
     <div>
       <div className="eyebrow">♠ Torrente On Line Series - TOLS 3.0</div>
       <h1>Estadísticas</h1>
-      <p className="subtitle">Resultados de los torneos ya publicados por un administrador.</p>
 
       {error && <div className="section-sub" style={{ color: "#b00020" }}>{error}</div>}
       {aviso && <div className="section-sub" style={{ color: "#2e7d32" }}>{aviso}</div>}
@@ -739,39 +747,50 @@ export default function Estadisticas({ session }) {
               {label}
             </button>
           ))}
-          <button type="button" className="btn btn-secondary" onClick={() => setMostrarIndividuales((v) => !v)}>
-            {mostrarIndividuales ? "Ocultar torneos individuales" : "Mostrar torneos individuales"}
-          </button>
         </div>
+        {/* 72ª entrega (ajuste pedido por Federico): tabla completa, con TODAS las columnas de torneos de
+            izquierda a derecha (publicados o no, en cero los que faltan) y la de Total siempre visible —
+            si no entra en el ancho de pantalla, se hace scroll horizontal en vez de ocultar columnas.
+            Diseño de cuadrícula (bordes en todas las celdas), números centrados, "Lugar" como primera
+            columna fija (posición 1..n según el orden actual, nunca se mueve ni se puede ordenar por
+            ella) y los torneos Main resaltados en otro color para diferenciarlos de los Regular. */}
         {columnasClasif.length === 0 && torneosPracticaPublicados.length === 0 ? (
-          <div className="section-sub" style={{ padding: 16 }}>Todavía no hay ningún torneo publicado.</div>
+          <div className="section-sub" style={{ padding: 16 }}>Todavía no hay torneos registrados para el campeonato activo.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
-                  {mostrarIndividuales &&
-                    columnasClasif.map((c) => (
-                      <th
-                        key={c.fecha}
-                        title={fechaFmt(c.fecha)}
-                        style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
-                        onClick={() => ordenarClasifPor(c.fecha)}
-                      >
-                        {etiquetaNumerada(c, c.tipo)}{ordenClasif.col === c.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
-                      </th>
-                    ))}
-                  {vistaClasificacion === "puntos" && mostrarIndividuales && (
+                  <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
+                  <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
+                  {columnasClasif.map((c) => (
                     <th
-                      style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                      key={c.fecha}
+                      title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
+                      style={{
+                        textAlign: "center",
+                        border: "1px solid #ccc",
+                        padding: "6px 8px",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        color: c.tipo === "Main" ? "#b8860b" : undefined,
+                        fontWeight: c.tipo === "Main" ? 700 : undefined,
+                      }}
+                      onClick={() => ordenarClasifPor(c.fecha)}
+                    >
+                      {c.numero}{ordenClasif.col === c.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                    </th>
+                  ))}
+                  {vistaClasificacion === "puntos" && (
+                    <th
+                      style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
                       onClick={() => ordenarClasifPor("practica")}
                     >
                       Práctica{ordenClasif.col === "practica" ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
                     </th>
                   )}
                   <th
-                    style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                    style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
                     onClick={() => ordenarClasifPor("total")}
                   >
                     Total{ordenClasif.col === "total" ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
@@ -779,19 +798,19 @@ export default function Estadisticas({ session }) {
                 </tr>
               </thead>
               <tbody>
-                {filasClasifOrdenadas.map((f) => (
+                {filasClasifOrdenadas.map((f, i) => (
                   <tr key={f.jugador.correo || f.alias}>
-                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{f.alias}</td>
-                    {mostrarIndividuales &&
-                      columnasClasif.map((c) => (
-                        <td key={c.fecha} style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>
-                          {fmtClasifValor(f.valores[c.fecha] || 0)}
-                        </td>
-                      ))}
-                    {vistaClasificacion === "puntos" && mostrarIndividuales && (
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{f.practica}</td>
+                    <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{i + 1}</td>
+                    <td style={{ padding: "6px 8px", border: "1px solid #eee" }}>{f.alias}</td>
+                    {columnasClasif.map((c) => (
+                      <td key={c.fecha} style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>
+                        {fmtClasifValor(f.valores[c.fecha] || 0)}
+                      </td>
+                    ))}
+                    {vistaClasificacion === "puntos" && (
+                      <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{f.practica}</td>
                     )}
-                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right", fontWeight: "bold" }}>
+                    <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", fontWeight: "bold" }}>
                       {fmtClasifValor(f.total)}
                     </td>
                   </tr>

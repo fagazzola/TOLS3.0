@@ -41,7 +41,10 @@ const TABS = [
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, oculto: true },
-  { key: "estadisticas", modKey: null, label: "Estadísticas", Component: Estadisticas, siempreVisible: true },
+  // 73ª entrega: el botón/pestaña se renombró de "Estadísticas" a "Resultados" (pedido de Federico) — la
+  // `key` interna se dejó igual ("estadisticas") a propósito, para no tocar `SOLO_JUGADOR_TABS` ni nada
+  // que dependa de esa clave; el componente y el archivo siguen llamándose Estadisticas.jsx.
+  { key: "estadisticas", modKey: null, label: "Resultados", Component: Estadisticas, siempreVisible: true },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];

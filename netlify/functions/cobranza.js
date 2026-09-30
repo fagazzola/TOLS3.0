@@ -84,6 +84,30 @@ function normalizarEnviosSaldo(v) {
   return out;
 }
 
+// 76ª entrega: un registro de pago/depósito confirmado — "monto esperado" (lo que el torneo o el gasto
+// del Tablero dice que corresponde) vs "monto" (lo que el Tesorero realmente registra que se recibió o
+// se depositó, editable porque puede no coincidir centavo a centavo con lo esperado). `fecha`/`hora` son
+// el día/hora que el Tesorero quiso dejar asentado (no necesariamente "ahora"); `registradoEn` es el
+// timestamp real del servidor al momento de guardar, para auditoría.
+function normalizarRegistroPago(v) {
+  return {
+    montoEsperado: Math.max(0, Number(v?.montoEsperado) || 0),
+    monto: Math.max(0, Number(v?.monto) || 0),
+    fecha: String(v?.fecha || "").trim(),
+    hora: String(v?.hora || "").trim(),
+    registradoEn: String(v?.registradoEn || "").trim() || new Date().toISOString(),
+  };
+}
+function normalizarMapaPagos(v) {
+  const out = {};
+  if (v && typeof v === "object") {
+    for (const [clave, reg] of Object.entries(v)) {
+      if (reg && typeof reg === "object") out[clave] = normalizarRegistroPago(reg);
+    }
+  }
+  return out;
+}
+
 function normalizar(data) {
   const base = data && typeof data === "object" ? data : {};
   const jugadores = {};
@@ -92,7 +116,16 @@ function normalizar(data) {
   }
   const movimientos = (Array.isArray(base.movimientos) ? base.movimientos : seed.movimientos || []).map(normalizarMovimiento);
   const enviosSaldo = normalizarEnviosSaldo(base.enviosSaldo);
-  return { jugadores, movimientos, enviosSaldo };
+  // 76ª entrega: "Registrar pagos y depósitos" rediseñado — tres mapas nuevos, cada uno keyed por una
+  // clave estable que identifica de forma única una combinación jugador+motivo, para que reconfirmar el
+  // mismo pago/depósito sobrescriba el registro anterior en vez de duplicarlo:
+  //   pagosTorneo:     "campeonato|fecha|correo"          (el jugador le pagó a TOLS su Debe de ese torneo)
+  //   depositosTorneo: "campeonato|fecha|correo"          (TOLS le depositó al jugador su Premio de ese torneo)
+  //   depositosGasto:  "campeonato|concepto|correo"       (TOLS le depositó a un jugador un gasto del Tablero)
+  const pagosTorneo = normalizarMapaPagos(base.pagosTorneo);
+  const depositosTorneo = normalizarMapaPagos(base.depositosTorneo);
+  const depositosGasto = normalizarMapaPagos(base.depositosGasto);
+  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -138,7 +171,17 @@ async function respuestaCompleta(data) {
   for (const correo of Object.keys(resumen)) {
     adeudos[correo] = tieneAdeudoBloqueante(correo, movimientos, jugadoresResumen, proximaFecha);
   }
-  return { jugadores: data.jugadores, movimientos, resumen, adeudos, proximaFecha, enviosSaldo: data.enviosSaldo || {} };
+  return {
+    jugadores: data.jugadores,
+    movimientos,
+    resumen,
+    adeudos,
+    proximaFecha,
+    enviosSaldo: data.enviosSaldo || {},
+    pagosTorneo: data.pagosTorneo || {},
+    depositosTorneo: data.depositosTorneo || {},
+    depositosGasto: data.depositosGasto || {},
+  };
 }
 
 // 74ª entrega: usada por netlify/functions/cobranza-enviar-saldo.js justo después de mandar el correo de
@@ -291,11 +334,33 @@ export async function registrarCierreTorneo(campeonato, fecha, tipo, estado, con
 // También renombra el id de los movimientos generados por Game Night (`gn-{campeonato}-{fecha}-{correo}`)
 // para que sigan siendo el mismo registro la próxima vez que se guarde ese Game Night con el nombre nuevo
 // — si no se renombrara el id, upsertVariosDesdeGameNight generaría un id distinto y duplicaría la fila.
+// 76ª entrega: las claves de enviosSaldo/pagosTorneo/depositosTorneo/depositosGasto empiezan todas con
+// "{campeonato}|" — remapearlas en un renombre es el mismo criterio que ya se aplicaba a
+// movimientos[].campeonato, solo que acá el nombre vive DENTRO de la clave del mapa en vez de en un
+// campo aparte.
+function remapearClavesCampeonato(mapa, de, a) {
+  const out = {};
+  let cambio = false;
+  for (const [clave, val] of Object.entries(mapa || {})) {
+    if (clave.startsWith(`${de}|`)) {
+      out[`${a}|${clave.slice(de.length + 1)}`] = val;
+      cambio = true;
+    } else {
+      out[clave] = val;
+    }
+  }
+  return { mapa: out, cambio };
+}
+
 export async function renombrarCampeonatoEnCobranza(de, a) {
   const store = getStore({ name: "tols-cobranza", consistency: "strong" });
   const raw = await store.get("data", { type: "json", consistency: "strong" });
   const actual = normalizar(raw);
-  const cambia = actual.movimientos.some((m) => m.campeonato === de);
+  const r1 = remapearClavesCampeonato(actual.enviosSaldo, de, a);
+  const r2 = remapearClavesCampeonato(actual.pagosTorneo, de, a);
+  const r3 = remapearClavesCampeonato(actual.depositosTorneo, de, a);
+  const r4 = remapearClavesCampeonato(actual.depositosGasto, de, a);
+  const cambia = actual.movimientos.some((m) => m.campeonato === de) || r1.cambio || r2.cambio || r3.cambio || r4.cambio;
   if (!cambia) return;
   const prefijoViejo = `gn-${de}-`;
   actual.movimientos = actual.movimientos.map((m) => {
@@ -303,6 +368,10 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
     const nuevoId = m.id.startsWith(prefijoViejo) ? `gn-${a}-${m.id.slice(prefijoViejo.length)}` : m.id;
     return { ...m, campeonato: a, id: nuevoId };
   });
+  actual.enviosSaldo = r1.mapa;
+  actual.pagosTorneo = r2.mapa;
+  actual.depositosTorneo = r3.mapa;
+  actual.depositosGasto = r4.mapa;
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
@@ -360,6 +429,50 @@ export default async (req) => {
       if (actual.jugadores[correo]) {
         actual.jugadores[correo].excepciones = actual.jugadores[correo].excepciones.filter((f) => f !== fecha);
       }
+    } else if (body?.accion === "registrarPago") {
+      // 76ª entrega: confirma que un jugador pagó a TOLS el Debe de un torneo ya publicado en
+      // Estadísticas — el monto esperado/el propio torneo lo calcula el cliente (ya tiene los datos de
+      // Estadísticas cargados); acá solo se valida y persiste. Ojo: `fecha` es la fecha DEL TORNEO (la
+      // clave del registro), no la fecha en que el Tesorero recibió el pago — esa es `fechaRegistro`,
+      // un campo aparte (para no pisar uno con el otro).
+      const campeonato = String(body.campeonato || "").trim();
+      const fecha = String(body.fecha || "").trim();
+      const correo = String(body.correo || "").trim().toLowerCase();
+      if (!campeonato || !fecha || !correo) {
+        return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del pago." }), { status: 400, headers: HEADERS });
+      }
+      const clave = `${campeonato}|${fecha}|${correo}`;
+      actual.pagosTorneo[clave] = normalizarRegistroPago({
+        montoEsperado: body.montoEsperado,
+        monto: body.monto,
+        fecha: body.fechaRegistro,
+        hora: body.horaRegistro,
+      });
+    } else if (body?.accion === "registrarDeposito") {
+      // 76ª entrega: confirma que TOLS le depositó a un jugador — por el Premio de un torneo ya
+      // publicado ("motivoTipo":"torneo", "motivoId": fecha del torneo) o por un gasto del Tablero de
+      // Control ("motivoTipo":"gasto", "motivoId": concepto). `fechaRegistro` (la fecha en que se hizo el
+      // depósito, distinta de `motivoId` cuando el motivo es un torneo) es obligatoria para un depósito
+      // — a diferencia de un pago —, como pidió Federico.
+      const campeonato = String(body.campeonato || "").trim();
+      const motivoTipo = body.motivoTipo === "gasto" ? "gasto" : body.motivoTipo === "torneo" ? "torneo" : "";
+      const motivoId = String(body.motivoId || "").trim();
+      const correo = String(body.correo || "").trim().toLowerCase();
+      const fechaRegistro = String(body.fechaRegistro || "").trim();
+      if (!campeonato || !motivoTipo || !motivoId || !correo) {
+        return new Response(JSON.stringify({ error: "Falta el campeonato, el motivo o el jugador del depósito." }), { status: 400, headers: HEADERS });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaRegistro)) {
+        return new Response(JSON.stringify({ error: "La fecha del depósito es obligatoria (AAAA-MM-DD)." }), { status: 400, headers: HEADERS });
+      }
+      const mapa = motivoTipo === "gasto" ? "depositosGasto" : "depositosTorneo";
+      const clave = `${campeonato}|${motivoId}|${correo}`;
+      actual[mapa][clave] = normalizarRegistroPago({
+        montoEsperado: body.montoEsperado,
+        monto: body.monto,
+        fecha: fechaRegistro,
+        hora: body.horaRegistro,
+      });
     } else {
       return new Response(JSON.stringify({ error: "Acción no reconocida." }), { status: 400, headers: HEADERS });
     }

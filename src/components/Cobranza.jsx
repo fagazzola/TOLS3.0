@@ -54,23 +54,6 @@ function etiquetaCorta(entry) {
   return entry.tipo === "Main" ? `${entry.numero} - Main` : `${entry.numero}`;
 }
 
-function movimientoVacio(campeonato, correo) {
-  return {
-    id: "",
-    campeonato,
-    fecha: "",
-    correo: correo || "",
-    buyInPagado: true,
-    rebuys: 0,
-    addonComprado: false,
-    pagado: false,
-    fechaPago: "",
-    lugar: "",
-    premioPartida: 0,
-    premioCampeonato: 0,
-  };
-}
-
 function borradorEstadoCuenta(r, pendientes, proximaFecha) {
   const detalle = pendientes
     .map((m) => `• ${m.fecha} (${m.tipo}) — ${money(m.montoTotal)}`)
@@ -107,8 +90,14 @@ export default function Cobranza({ session, perfiles }) {
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
 
-  const [draft, setDraft] = useState(null); // movimiento en edición (form de arriba)
-  const [nombreNuevo, setNombreNuevo] = useState(""); // por si el correo del draft es nuevo
+  // 76ª entrega: "Registrar pagos y depósitos" rediseñado — ya no se CREA un movimiento manual desde
+  // acá (el Debe/Premio de cada torneo lo sigue calculando Estadísticas, automático desde la 72ª/74ª
+  // entrega), este formulario solo CONFIRMA que un pago o un depósito puntual efectivamente ocurrió.
+  // `motivo` guarda: la fecha del torneo directo para un Pago; "torneo:{fecha}" o "gasto:{concepto}"
+  // para un Depósito (un solo combo unificado, como pidió Federico).
+  const [nuevoMov, setNuevoMov] = useState(null); // null | { tipo, correo, motivo, montoReal, fechaReal, horaReal }
+  const [guardandoMov, setGuardandoMov] = useState(false);
+  const [errorMov, setErrorMov] = useState("");
 
   const [correoEstado, setCorreoEstado] = useState("");
   const [borrador, setBorrador] = useState(null); // { asunto, cuerpo }
@@ -172,11 +161,6 @@ export default function Cobranza({ session, perfiles }) {
     return Object.values(porCorreo).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [jugadoresSitio, data]);
 
-  const fechasDelCampeonato = useMemo(
-    () => torneosCal.filter((t) => t.temporada === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha)),
-    [torneosCal, campeonatoSel]
-  );
-
   // 51ª entrega: "Resultados de Torneos" — si se cambia de campeonato arriba mientras esta vista está
   // abierta, el torneo elegido ya no aplica (pertenece a otro campeonato) — se limpia solo para no dejar
   // un torneo "fantasma" seleccionado que en realidad es de otro campeonato. 74ª entrega: también se
@@ -216,42 +200,153 @@ export default function Cobranza({ session, perfiles }) {
     [data, campeonatoSel]
   );
 
-  const recomprasMax = tableroMapa?.[campeonatoSel]?.recomprasMax ?? 2;
+  // 76ª entrega: los 3 conceptos de "Gastos del campeonato" del Tablero de Control — fuente del combo
+  // de "motivo" cuando el tipo elegido es Depósito (Q3: "para estas 3 que mencionas, los montos
+  // definidos en el tablero de control").
+  const gastosCampeonatoActivo = tableroMapa?.[campeonatoSel]?.gastosCampeonato || [];
 
-  async function guardarMovimiento() {
-    if (!draft) return;
-    setGuardando(true);
-    setError("");
+  // 76ª entrega: resultado (premioTotal - debeTotal) de un jugador en un torneo puntual ya publicado —
+  // mismo cálculo que ya usa "Resultados de Torneos" más arriba, reutilizado acá para decidir el "monto
+  // esperado" de un Pago (resultado negativo = debe) o de un Depósito por torneo (resultado positivo =
+  // le deben premio).
+  function resultadoTorneo(correo, fecha) {
+    const torneo = estData?.torneos?.[campeonatoSel]?.[fecha];
+    const jug = directorioActivo.find((j) => j.correo === correo);
+    if (!torneo || !jug) return 0;
+    const jt = jugadorEnTorneo(torneo, jug);
+    return jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+  }
+
+  // 76ª entrega: opciones del combo de "motivo" según el tipo y el jugador elegidos en `nuevoMov` — un
+  // torneo/gasto ya confirmado (con registro en pagosTorneo/depositosTorneo/depositosGasto) no vuelve a
+  // aparecer, para no duplicar una confirmación ya hecha.
+  const opcionesPago =
+    nuevoMov?.tipo === "pago" && nuevoMov.correo
+      ? torneosSaldoOpciones
+          .filter((t) => resultadoTorneo(nuevoMov.correo, t.fecha) < 0)
+          .filter((t) => !data?.pagosTorneo?.[`${campeonatoSel}|${t.fecha}|${nuevoMov.correo}`])
+      : [];
+  const opcionesDepositoTorneo =
+    nuevoMov?.tipo === "deposito" && nuevoMov.correo
+      ? torneosSaldoOpciones
+          .filter((t) => resultadoTorneo(nuevoMov.correo, t.fecha) > 0)
+          .filter((t) => !data?.depositosTorneo?.[`${campeonatoSel}|${t.fecha}|${nuevoMov.correo}`])
+      : [];
+  const opcionesDepositoGasto =
+    nuevoMov?.tipo === "deposito" && nuevoMov.correo
+      ? gastosCampeonatoActivo.filter(
+          (g) => g.concepto && !data?.depositosGasto?.[`${campeonatoSel}|${g.concepto}|${nuevoMov.correo}`]
+        )
+      : [];
+
+  // 76ª entrega: "monto esperado" (recuadro inactivo) y etiqueta legible del motivo elegido — se
+  // recalculan en cada render a partir de `nuevoMov.motivo`, nunca se guardan en el estado (para que
+  // siempre reflejen el dato más reciente de Estadísticas/Tablero).
+  let montoEsperadoMov = 0;
+  let etiquetaMotivoMov = "";
+  if (nuevoMov?.tipo === "pago" && nuevoMov.motivo) {
+    const entry = torneosSaldoOpciones.find((t) => t.fecha === nuevoMov.motivo);
+    montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, nuevoMov.motivo));
+    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : nuevoMov.motivo;
+  } else if (nuevoMov?.tipo === "deposito" && nuevoMov.motivo?.startsWith("torneo:")) {
+    const fecha = nuevoMov.motivo.slice("torneo:".length);
+    const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
+    montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, fecha));
+    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : fecha;
+  } else if (nuevoMov?.tipo === "deposito" && nuevoMov.motivo?.startsWith("gasto:")) {
+    const concepto = nuevoMov.motivo.slice("gasto:".length);
+    const g = gastosCampeonatoActivo.find((x) => x.concepto === concepto);
+    montoEsperadoMov = Number(g?.monto) || 0;
+    etiquetaMotivoMov = concepto;
+  }
+
+  // 76ª entrega: tabla de pagos/depósitos ya confirmados para el campeonato activo, juntando los 3
+  // mapas del backend en una sola lista (más reciente primero).
+  const confirmadosCampeonato = useMemo(() => {
+    const filas = [];
+    const prefijo = `${campeonatoSel}|`;
+    for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, fecha, correo] = clave.split("|");
+      const entry = numeracion[`${campeonatoSel}|${fecha}`];
+      filas.push({ clave, tipo: "Pago", motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fecha)})`, correo, ...reg });
+    }
+    for (const [clave, reg] of Object.entries(data?.depositosTorneo || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, fecha, correo] = clave.split("|");
+      const entry = numeracion[`${campeonatoSel}|${fecha}`];
+      filas.push({ clave, tipo: "Depósito", motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fecha)})`, correo, ...reg });
+    }
+    for (const [clave, reg] of Object.entries(data?.depositosGasto || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, concepto, correo] = clave.split("|");
+      filas.push({ clave, tipo: "Depósito", motivo: concepto, correo, ...reg });
+    }
+    return filas.sort((a, b) => (b.registradoEn || "").localeCompare(a.registradoEn || ""));
+  }, [data, campeonatoSel, numeracion]);
+
+  async function confirmarNuevoMov() {
+    if (!nuevoMov) return;
+    setErrorMov("");
+    const correo = nuevoMov.correo.trim().toLowerCase();
+    if (!correo) {
+      setErrorMov("Elegí un jugador.");
+      return;
+    }
+    if (!nuevoMov.motivo) {
+      setErrorMov(nuevoMov.tipo === "pago" ? "Elegí un torneo." : "Elegí un motivo.");
+      return;
+    }
+    const monto = Number(nuevoMov.montoReal);
+    if (!(monto > 0)) {
+      setErrorMov("Ingresá el monto real " + (nuevoMov.tipo === "pago" ? "recibido." : "depositado."));
+      return;
+    }
+    if (nuevoMov.tipo === "deposito" && !nuevoMov.fechaReal) {
+      setErrorMov("La fecha es obligatoria para un depósito.");
+      return;
+    }
+    setGuardandoMov(true);
     try {
-      const correo = draft.correo.trim().toLowerCase();
-      if (!correo || !draft.fecha) throw new Error("Elegí un jugador y una fecha.");
-      // si el correo no existe todavía en el directorio de Cobranza, se da de alta con el nombre
-      // que se haya escrito al lado del selector
-      if (!data.jugadores[correo] && !directorio.find((d) => d.correo === correo)?.nombre && !nombreNuevo.trim()) {
-        throw new Error("Ese correo es nuevo — escribí el nombre del jugador antes de guardar.");
-      }
-      if (!data.jugadores[correo]) {
-        const r1 = await fetch(API, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ accion: "guardarJugador", correo, nombre: nombreNuevo.trim() || directorio.find((d) => d.correo === correo)?.nombre || "" }),
-        });
-        if (!r1.ok) throw new Error((await r1.json()).error || "No se pudo registrar al jugador.");
+      let body;
+      if (nuevoMov.tipo === "pago") {
+        body = {
+          accion: "registrarPago",
+          campeonato: campeonatoSel,
+          fecha: nuevoMov.motivo,
+          correo,
+          montoEsperado: montoEsperadoMov,
+          monto,
+          fechaRegistro: nuevoMov.fechaReal,
+          horaRegistro: nuevoMov.horaReal,
+        };
+      } else {
+        const esTorneo = nuevoMov.motivo.startsWith("torneo:");
+        body = {
+          accion: "registrarDeposito",
+          campeonato: campeonatoSel,
+          motivoTipo: esTorneo ? "torneo" : "gasto",
+          motivoId: esTorneo ? nuevoMov.motivo.slice("torneo:".length) : nuevoMov.motivo.slice("gasto:".length),
+          correo,
+          montoEsperado: montoEsperadoMov,
+          monto,
+          fechaRegistro: nuevoMov.fechaReal,
+          horaRegistro: nuevoMov.horaReal,
+        };
       }
       const r = await fetch(API, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accion: "guardarMovimiento", movimiento: { ...draft, correo } }),
+        body: JSON.stringify(body),
       });
       const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo guardar el movimiento.");
+      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
       setData(json);
-      setDraft(null);
-      setNombreNuevo("");
+      setNuevoMov(null);
     } catch (e) {
-      setError(e.message || "No se pudo guardar.");
+      setErrorMov(e.message || "No se pudo guardar.");
     } finally {
-      setGuardando(false);
+      setGuardandoMov(false);
     }
   }
 
@@ -384,6 +479,31 @@ export default function Cobranza({ session, perfiles }) {
   const tieneRegistroJugador = correoEstado ? jugadoresSitio.some((j) => j.correo === correoEstado) : false;
 
   const finanzas = campeonatoSel ? finanzasCampeonato(campeonatoSel, data?.movimientos || [], tableroMapa) : null;
+
+  // 76ª entrega: totales de pagos/depósitos ya CONFIRMADOS por el Tesorero (los 3 mapas nuevos),
+  // separados a propósito de las cifras históricas/estáticas que ya traían "Estado de cuenta" y
+  // "Finanzas generales" (r.pago/r.deposito y finanzas.recaudadoCobrado/premiosPagados/gastosFijos
+  // siguen viniendo de `movimientos`/Tablero, sin tocar, para no romper nada que ya funcionaba).
+  function sumaMapaConfirmado(mapa, filtroCorreo) {
+    const prefijo = `${campeonatoSel}|`;
+    let total = 0;
+    for (const [clave, reg] of Object.entries(mapa || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const partes = clave.split("|");
+      const correo = partes[partes.length - 1];
+      if (filtroCorreo && correo !== filtroCorreo) continue;
+      total += Number(reg.monto) || 0;
+    }
+    return total;
+  }
+
+  const confirmadoPagadoJugador = correoEstado ? sumaMapaConfirmado(data?.pagosTorneo, correoEstado) : 0;
+  const confirmadoDepositadoJugador = correoEstado
+    ? sumaMapaConfirmado(data?.depositosTorneo, correoEstado) + sumaMapaConfirmado(data?.depositosGasto, correoEstado)
+    : 0;
+
+  const totalPagosConfirmados = sumaMapaConfirmado(data?.pagosTorneo);
+  const totalDepositosConfirmados = sumaMapaConfirmado(data?.depositosTorneo) + sumaMapaConfirmado(data?.depositosGasto);
 
   return (
     <div>
@@ -577,43 +697,41 @@ export default function Cobranza({ session, perfiles }) {
 
           {editable && (
             <div className="tbl" style={{ padding: 16, marginBottom: 16 }}>
-              {!draft ? (
-                <button className="btn btn-primary btn-add" onClick={() => setDraft(movimientoVacio(campeonatoSel, ""))}>
+              {!nuevoMov ? (
+                <button
+                  className="btn btn-primary btn-add"
+                  onClick={() => {
+                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: 0, fechaReal: "", horaReal: "" });
+                    setErrorMov("");
+                  }}
+                >
                   + Nuevo movimiento
                 </button>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div className="login-field-row">
-                    <div className="login-field" style={{ flex: 2 }}>
-                      <label>Jugador (correo)</label>
-                      <input
+                    <div className="login-field" style={{ maxWidth: 200 }}>
+                      <label>Tipo</label>
+                      <select
                         className="field"
-                        list="cobranza-directorio"
-                        value={draft.correo}
-                        onChange={(e) => setDraft({ ...draft, correo: e.target.value })}
-                        placeholder="correo@ejemplo.com"
-                      />
-                      <datalist id="cobranza-directorio">
-                        {directorio.map((d) => (
-                          <option key={d.correo} value={d.correo}>
-                            {d.nombre}
-                          </option>
-                        ))}
-                      </datalist>
+                        value={nuevoMov.tipo}
+                        onChange={(e) => setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "" })}
+                      >
+                        <option value="pago">Pago (jugador → TOLS)</option>
+                        <option value="deposito">Depósito (TOLS → jugador)</option>
+                      </select>
                     </div>
-                    {!data.jugadores[draft.correo.trim().toLowerCase()] && (
-                      <div className="login-field" style={{ flex: 1 }}>
-                        <label>Nombre (jugador nuevo en Cobranza)</label>
-                        <input className="field" value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} placeholder="Nombre y apellido" />
-                      </div>
-                    )}
-                    <div className="login-field" style={{ flex: 1 }}>
-                      <label>Fecha</label>
-                      <select className="field" value={draft.fecha} onChange={(e) => setDraft({ ...draft, fecha: e.target.value })}>
-                        <option value="">— elegir —</option>
-                        {fechasDelCampeonato.map((t) => (
-                          <option key={t.fecha} value={t.fecha}>
-                            {t.fecha} {t.main ? "(Main)" : ""}
+                    <div className="login-field" style={{ flex: 2 }}>
+                      <label>Jugador (Alias PokerStars / Nº de referencia)</label>
+                      <select
+                        className="field"
+                        value={nuevoMov.correo}
+                        onChange={(e) => setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "" })}
+                      >
+                        <option value="">— elegir jugador —</option>
+                        {directorioActivo.map((j) => (
+                          <option key={j.correo} value={j.correo}>
+                            {nombreCorto(j)} (#{j.id})
                           </option>
                         ))}
                       </select>
@@ -621,57 +739,105 @@ export default function Cobranza({ session, perfiles }) {
                   </div>
 
                   <div className="login-field-row">
-                    <label className="chk-inline">
-                      <input type="checkbox" checked={draft.buyInPagado} onChange={(e) => setDraft({ ...draft, buyInPagado: e.target.checked })} />
-                      Buy-in
-                    </label>
-                    <div className="login-field" style={{ maxWidth: 140 }}>
-                      <label>Rebuys (0–{recomprasMax})</label>
-                      <input
+                    <div className="login-field" style={{ flex: 2 }}>
+                      <label>Motivo</label>
+                      <select
                         className="field"
-                        type="number"
-                        min={0}
-                        max={recomprasMax}
-                        value={draft.rebuys}
-                        onChange={(e) => setDraft({ ...draft, rebuys: Math.max(0, Math.min(recomprasMax, Number(e.target.value) || 0)) })}
-                      />
+                        value={nuevoMov.motivo}
+                        disabled={!nuevoMov.correo}
+                        onChange={(e) => setNuevoMov({ ...nuevoMov, motivo: e.target.value })}
+                      >
+                        <option value="">— elegir —</option>
+                        {nuevoMov.tipo === "pago" &&
+                          opcionesPago.map((t) => (
+                            <option key={t.fecha} value={t.fecha}>
+                              Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                            </option>
+                          ))}
+                        {nuevoMov.tipo === "deposito" && (
+                          <>
+                            {opcionesDepositoTorneo.map((t) => (
+                              <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
+                                Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                              </option>
+                            ))}
+                            {opcionesDepositoGasto.map((g) => (
+                              <option key={`gasto:${g.concepto}`} value={`gasto:${g.concepto}`}>
+                                {g.concepto}
+                              </option>
+                            ))}
+                          </>
+                        )}
+                      </select>
+                      {nuevoMov.correo &&
+                        nuevoMov.tipo === "pago" &&
+                        opcionesPago.length === 0 && (
+                          <div className="section-sub" style={{ marginTop: 4 }}>
+                            No hay torneos con pago pendiente de confirmar para este jugador.
+                          </div>
+                        )}
+                      {nuevoMov.correo &&
+                        nuevoMov.tipo === "deposito" &&
+                        opcionesDepositoTorneo.length === 0 &&
+                        opcionesDepositoGasto.length === 0 && (
+                          <div className="section-sub" style={{ marginTop: 4 }}>
+                            No hay depósitos pendientes de confirmar para este jugador.
+                          </div>
+                        )}
                     </div>
-                    <label className="chk-inline">
-                      <input type="checkbox" checked={draft.addonComprado} onChange={(e) => setDraft({ ...draft, addonComprado: e.target.checked })} />
-                      Add-on
-                    </label>
-                    <label className="chk-inline">
-                      <input type="checkbox" checked={draft.pagado} onChange={(e) => setDraft({ ...draft, pagado: e.target.checked })} />
-                      Pagado al tesorero
-                    </label>
-                    {draft.pagado && (
-                      <div className="login-field" style={{ maxWidth: 160 }}>
-                        <label>Fecha de pago</label>
-                        <input className="field" type="date" value={draft.fechaPago} onChange={(e) => setDraft({ ...draft, fechaPago: e.target.value })} />
-                      </div>
-                    )}
                   </div>
 
-                  <div className="login-field-row">
-                    <div className="login-field" style={{ maxWidth: 120 }}>
-                      <label>Lugar (opcional)</label>
-                      <input className="field" type="number" min={1} value={draft.lugar} onChange={(e) => setDraft({ ...draft, lugar: e.target.value })} />
-                    </div>
-                    <div className="login-field" style={{ maxWidth: 160 }}>
-                      <label>Premio de partida ($)</label>
-                      <input className="field" type="number" min={0} value={draft.premioPartida} onChange={(e) => setDraft({ ...draft, premioPartida: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div className="login-field" style={{ maxWidth: 200 }}>
-                      <label>Premio de campeonato ($, solo última fecha)</label>
-                      <input className="field" type="number" min={0} value={draft.premioCampeonato} onChange={(e) => setDraft({ ...draft, premioCampeonato: Number(e.target.value) || 0 })} />
-                    </div>
-                  </div>
+                  {nuevoMov.motivo && (
+                    <>
+                      <div className="login-field-row">
+                        <div className="login-field" style={{ maxWidth: 220 }}>
+                          <label>Monto esperado a {nuevoMov.tipo === "pago" ? "recibir" : "depositar"}</label>
+                          <input className="field" value={money(montoEsperadoMov)} disabled readOnly />
+                        </div>
+                        <div className="login-field" style={{ maxWidth: 220 }}>
+                          <label>Monto realmente {nuevoMov.tipo === "pago" ? "recibido" : "depositado"}</label>
+                          <input
+                            className="field"
+                            type="number"
+                            min={0}
+                            value={nuevoMov.montoReal}
+                            onChange={(e) => setNuevoMov({ ...nuevoMov, montoReal: Number(e.target.value) || 0 })}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="login-field-row">
+                        <div className="login-field" style={{ maxWidth: 180 }}>
+                          <label>
+                            Fecha {nuevoMov.tipo === "pago" ? "de recibido (opcional)" : "de depósito"}
+                          </label>
+                          <input
+                            className="field"
+                            type="date"
+                            value={nuevoMov.fechaReal}
+                            onChange={(e) => setNuevoMov({ ...nuevoMov, fechaReal: e.target.value })}
+                          />
+                        </div>
+                        <div className="login-field" style={{ maxWidth: 140 }}>
+                          <label>Hora (opcional)</label>
+                          <input
+                            className="field"
+                            type="time"
+                            value={nuevoMov.horaReal}
+                            onChange={(e) => setNuevoMov({ ...nuevoMov, horaReal: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {errorMov && <div className="login-error">{errorMov}</div>}
 
                   <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
-                    <button className="btn btn-primary" disabled={guardando} onClick={guardarMovimiento}>
-                      {guardando ? "Guardando…" : "Guardar movimiento"}
+                    <button className="btn btn-primary" disabled={guardandoMov} onClick={confirmarNuevoMov}>
+                      {guardandoMov ? "Guardando…" : "Confirmar"}
                     </button>
-                    <button className="btn btn-secondary" disabled={guardando} onClick={() => { setDraft(null); setNombreNuevo(""); }}>
+                    <button className="btn btn-secondary" disabled={guardandoMov} onClick={() => { setNuevoMov(null); setErrorMov(""); }}>
                       Cancelar
                     </button>
                   </div>
@@ -680,6 +846,27 @@ export default function Cobranza({ session, perfiles }) {
             </div>
           )}
 
+          <div className="section-sub">Pagos y depósitos confirmados</div>
+          <div className="tbl">
+            <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr" }}>
+              <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div>
+            </div>
+            {confirmadosCampeonato.map((c) => (
+              <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr" }} key={c.clave}>
+                <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
+                <div><span className={"badge " + (c.tipo === "Pago" ? "badge-regular" : "badge-main")}>{c.tipo}</span></div>
+                <div>{c.motivo}</div>
+                <div className="num right">{money(c.montoEsperado)}</div>
+                <div className="num right">{money(c.monto)}</div>
+                <div className="num">{c.fecha ? fechaFmt(c.fecha) : "—"}{c.hora ? ` ${c.hora}` : ""}</div>
+              </div>
+            ))}
+            {confirmadosCampeonato.length === 0 && (
+              <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este campeonato.</div>
+            )}
+          </div>
+
+          <div className="section-sub" style={{ marginTop: 20 }}>Historial de movimientos (Debe/Ganó por torneo)</div>
           <div className="tbl">
             <div className="trow thead" style={{ gridTemplateColumns: "1fr 1.4fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr 0.9fr 40px" }}>
               <div>Fecha</div><div>Jugador</div><div>Tipo</div><div>Debe</div><div>Ganó</div><div>Balance</div><div>Pagado</div><div>Lugar</div><div />
@@ -738,6 +925,14 @@ export default function Cobranza({ session, perfiles }) {
                 <div className="stat">
                   <div className="stat-label">Saldo</div>
                   <div className="stat-value">{money(r.saldo)}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Pagado confirmado</div>
+                  <div className="stat-value">{money(confirmadoPagadoJugador)}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Depositado confirmado</div>
+                  <div className="stat-value">{money(confirmadoDepositadoJugador)}</div>
                 </div>
               </div>
 
@@ -892,11 +1087,20 @@ export default function Cobranza({ session, perfiles }) {
               <div className="stat-label">Saldo neto de la liga</div>
               <div className="stat-value">{money(finanzas.saldoNeto)}</div>
             </div>
+            <div className="stat">
+              <div className="stat-label">Pagos confirmados (Cobranza)</div>
+              <div className="stat-value">{money(totalPagosConfirmados)}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Depósitos confirmados (Cobranza)</div>
+              <div className="stat-value">{money(totalDepositosConfirmados)}</div>
+            </div>
           </div>
           <div className="section-sub">
             "Recaudado" solo cuenta lo marcado como pagado al tesorero. El fondo acumulado es una estimación
             (% configurado en el Tablero de Control sobre lo ya cobrado) — el monto real depende de cuánto
-            se termine recaudando en cada fecha.
+            se termine recaudando en cada fecha. "Pagos/Depósitos confirmados" son los registros confirmados
+            desde "Registrar pagos y depósitos" (76ª entrega) y todavía no se mezclan en el Saldo neto de arriba.
           </div>
         </div>
       )}

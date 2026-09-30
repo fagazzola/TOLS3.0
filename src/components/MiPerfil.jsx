@@ -20,7 +20,7 @@ function formatTelefono(v) {
 // campos que el propio jugador puede editar desde acá. Deliberadamente NO incluye id, nombre,
 // correo, tipoUsuario, fechaRegistro ni estatus — esos son de solo administración y ni siquiera se
 // muestran en esta pantalla.
-export default function MiPerfil({ session, verComoJugador, esRealAdmin, onToggleVerComoJugador }) {
+export default function MiPerfil({ session, verComoJugador, puedeAlternarVista, onToggleVerComoJugador }) {
   const correo = (session?.usuario || "").trim().toLowerCase();
   const [jugador, setJugador] = useState(null);
   const [form, setForm] = useState(null);
@@ -235,14 +235,17 @@ export default function MiPerfil({ session, verComoJugador, esRealAdmin, onToggl
           <div className="eyebrow">♦ Torrente On Line Series - TOLS 3.0</div>
           <h1>Mi Perfil</h1>
           <p className="subtitle">Actualiza tus datos de contacto y de cobro. Tu nombre, correo y estatus los administra la liga.</p>
-          {/* 72ª entrega: switch para que un administrador vea el sitio exactamente como lo ve un
-              Jugador (pedido de Federico) — solo aparece para quien realmente inició sesión como
-              administrador, nunca para un Jugador ni mientras el switch ya lo está mostrando "como
-              jugador" (en ese caso `esRealAdmin` sigue en true, así que el botón queda visible para
-              poder volver). */}
-          {esRealAdmin && (
+          {/* 72ª entrega: switch para que quien tiene una vista más amplia (administrador) vea el sitio
+              exactamente como lo ve un Jugador (pedido de Federico) — 75ª entrega: se extendió también
+              al Tesorero, que necesita poder revisar rápido cómo se ve el Calendario/Resultados desde
+              el lado de un jugador. Solo aparece para quien realmente inició sesión con uno de esos dos
+              roles (`puedeAlternarVista`, calculado en App.jsx sobre la sesión REAL, nunca sobre la
+              efectiva) — nunca para un Jugador, ni mientras el switch ya lo está mostrando "como
+              jugador" (en ese caso `puedeAlternarVista` sigue en true, así que el botón queda visible
+              para poder volver). */}
+          {puedeAlternarVista && (
             <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={onToggleVerComoJugador}>
-              {verComoJugador ? "🛠 Volver a vista de administrador" : "👤 Ver como jugador"}
+              {verComoJugador ? "🛠 Volver a mi vista" : "👤 Ver como jugador"}
             </button>
           )}
         </div>

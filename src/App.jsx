@@ -155,6 +155,18 @@ export default function App() {
     return rol === "Administrador General" || rol === "Administrador";
   }
 
+  // 75ª entrega: Federico pidió que "Ver como jugador" también esté disponible para el Tesorero, no
+  // solo para Administrador/Administrador General — el Tesorero necesita poder revisar rápido cómo se
+  // ve el Calendario/Resultados desde el lado de un jugador (ej. para explicarle un reclamo por
+  // teléfono) sin tener que pedirle a un administrador que lo haga. `esAdmin()` sigue siendo el
+  // criterio para todo lo demás (pestañas `soloAdmins`, bypass de portal apagado, etc.) — a propósito
+  // NO se tocó, porque esas otras protecciones (activar/desactivar el portal, ver pestañas de
+  // administración) siguen siendo exclusivas de administrador real. Este helper es solo para decidir
+  // quién puede usar el switch de Mi Perfil.
+  function puedeAlternarVistaJugador(rol) {
+    return esAdmin(rol) || rol === "Tesorero";
+  }
+
   // 72ª entrega: recibe la sesión a evaluar como parámetro (antes cerraba directo sobre `session`) para
   // poder reutilizarla también con la "sesión efectiva" (real o forzada a "Jugador" por el switch "Ver
   // como jugador" de Mi Perfil) sin duplicar la lógica de permisos.
@@ -301,14 +313,14 @@ export default function App() {
   // Calendario, Estadísticas y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
   // no solo se deshabilita. (66ª entrega: Game Night salió de esta lista — quedó oculta para todos.)
   const SOLO_JUGADOR_TABS = ["calendario", "estadisticas", "miperfil"];
-  // 72ª entrega: "sesión efectiva" — igual a la real, salvo que un administrador real activó "Ver como
-  // jugador" en Mi Perfil, en cuyo caso se fuerza rol "Jugador" para que `puedeVerTab()`/la lista de
-  // pestañas reproduzcan EXACTAMENTE lo que ve un Jugador (permisos.js decide todo por `session.rol`,
-  // así que alcanza con este único cambio). La sesión REAL se sigue usando para Nav (nombre/rol
-  // mostrados) y para toda la lógica de portal apagado / login, que nunca debe verse afectada por el
-  // switch.
-  const esRealAdmin = esAdmin(session.rol);
-  const effectiveSession = verComoJugador && esRealAdmin ? { ...session, rol: "Jugador" } : session;
+  // 72ª entrega: "sesión efectiva" — igual a la real, salvo que quien puede usar el switch (administrador
+  // real, o desde la 75ª entrega también el Tesorero) activó "Ver como jugador" en Mi Perfil, en cuyo
+  // caso se fuerza rol "Jugador" para que `puedeVerTab()`/la lista de pestañas reproduzcan EXACTAMENTE
+  // lo que ve un Jugador (permisos.js decide todo por `session.rol`, así que alcanza con este único
+  // cambio). La sesión REAL se sigue usando para Nav (nombre/rol mostrados) y para toda la lógica de
+  // portal apagado / login, que nunca debe verse afectada por el switch.
+  const puedeAlternarVista = puedeAlternarVistaJugador(session.rol);
+  const effectiveSession = verComoJugador && puedeAlternarVista ? { ...session, rol: "Jugador" } : session;
   const tabsConPermiso = TABS.filter((t) => !t.oculto)
     .map((t) => ({ ...t, permitido: puedeVerTab(t, effectiveSession) }))
     .filter((t) => effectiveSession.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key));
@@ -328,10 +340,10 @@ export default function App() {
             cuando quieras abrir el acceso de nuevo.
           </div>
         )}
-        {verComoJugador && esRealAdmin && (
+        {verComoJugador && puedeAlternarVista && (
           <div className="campeonato-banner" style={{ marginBottom: 16 }}>
-            👤 Estás viendo el sitio como perfil Jugador — volvé a la vista de administrador desde el
-            botón en "Mi Perfil".
+            👤 Estás viendo el sitio como perfil Jugador — volvé a tu vista normal desde el botón en
+            "Mi Perfil".
           </div>
         )}
         {active ? (
@@ -340,7 +352,7 @@ export default function App() {
             perfiles={perfiles}
             onPerfilesChange={setPerfiles}
             verComoJugador={verComoJugador}
-            esRealAdmin={esRealAdmin}
+            puedeAlternarVista={puedeAlternarVista}
             onToggleVerComoJugador={() => setVerComoJugador((v) => !v)}
           />
         ) : (

@@ -22,6 +22,12 @@ function moneyContable(n) {
   const abs = Math.abs(v).toLocaleString("en-US");
   return v < 0 ? `($ ${abs})` : `$ ${abs}`;
 }
+// 78ª entrega: a diferencia de money() (que redondea a pesos enteros, el criterio de todo el resto del
+// sitio), "Centavos acumulados" es la única cifra de Cobranza donde los centavos SON el dato — redondearla
+// escondería justo lo que se está mostrando.
+function moneyConCentavos(n) {
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function norm(s) {
   return (s || "").trim().toLowerCase();
 }
@@ -95,9 +101,17 @@ export default function Cobranza({ session, perfiles }) {
   // entrega), este formulario solo CONFIRMA que un pago o un depósito puntual efectivamente ocurrió.
   // `motivo` guarda: la fecha del torneo directo para un Pago; "torneo:{fecha}" o "gasto:{concepto}"
   // para un Depósito (un solo combo unificado, como pidió Federico).
-  const [nuevoMov, setNuevoMov] = useState(null); // null | { tipo, correo, motivo, montoReal, fechaReal, horaReal }
+  const [nuevoMov, setNuevoMov] = useState(null); // null | { tipo, correo, motivo, montoReal, fechaReal }
   const [guardandoMov, setGuardandoMov] = useState(false);
   const [errorMov, setErrorMov] = useState("");
+
+  // pedido extra de Federico: permitir editar (monto y/o fecha) un pago/depósito ya confirmado, desde
+  // la propia tabla de "Pagos y depósitos confirmados" — reusa las mismas acciones del servidor
+  // (misma clave = sobrescribe en vez de duplicar), solo que acá el motivo/jugador ya están fijos (no
+  // se puede cambiar de torneo/concepto/jugador editando, solo corregir monto/fecha).
+  const [editandoPago, setEditandoPago] = useState(null); // null | { clave, tipoAccion, motivoTipo, motivoId, correo, monto, fecha }
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [errorEdicion, setErrorEdicion] = useState("");
 
   const [correoEstado, setCorreoEstado] = useState("");
   const [borrador, setBorrador] = useState(null); // { asunto, cuerpo }
@@ -261,29 +275,125 @@ export default function Cobranza({ session, perfiles }) {
   }
 
   // 76ª entrega: tabla de pagos/depósitos ya confirmados para el campeonato activo, juntando los 3
-  // mapas del backend en una sola lista (más reciente primero).
+  // mapas del backend en una sola lista (más reciente primero). Cada fila guarda además `tipoAccion`/
+  // `motivoTipo`/`motivoId` — no se muestran en la tabla, pero son lo que hace falta para poder
+  // reenviar la misma acción del servidor al EDITAR (ver `guardarEdicionPago()`), ya que el motivo/
+  // jugador de un registro ya confirmado no vienen de los combos filtrados de `nuevoMov`.
   const confirmadosCampeonato = useMemo(() => {
     const filas = [];
     const prefijo = `${campeonatoSel}|`;
     for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
       if (!clave.startsWith(prefijo)) continue;
-      const [, fecha, correo] = clave.split("|");
-      const entry = numeracion[`${campeonatoSel}|${fecha}`];
-      filas.push({ clave, tipo: "Pago", motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fecha)})`, correo, ...reg });
+      const [, fechaTorneo, correo] = clave.split("|");
+      const entry = numeracion[`${campeonatoSel}|${fechaTorneo}`];
+      filas.push({
+        clave,
+        tipo: "Pago",
+        tipoAccion: "pago",
+        motivoTipo: "torneo",
+        motivoId: fechaTorneo,
+        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fechaTorneo)})`,
+        correo,
+        ...reg,
+      });
     }
     for (const [clave, reg] of Object.entries(data?.depositosTorneo || {})) {
       if (!clave.startsWith(prefijo)) continue;
-      const [, fecha, correo] = clave.split("|");
-      const entry = numeracion[`${campeonatoSel}|${fecha}`];
-      filas.push({ clave, tipo: "Depósito", motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fecha)})`, correo, ...reg });
+      const [, fechaTorneo, correo] = clave.split("|");
+      const entry = numeracion[`${campeonatoSel}|${fechaTorneo}`];
+      filas.push({
+        clave,
+        tipo: "Depósito",
+        tipoAccion: "deposito",
+        motivoTipo: "torneo",
+        motivoId: fechaTorneo,
+        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fechaTorneo)})`,
+        correo,
+        ...reg,
+      });
     }
     for (const [clave, reg] of Object.entries(data?.depositosGasto || {})) {
       if (!clave.startsWith(prefijo)) continue;
       const [, concepto, correo] = clave.split("|");
-      filas.push({ clave, tipo: "Depósito", motivo: concepto, correo, ...reg });
+      filas.push({
+        clave,
+        tipo: "Depósito",
+        tipoAccion: "deposito",
+        motivoTipo: "gasto",
+        motivoId: concepto,
+        motivo: concepto,
+        correo,
+        ...reg,
+      });
     }
     return filas.sort((a, b) => (b.registradoEn || "").localeCompare(a.registradoEn || ""));
   }, [data, campeonatoSel, numeracion]);
+
+  // 76ª entrega: "monto esperado" del registro que se está editando — se recalcula igual que
+  // `montoEsperadoMov` (nunca se confía en el valor guardado, por si Estadísticas/Tablero cambiaron
+  // desde que se confirmó por primera vez).
+  let montoEsperadoEdicion = 0;
+  if (editandoPago) {
+    if (editandoPago.motivoTipo === "torneo") {
+      montoEsperadoEdicion = Math.abs(resultadoTorneo(editandoPago.correo, editandoPago.motivoId));
+    } else {
+      const g = gastosCampeonatoActivo.find((x) => x.concepto === editandoPago.motivoId);
+      montoEsperadoEdicion = Number(g?.monto) || 0;
+    }
+  }
+
+  async function guardarEdicionPago() {
+    if (!editandoPago) return;
+    setErrorEdicion("");
+    const monto = Number(editandoPago.monto);
+    if (!(monto > 0)) {
+      setErrorEdicion("Ingresá un monto mayor a 0.");
+      return;
+    }
+    if (editandoPago.tipoAccion === "deposito" && !editandoPago.fecha) {
+      setErrorEdicion("La fecha es obligatoria para un depósito.");
+      return;
+    }
+    setGuardandoEdicion(true);
+    try {
+      let body;
+      if (editandoPago.tipoAccion === "pago") {
+        body = {
+          accion: "registrarPago",
+          campeonato: campeonatoSel,
+          fecha: editandoPago.motivoId,
+          correo: editandoPago.correo,
+          montoEsperado: montoEsperadoEdicion,
+          monto,
+          fechaRegistro: editandoPago.fecha,
+        };
+      } else {
+        body = {
+          accion: "registrarDeposito",
+          campeonato: campeonatoSel,
+          motivoTipo: editandoPago.motivoTipo,
+          motivoId: editandoPago.motivoId,
+          correo: editandoPago.correo,
+          montoEsperado: montoEsperadoEdicion,
+          monto,
+          fechaRegistro: editandoPago.fecha,
+        };
+      }
+      const r = await fetch(API, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
+      setData(json);
+      setEditandoPago(null);
+    } catch (e) {
+      setErrorEdicion(e.message || "No se pudo guardar.");
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  }
 
   async function confirmarNuevoMov() {
     if (!nuevoMov) return;
@@ -318,7 +428,6 @@ export default function Cobranza({ session, perfiles }) {
           montoEsperado: montoEsperadoMov,
           monto,
           fechaRegistro: nuevoMov.fechaReal,
-          horaRegistro: nuevoMov.horaReal,
         };
       } else {
         const esTorneo = nuevoMov.motivo.startsWith("torneo:");
@@ -331,7 +440,6 @@ export default function Cobranza({ session, perfiles }) {
           montoEsperado: montoEsperadoMov,
           monto,
           fechaRegistro: nuevoMov.fechaReal,
-          horaRegistro: nuevoMov.horaReal,
         };
       }
       const r = await fetch(API, {
@@ -504,6 +612,27 @@ export default function Cobranza({ session, perfiles }) {
 
   const totalPagosConfirmados = sumaMapaConfirmado(data?.pagosTorneo);
   const totalDepositosConfirmados = sumaMapaConfirmado(data?.depositosTorneo) + sumaMapaConfirmado(data?.depositosGasto);
+
+  // 78ª entrega: "Centavos acumulados" — los jugadores pagan su Debe + su Número de Referencia como
+  // centavos (ej. Debe $900, referencia 15 → paga $900.15), para que el Tesorero pueda identificar quién
+  // depositó. Esos centavos nunca están incluidos en el Debe que calcula Estadísticas, así que quedan
+  // como remanente en cada Pago — a pedido de Federico, se acumulan solos como un ingreso extra de TOLS,
+  // sin pedirle nada nuevo al Tesorero. Se calcula SOLO de Pagos confirmados del campeonato activo (nunca
+  // de Depósitos — ahí la diferencia sería un error de depósito, no un centavo de referencia) y SOLO el
+  // remanente a favor de TOLS (si por algún motivo el Tesorero registra un monto real MENOR al esperado,
+  // eso es un faltante, no "centavos negativos" — no resta de este total). Es un cálculo puramente
+  // derivado, aditivo — no se guarda nada nuevo en Blobs, se recalcula de `pagosTorneo` en cada render.
+  function centavosAcumuladosCampeonato() {
+    const prefijo = `${campeonatoSel}|`;
+    let total = 0;
+    for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const remanente = (Number(reg.monto) || 0) - (Number(reg.montoEsperado) || 0);
+      if (remanente > 0) total += remanente;
+    }
+    return total;
+  }
+  const centavosAcumulados = centavosAcumuladosCampeonato();
 
   return (
     <div>
@@ -701,7 +830,7 @@ export default function Cobranza({ session, perfiles }) {
                 <button
                   className="btn btn-primary btn-add"
                   onClick={() => {
-                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: 0, fechaReal: "", horaReal: "" });
+                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: 0, fechaReal: "" });
                     setErrorMov("");
                   }}
                 >
@@ -818,15 +947,6 @@ export default function Cobranza({ session, perfiles }) {
                             onChange={(e) => setNuevoMov({ ...nuevoMov, fechaReal: e.target.value })}
                           />
                         </div>
-                        <div className="login-field" style={{ maxWidth: 140 }}>
-                          <label>Hora (opcional)</label>
-                          <input
-                            className="field"
-                            type="time"
-                            value={nuevoMov.horaReal}
-                            onChange={(e) => setNuevoMov({ ...nuevoMov, horaReal: e.target.value })}
-                          />
-                        </div>
                       </div>
                     </>
                   )}
@@ -848,19 +968,89 @@ export default function Cobranza({ session, perfiles }) {
 
           <div className="section-sub">Pagos y depósitos confirmados</div>
           <div className="tbl">
-            <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr" }}>
-              <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div>
+            <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }}>
+              <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div><div />
             </div>
-            {confirmadosCampeonato.map((c) => (
-              <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr" }} key={c.clave}>
-                <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
-                <div><span className={"badge " + (c.tipo === "Pago" ? "badge-regular" : "badge-main")}>{c.tipo}</span></div>
-                <div>{c.motivo}</div>
-                <div className="num right">{money(c.montoEsperado)}</div>
-                <div className="num right">{money(c.monto)}</div>
-                <div className="num">{c.fecha ? fechaFmt(c.fecha) : "—"}{c.hora ? ` ${c.hora}` : ""}</div>
-              </div>
-            ))}
+            {confirmadosCampeonato.map((c) =>
+              editandoPago?.clave === c.clave ? (
+                <div
+                  key={c.clave}
+                  style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", padding: "12px", borderBottom: "1px solid #eee" }}
+                >
+                  <div style={{ minWidth: 200, alignSelf: "center" }}>
+                    <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
+                    <div className="section-sub" style={{ marginTop: 2 }}>{c.tipo} — {c.motivo}</div>
+                  </div>
+                  <div className="login-field" style={{ maxWidth: 160 }}>
+                    <label>Monto esperado</label>
+                    <input className="field" value={money(montoEsperadoEdicion)} disabled readOnly />
+                  </div>
+                  <div className="login-field" style={{ maxWidth: 160 }}>
+                    <label>Monto real</label>
+                    <input
+                      className="field"
+                      type="number"
+                      min={0}
+                      value={editandoPago.monto}
+                      onChange={(e) => setEditandoPago({ ...editandoPago, monto: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="login-field" style={{ maxWidth: 170 }}>
+                    <label>Fecha {editandoPago.tipoAccion === "pago" ? "(opcional)" : ""}</label>
+                    <input
+                      className="field"
+                      type="date"
+                      value={editandoPago.fecha}
+                      onChange={(e) => setEditandoPago({ ...editandoPago, fecha: e.target.value })}
+                    />
+                  </div>
+                  {errorEdicion && <div className="login-error">{errorEdicion}</div>}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn btn-primary" disabled={guardandoEdicion} onClick={guardarEdicionPago}>
+                      {guardandoEdicion ? "Guardando…" : "Guardar"}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={guardandoEdicion}
+                      onClick={() => { setEditandoPago(null); setErrorEdicion(""); }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }} key={c.clave}>
+                  <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
+                  <div><span className={"badge " + (c.tipo === "Pago" ? "badge-regular" : "badge-main")}>{c.tipo}</span></div>
+                  <div>{c.motivo}</div>
+                  <div className="num right">{money(c.montoEsperado)}</div>
+                  <div className="num right">{money(c.monto)}</div>
+                  <div className="num">{c.fecha ? fechaFmt(c.fecha) : "—"}</div>
+                  <div>
+                    {editable && (
+                      <button
+                        className="btn-icon-remove"
+                        title="Editar"
+                        onClick={() => {
+                          setEditandoPago({
+                            clave: c.clave,
+                            tipoAccion: c.tipoAccion,
+                            motivoTipo: c.motivoTipo,
+                            motivoId: c.motivoId,
+                            correo: c.correo,
+                            monto: c.monto,
+                            fecha: c.fecha || "",
+                          });
+                          setErrorEdicion("");
+                        }}
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            )}
             {confirmadosCampeonato.length === 0 && (
               <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este campeonato.</div>
             )}
@@ -1095,12 +1285,19 @@ export default function Cobranza({ session, perfiles }) {
               <div className="stat-label">Depósitos confirmados (Cobranza)</div>
               <div className="stat-value">{money(totalDepositosConfirmados)}</div>
             </div>
+            <div className="stat">
+              <div className="stat-label">Centavos acumulados</div>
+              <div className="stat-value">{moneyConCentavos(centavosAcumulados)}</div>
+            </div>
           </div>
           <div className="section-sub">
             "Recaudado" solo cuenta lo marcado como pagado al tesorero. El fondo acumulado es una estimación
             (% configurado en el Tablero de Control sobre lo ya cobrado) — el monto real depende de cuánto
             se termine recaudando en cada fecha. "Pagos/Depósitos confirmados" son los registros confirmados
-            desde "Registrar pagos y depósitos" (76ª entrega) y todavía no se mezclan en el Saldo neto de arriba.
+            desde "Registrar pagos y depósitos" (76ª entrega) y todavía no se mezclan en el Saldo neto de
+            arriba. "Centavos acumulados" (78ª entrega) es el remanente de los Pagos confirmados de este
+            campeonato por encima del Debe esperado — los centavos que cada jugador agrega como Número de
+            Referencia para identificar su depósito — y tampoco se mezcla con el Saldo neto.
           </div>
         </div>
       )}

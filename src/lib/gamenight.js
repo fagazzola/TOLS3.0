@@ -357,4 +357,40 @@ export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeona
   };
 }
 
+// 72ª entrega: numeración cronológica 1..n de los torneos Regular/Main de cada campeonato — a pedido
+// de Federico, para identificar cada torneo como "N - Regular"/"N - Main" en vez de repetir siempre
+// "Regular"/"Main Event" sin poder distinguir uno de otro a simple vista. Las partidas de práctica
+// NUNCA se numeran (quedan fuera de este mapa por completo) — sus puntos siguen contando aparte (ver
+// PUNTOS_PRACTICA_KEY arriba), pero como torneo no tienen un "N" propio, solo se identifican por fecha.
+// La numeración se calcula sobre TODAS las fechas Regular/Main de cada campeonato tal como están en el
+// Calendario (jugadas o no, publicadas o no) — nunca solo las publicadas — para que el número de un
+// torneo puntual sea estable y no cambie según el orden en que se van publicando resultados. Devuelve
+// un mapa único `"{campeonato}|{fecha}" -> { numero, tipo }` que cubre TODOS los campeonatos presentes
+// en `torneosCal` (no solo el activo), para que un torneo publicado de un campeonato ya cerrado
+// también se pueda etiquetar correctamente en pantallas como Estadísticas.
+export function mapaNumeracionTorneos(torneosCal) {
+  const porCampeonato = {};
+  (torneosCal || []).forEach((t) => {
+    if (t.practica || !t.temporada || !t.fecha) return;
+    if (!porCampeonato[t.temporada]) porCampeonato[t.temporada] = [];
+    porCampeonato[t.temporada].push(t);
+  });
+  const mapa = {};
+  Object.entries(porCampeonato).forEach(([campeonato, lista]) => {
+    lista
+      .slice()
+      .sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .forEach((t, i) => {
+        mapa[`${campeonato}|${t.fecha}`] = { numero: i + 1, tipo: t.main ? "Main" : "Regular" };
+      });
+  });
+  return mapa;
+}
+
+// etiqueta corta "N - Regular"/"N - Main" a partir de una entrada de mapaNumeracionTorneos() — cada
+// pantalla le agrega la fecha formateada al final si hace falta (ej. "1 - Regular (18/01/2026)").
+export function etiquetaNumerada(entry, fallback) {
+  return entry ? `${entry.numero} - ${entry.tipo}` : fallback || "";
+}
+
 export { tipoDeFecha };

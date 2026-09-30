@@ -61,6 +61,10 @@ export default function App() {
   // en la pantalla de mantenimiento, deja al administrador "colarse" al formulario de login normal —
   // el interruptor vive dentro del sitio, así que un administrador SIEMPRE necesita poder entrar.
   const [mostrarLoginAdmin, setMostrarLoginAdmin] = useState(false);
+  // 72ª entrega: switch "Ver como jugador" para administradores, pedido por Federico para poder revisar
+  // la experiencia del rol Jugador sin tener que loguearse con otra cuenta — el botón vive en "Mi
+  // Perfil" (ver MiPerfil.jsx) y solo aparece si quien inició sesión es realmente un administrador.
+  const [verComoJugador, setVerComoJugador] = useState(false);
 
   useEffect(() => {
     const onPop = () => setRuta(window.location.pathname);
@@ -148,11 +152,14 @@ export default function App() {
     return rol === "Administrador General" || rol === "Administrador";
   }
 
-  function puedeVerTab(t) {
+  // 72ª entrega: recibe la sesión a evaluar como parámetro (antes cerraba directo sobre `session`) para
+  // poder reutilizarla también con la "sesión efectiva" (real o forzada a "Jugador" por el switch "Ver
+  // como jugador" de Mi Perfil) sin duplicar la lógica de permisos.
+  function puedeVerTab(t, sesionEval) {
     if (t.oculto) return false;
     if (t.siempreVisible) return true;
-    if (t.soloAdmins) return esAdmin(session?.rol);
-    return puedeVer(perfiles, session, t.modKey);
+    if (t.soloAdmins) return esAdmin(sesionEval?.rol);
+    return puedeVer(perfiles, sesionEval, t.modKey);
   }
 
   function handleLogin(s) {
@@ -291,9 +298,17 @@ export default function App() {
   // Calendario, Estadísticas y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
   // no solo se deshabilita. (66ª entrega: Game Night salió de esta lista — quedó oculta para todos.)
   const SOLO_JUGADOR_TABS = ["calendario", "estadisticas", "miperfil"];
+  // 72ª entrega: "sesión efectiva" — igual a la real, salvo que un administrador real activó "Ver como
+  // jugador" en Mi Perfil, en cuyo caso se fuerza rol "Jugador" para que `puedeVerTab()`/la lista de
+  // pestañas reproduzcan EXACTAMENTE lo que ve un Jugador (permisos.js decide todo por `session.rol`,
+  // así que alcanza con este único cambio). La sesión REAL se sigue usando para Nav (nombre/rol
+  // mostrados) y para toda la lógica de portal apagado / login, que nunca debe verse afectada por el
+  // switch.
+  const esRealAdmin = esAdmin(session.rol);
+  const effectiveSession = verComoJugador && esRealAdmin ? { ...session, rol: "Jugador" } : session;
   const tabsConPermiso = TABS.filter((t) => !t.oculto)
-    .map((t) => ({ ...t, permitido: puedeVerTab(t) }))
-    .filter((t) => session.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key));
+    .map((t) => ({ ...t, permitido: puedeVerTab(t, effectiveSession) }))
+    .filter((t) => effectiveSession.rol !== "Jugador" || SOLO_JUGADOR_TABS.includes(t.key));
   const permitidas = tabsConPermiso.filter((t) => t.permitido);
   const active = permitidas.find((t) => t.key === tab) || permitidas[0];
 
@@ -310,8 +325,21 @@ export default function App() {
             cuando quieras abrir el acceso de nuevo.
           </div>
         )}
+        {verComoJugador && esRealAdmin && (
+          <div className="campeonato-banner" style={{ marginBottom: 16 }}>
+            👤 Estás viendo el sitio como perfil Jugador — volvé a la vista de administrador desde el
+            botón en "Mi Perfil".
+          </div>
+        )}
         {active ? (
-          <active.Component session={session} perfiles={perfiles} onPerfilesChange={setPerfiles} />
+          <active.Component
+            session={effectiveSession}
+            perfiles={perfiles}
+            onPerfilesChange={setPerfiles}
+            verComoJugador={verComoJugador}
+            esRealAdmin={esRealAdmin}
+            onToggleVerComoJugador={() => setVerComoJugador((v) => !v)}
+          />
         ) : (
           <p className="subtitle">Tu perfil no tiene acceso a ningún módulo todavía. Pídele a un administrador que revise tus permisos.</p>
         )}

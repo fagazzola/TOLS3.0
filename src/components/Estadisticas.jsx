@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { estadoTorneoDesdeLugares, tipoDeFecha, PRACTICA_CAMPEONATO } from "../lib/gamenight.js";
+import { estadoTorneoDesdeLugares, tipoDeFecha, PRACTICA_CAMPEONATO, mapaNumeracionTorneos, etiquetaNumerada } from "../lib/gamenight.js";
 import { extraerKillersDeChat } from "../lib/killersChat.js";
 
 // 66ª entrega: pantalla nueva "Estadísticas" — reemplaza el seguimiento en vivo de Game Night (que
@@ -28,6 +28,13 @@ function money(n) {
 function moneyFirmado(n) {
   const v = Math.round(Number(n || 0));
   return (v < 0 ? "-" : "") + "$ " + Math.abs(v).toLocaleString("en-US");
+}
+// 72ª entrega: formato contable pedido por Federico para montos en negativo — "($ #,##0)" en vez de
+// "-$ #,##0" — usado en Estadísticas para Debe/Saldo/Resultado, igual que en Calendario.jsx.
+function moneyContable(n) {
+  const v = Math.round(Number(n || 0));
+  const abs = Math.abs(v).toLocaleString("en-US");
+  return v < 0 ? `($ ${abs})` : `$ ${abs}`;
 }
 function fechaFmt(iso) {
   const [y, m, d] = String(iso || "").split("-");
@@ -109,6 +116,37 @@ function etiquetaTipo(campeonato, tipo) {
   return tipo === "Main" ? "Main Event" : "Regular";
 }
 
+// 72ª entrega: tally de kills HECHOS por cada alias en un torneo ya publicado — misma lógica que ya
+// usaba killsPorAliasTorneo (más abajo, para la tabla de un torneo puntual), factoreada aparte para
+// poder reutilizarla también en el bloque de "Clasificación general" (vista "por killers"), que necesita
+// este mismo cálculo repetido para cada torneo publicado del campeonato, no solo el que está abierto.
+function killsTallyDeTorneo(torneo) {
+  const tally = {};
+  Object.values(torneo?.jugadores || {}).forEach((j) => {
+    if (j.eliminadoPor) tally[j.eliminadoPor] = (tally[j.eliminadoPor] || 0) + 1;
+  });
+  (torneo?.logKillersNoResueltos || []).forEach((l) => {
+    if (l.asignadoA) tally[l.asignadoA] = (tally[l.asignadoA] || 0) + 1;
+  });
+  return tally;
+}
+
+// 72ª entrega: busca el registro de UN jugador del directorio dentro de un torneo ya publicado —
+// `estadisticas.js` guarda cada jugador bajo la clave `correo || alias` (ver Estadisticas.jsx, armado
+// del preview más abajo), así que primero se prueba esa misma clave y, si no aparece (por ejemplo un
+// torneo viejo guardado con un alias que después cambió), se cae a buscar por alias o correo entre
+// todos los valores — igual que hace nombreKillerEnTorneo() más abajo para el nombre visible.
+function jugadorEnTorneo(torneo, jugadorDir) {
+  if (!torneo) return null;
+  const clave = jugadorDir.correo || nombreCorto(jugadorDir);
+  if (torneo.jugadores?.[clave]) return torneo.jugadores[clave];
+  return (
+    Object.values(torneo.jugadores || {}).find(
+      (j) => norm(j.alias) === norm(nombreCorto(jugadorDir)) || (jugadorDir.correo && norm(j.correo) === norm(jugadorDir.correo))
+    ) || null
+  );
+}
+
 export default function Estadisticas({ session }) {
   const admin = esAdmin(session?.rol);
 
@@ -123,6 +161,11 @@ export default function Estadisticas({ session }) {
   const [estData, setEstData] = useState({ torneos: {}, apodos: {} });
 
   const [torneoAbierto, setTorneoAbierto] = useState(null); // { campeonato, fecha }
+
+  // ───────── 72ª entrega: "Clasificación general" ─────────
+  const [vistaClasificacion, setVistaClasificacion] = useState("puntos"); // "puntos" | "killers" | "resultado"
+  const [mostrarIndividuales, setMostrarIndividuales] = useState(true);
+  const [ordenClasif, setOrdenClasif] = useState({ col: "total", dir: "desc" }); // default: Total descendente
 
   // ───────── admin: subir resultados ─────────
   const [torneoAdminSel, setTorneoAdminSel] = useState(""); // clave "campeonato|fecha"
@@ -164,7 +207,14 @@ export default function Estadisticas({ session }) {
       .then(([camp, cal, jug, tablero, est]) => {
         setCampeonatos(camp || { nombres: [], activo: "" });
         setTorneosCal(cal?.torneos || []);
-        setDirectorio((jug?.jugadores || []).filter((j) => j.estatus === "Activo"));
+        // 72ª entrega: "Usuario Domi" es una cuenta de pruebas del sitio — a pedido de Federico se omite
+        // del directorio que alimenta la "Clasificación general" (y de paso, de todo lo demás que ya usa
+        // este `directorio`, ya que no tiene sentido mostrarlo en ningún lado de Estadísticas).
+        setDirectorio(
+          (jug?.jugadores || []).filter(
+            (j) => j.estatus === "Activo" && norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi"
+          )
+        );
         setTableroMapa(tablero || {});
         setEstData(est || { torneos: {}, apodos: {} });
       })
@@ -182,6 +232,17 @@ export default function Estadisticas({ session }) {
     }
     return lista.sort((a, b) => b.fecha.localeCompare(a.fecha));
   }, [estData]);
+
+  // 72ª entrega: numeración cronológica 1..n de los torneos Regular/Main de cada campeonato (ver
+  // src/lib/gamenight.js) — se calcula sobre TODAS las fechas del Calendario, publicadas o no, para que
+  // el número de un torneo sea estable. `etiquetaTorneo()` arma el rótulo completo pedido por Federico:
+  // "N - Regular (dd/mm/yyyy)" / "N - Main (dd/mm/yyyy)", o "Práctica (dd/mm/yyyy)" para una práctica.
+  const numeracion = useMemo(() => mapaNumeracionTorneos(torneosCal), [torneosCal]);
+  function etiquetaTorneo(campeonato, fecha, tipoFallback) {
+    if (campeonato === PRACTICA_CAMPEONATO) return `Práctica (${fechaFmt(fecha)})`;
+    const base = etiquetaNumerada(numeracion[`${campeonato}|${fecha}`], tipoFallback || "Regular");
+    return `${base} (${fechaFmt(fecha)})`;
+  }
 
   // 70ª entrega: a pedido de Federico, ya NO se preselecciona el torneo más reciente al entrar — la
   // pantalla solo muestra los botones de "Torneos publicados"; los resultados se despliegan recién
@@ -294,6 +355,68 @@ export default function Estadisticas({ session }) {
     const yaGuardado = estData.torneos?.[campeonato]?.[fecha] || null;
     return { ...opcion, yaGuardado };
   }, [torneoAdminSel, opcionesTorneoAdmin, estData]);
+
+  // ───────── 72ª entrega: datos de "Clasificación general" ─────────
+  // columnas: torneos Regular/Main del campeonato activo, numerados y en orden cronológico, marcando
+  // cuáles ya están publicados (los únicos que entran en las tablas — "Lo demás en cero").
+  const campeonatoActivoNombre = campeonatos.activo || campeonatos.nombres?.[0] || "";
+  const torneosClasifCampeonato = useMemo(() => {
+    return torneosCal
+      .filter((t) => !t.practica && t.temporada === campeonatoActivoNombre && t.fecha)
+      .map((t) => ({ fecha: t.fecha, ...(numeracion[`${campeonatoActivoNombre}|${t.fecha}`] || {}) }))
+      .filter((t) => t.numero)
+      .sort((a, b) => a.numero - b.numero)
+      .map((t) => ({ ...t, torneo: estData.torneos?.[campeonatoActivoNombre]?.[t.fecha] || null }));
+  }, [torneosCal, campeonatoActivoNombre, numeracion, estData]);
+  const columnasClasif = torneosClasifCampeonato.filter((t) => t.torneo?.publicado);
+
+  // columna lumped "Práctica" (solo vista Puntos) — suma de TODAS las partidas de práctica publicadas,
+  // indistintamente del campeonato (mismo criterio que ya usa el Calendario para puntos de práctica).
+  const torneosPracticaPublicados = useMemo(() => {
+    return torneosCal
+      .filter((t) => t.practica && t.fecha)
+      .map((t) => estData.torneos?.[PRACTICA_CAMPEONATO]?.[t.fecha] || null)
+      .filter((t) => t?.publicado);
+  }, [torneosCal, estData]);
+
+  const filasClasificacion = useMemo(() => {
+    return directorio.map((j) => {
+      const alias = nombreCorto(j);
+      const valores = {};
+      columnasClasif.forEach((c) => {
+        const jt = jugadorEnTorneo(c.torneo, j);
+        let v = 0;
+        if (vistaClasificacion === "puntos") v = Number(jt?.puntos) || 0;
+        else if (vistaClasificacion === "killers") v = killsTallyDeTorneo(c.torneo)[alias] || 0;
+        else v = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+        valores[c.fecha] = v;
+      });
+      const practica =
+        vistaClasificacion === "puntos"
+          ? torneosPracticaPublicados.reduce((s, t) => s + (Number(jugadorEnTorneo(t, j)?.puntos) || 0), 0)
+          : 0;
+      const total = Object.values(valores).reduce((s, v) => s + v, 0) + practica;
+      return { jugador: j, alias, valores, practica, total };
+    });
+  }, [directorio, columnasClasif, torneosPracticaPublicados, vistaClasificacion]);
+
+  const filasClasifOrdenadas = useMemo(() => {
+    const arr = [...filasClasificacion];
+    arr.sort((a, b) => {
+      const va = ordenClasif.col === "total" ? a.total : ordenClasif.col === "practica" ? a.practica : a.valores[ordenClasif.col] || 0;
+      const vb = ordenClasif.col === "total" ? b.total : ordenClasif.col === "practica" ? b.practica : b.valores[ordenClasif.col] || 0;
+      return ordenClasif.dir === "asc" ? va - vb : vb - va;
+    });
+    return arr;
+  }, [filasClasificacion, ordenClasif]);
+
+  function ordenarClasifPor(col) {
+    setOrdenClasif((prev) => (prev.col === col ? { col, dir: prev.dir === "desc" ? "asc" : "desc" } : { col, dir: "desc" }));
+  }
+
+  function fmtClasifValor(v) {
+    return vistaClasificacion === "resultado" ? moneyContable(v) : v;
+  }
 
   function reiniciarSubida() {
     setExcelJugadores(null);
@@ -599,7 +722,89 @@ export default function Estadisticas({ session }) {
 
       <div className="section">
         <div className="section-head">
-          <div className="section-title">Torneos publicados</div>
+          <div className="section-title">Clasificación general</div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "8px 0" }}>
+          {[
+            ["puntos", "Por puntos"],
+            ["killers", "Por killers"],
+            ["resultado", "Por resultado"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={"btn " + (vistaClasificacion === key ? "btn-primary" : "btn-secondary")}
+              onClick={() => setVistaClasificacion(key)}
+            >
+              {label}
+            </button>
+          ))}
+          <button type="button" className="btn btn-secondary" onClick={() => setMostrarIndividuales((v) => !v)}>
+            {mostrarIndividuales ? "Ocultar torneos individuales" : "Mostrar torneos individuales"}
+          </button>
+        </div>
+        {columnasClasif.length === 0 && torneosPracticaPublicados.length === 0 ? (
+          <div className="section-sub" style={{ padding: 16 }}>Todavía no hay ningún torneo publicado.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
+                  {mostrarIndividuales &&
+                    columnasClasif.map((c) => (
+                      <th
+                        key={c.fecha}
+                        title={fechaFmt(c.fecha)}
+                        style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                        onClick={() => ordenarClasifPor(c.fecha)}
+                      >
+                        {etiquetaNumerada(c, c.tipo)}{ordenClasif.col === c.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                      </th>
+                    ))}
+                  {vistaClasificacion === "puntos" && mostrarIndividuales && (
+                    <th
+                      style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                      onClick={() => ordenarClasifPor("practica")}
+                    >
+                      Práctica{ordenClasif.col === "practica" ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                    </th>
+                  )}
+                  <th
+                    style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                    onClick={() => ordenarClasifPor("total")}
+                  >
+                    Total{ordenClasif.col === "total" ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filasClasifOrdenadas.map((f) => (
+                  <tr key={f.jugador.correo || f.alias}>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{f.alias}</td>
+                    {mostrarIndividuales &&
+                      columnasClasif.map((c) => (
+                        <td key={c.fecha} style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>
+                          {fmtClasifValor(f.valores[c.fecha] || 0)}
+                        </td>
+                      ))}
+                    {vistaClasificacion === "puntos" && mostrarIndividuales && (
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{f.practica}</td>
+                    )}
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right", fontWeight: "bold" }}>
+                      {fmtClasifValor(f.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="section">
+        <div className="section-head">
+          <div className="section-title">Resultados Torneos</div>
         </div>
         {torneosPublicados.length === 0 ? (
           <div className="section-sub" style={{ padding: 16 }}>Todavía no hay ningún torneo publicado.</div>
@@ -612,9 +817,9 @@ export default function Estadisticas({ session }) {
                   key={`${t.campeonato}|${t.fecha}`}
                   type="button"
                   className={"btn " + (activo ? "btn-primary" : "btn-secondary")}
-                  onClick={() => setTorneoAbierto(t)}
+                  onClick={() => setTorneoAbierto(activo ? null : t)}
                 >
-                  {fechaFmt(t.fecha)} · {etiquetaTipo(t.campeonato, t.tipo)}
+                  {etiquetaTorneo(t.campeonato, t.fecha, t.tipo)}
                 </button>
               );
             })}
@@ -626,7 +831,7 @@ export default function Estadisticas({ session }) {
         <div className="section">
           <div className="section-head">
             <div className="section-title">
-              Resultados torneo {fechaFmt(torneoAbierto.fecha)} · {etiquetaTipo(torneoAbierto.campeonato, torneoAbierto.tipo)}
+              Resultados torneo {etiquetaTorneo(torneoAbierto.campeonato, torneoAbierto.fecha, torneoActual.tipo)}
             </div>
             {admin && (
               <button type="button" className="btn btn-secondary btn-filtro" onClick={exportarExcel}>
@@ -670,9 +875,9 @@ export default function Estadisticas({ session }) {
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{killsPorAliasTorneo[j.alias] || 0}</td>
                     {esMainActual && <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.mejorMano ? "Sí" : "No"}</td>}
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
-                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(-(j.debeTotal || 0))}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyContable(-(j.debeTotal || 0))}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{money(j.premioTotal)}</td>
-                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(saldo)}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyContable(saldo)}</td>
                   </tr>
                 );
               })}
@@ -691,9 +896,9 @@ export default function Estadisticas({ session }) {
                   </td>
                   {esMainActual && <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>}
                   <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
-                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesTorneo.debe)}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyContable(-totalesTorneo.debe)}</td>
                   <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{money(totalesTorneo.premio)}</td>
-                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(totalesTorneo.saldo)}</td>
+                  <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyContable(totalesTorneo.saldo)}</td>
                 </tr>
               </tfoot>
             )}
@@ -731,7 +936,7 @@ export default function Estadisticas({ session }) {
                   const estadoTxt = guardado?.publicado ? " (ya publicado)" : guardado ? " (cargado, sin publicar)" : "";
                   return (
                     <option key={`${o.campeonato}|${o.fecha}`} value={`${o.campeonato}|${o.fecha}`}>
-                      {fechaFmt(o.fecha)} · {etiquetaTipo(o.campeonato, o.tipo)}{estadoTxt}
+                      {etiquetaTorneo(o.campeonato, o.fecha, o.tipo)}{estadoTxt}
                     </option>
                   );
                 })}
@@ -821,9 +1026,9 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{killsPorAliasPreview[j.alias] || 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado(-(j.debeTotal || 0))}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyContable(-(j.debeTotal || 0))}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{money(j.premioTotal)}</td>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyFirmado((j.premioTotal || 0) - (j.debeTotal || 0))}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyContable((j.premioTotal || 0) - (j.debeTotal || 0))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -840,9 +1045,9 @@ export default function Estadisticas({ session }) {
                         {Object.values(killsPorAliasPreview).reduce((s, n) => s + n, 0)}
                       </td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999" }}></td>
-                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(-totalesPreview.debe)}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyContable(-totalesPreview.debe)}</td>
                       <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{money(totalesPreview.premio)}</td>
-                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyFirmado(totalesPreview.saldo)}</td>
+                      <td style={{ padding: "6px 8px", borderTop: "2px solid #999", textAlign: "right" }}>{moneyContable(totalesPreview.saldo)}</td>
                     </tr>
                   </tfoot>
                 )}

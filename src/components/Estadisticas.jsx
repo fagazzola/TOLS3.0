@@ -629,20 +629,10 @@ export default function Estadisticas({ session }) {
   }
 
   // ───────── admin: editor de apodos de chat ─────────
-  function seedApodosBorrador() {
-    const borrador = {};
-    for (const j of directorio) {
-      const alias = nombreCorto(j);
-      if (!alias) continue;
-      const previos = estData.apodos?.[alias] || [];
-      borrador[alias] = [previos[0] || "", previos[1] || "", previos[2] || ""];
-    }
-    return borrador;
-  }
-  function abrirEditorApodos() {
-    setApodosBorrador(seedApodosBorrador());
-    setEditorApodos(true);
-  }
+  // 82ª entrega: el botón manual "Apodos de chat" (que abría este editor con lo ya guardado,
+  // pre-cargado) se eliminó a pedido de Federico — "Excel Referencias" pasó a ser la única vía para
+  // cargar/editar estos datos, y siempre reemplaza lo guardado (ver onApodosExcelSeleccionado más abajo),
+  // así que ya no hace falta "sembrar" el borrador con lo previo.
   function cambiarApodo(alias, i, valor) {
     setApodosBorrador((prev) => {
       const fila = [...(prev[alias] || ["", "", ""])];
@@ -651,10 +641,14 @@ export default function Estadisticas({ session }) {
     });
   }
 
-  // Importa el Excel de referencias de chat que Federico ya tenía armado (Alias PokerStars + hasta 3
-  // referencias) — a pedido explícito, esto NUNCA borra un apodo ya guardado: cada referencia del
-  // archivo se agrega en el primer espacio libre de esa fila (sin duplicar una que ya esté), y un
-  // jugador que no esté en el archivo mantiene intactos los apodos que ya tenía.
+  // 82ª entrega: a pedido de Federico, "Excel Referencias" ahora SIEMPRE reemplaza lo que haya guardado
+  // en el portal — ya no se fusiona de forma no-destructiva con lo previo (ese era el comportamiento de
+  // hasta la 68ª/81ª entrega, cuando todavía existía el botón manual "Apodos de chat" para cargar/editar
+  // a mano). El borrador se reconstruye desde cero en cada import: cada Alias PokerStars del directorio
+  // arranca en blanco, y solo los que aparecen en el archivo quedan con sus referencias — nunca se
+  // conserva un valor que ya estuviera guardado del lado del servidor si el archivo no lo repite. Se
+  // muestra de inmediato en formato tabla (el mismo editor de siempre); sigue haciendo falta tocar
+  // "Guardar apodos" para confirmar el reemplazo contra el servidor.
   async function onApodosExcelSeleccionado(e) {
     const archivo = e.target.files?.[0];
     e.target.value = "";
@@ -670,21 +664,17 @@ export default function Estadisticas({ session }) {
         setError(err);
         return;
       }
+      const base = {};
+      for (const j of directorio) {
+        const alias = nombreCorto(j);
+        if (alias) base[alias] = ["", "", ""];
+      }
+      for (const { alias, referencias } of filas) {
+        base[alias] = [referencias[0] || "", referencias[1] || "", referencias[2] || ""];
+      }
+      setApodosBorrador(base);
       setEditorApodos(true);
-      setApodosBorrador((prev) => {
-        const base = Object.keys(prev).length ? { ...prev } : seedApodosBorrador();
-        for (const { alias, referencias } of filas) {
-          const actuales = [...(base[alias] || ["", "", ""])];
-          for (const valor of referencias) {
-            if (!valor || actuales.includes(valor)) continue;
-            const idxVacio = actuales.findIndex((v) => !v);
-            if (idxVacio >= 0) actuales[idxVacio] = valor;
-          }
-          base[alias] = actuales.slice(0, 3);
-        }
-        return base;
-      });
-      setAviso(`Referencias importadas de "${archivo.name}" — revisá y guardá para confirmar.`);
+      setAviso(`Referencias importadas de "${archivo.name}" — reemplazaron lo que había guardado. Revisá y guardá para confirmar.`);
     } catch {
       setError("No se pudo leer el archivo de referencias. ¿Seguro que es un .xlsx?");
     }
@@ -961,20 +951,23 @@ export default function Estadisticas({ session }) {
                 })}
               </select>
             </label>
+            {/* 82ª entrega: botones renombrados a pedido de Federico — "Excel PokerStars"/"Txt WhatsApp"/
+                "Excel Referencias" en vez de los nombres largos de antes; el botón "Apodos de chat" (que
+                abría el editor vacío/con lo ya guardado para editar a mano) se eliminó — "Excel
+                Referencias" pasó a ser la única vía para cargar estos datos (ver más abajo). */}
             <button type="button" className="btn btn-secondary" onClick={() => excelRef.current?.click()}>
-              📥 {excelNombreArchivo || "Elegir Excel de resultados (PokerStars)"}
+              📥 {excelNombreArchivo || "Excel PokerStars"}
             </button>
             <input ref={excelRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={onExcelSeleccionado} />
             <button type="button" className="btn btn-secondary" onClick={() => chatRef.current?.click()}>
-              💬 {chatNombreArchivo || "Elegir chat de WhatsApp (.txt) con los Killers"}
+              💬 {chatNombreArchivo || "Txt WhatsApp"}
             </button>
             <input ref={chatRef} type="file" accept=".txt" style={{ display: "none" }} onChange={onChatSeleccionado} />
             {(excelNombreArchivo || chatNombreArchivo) && (
               <button type="button" className="btn btn-secondary" onClick={reiniciarSubida}>✕ Quitar archivos</button>
             )}
-            <button type="button" className="btn btn-secondary" onClick={abrirEditorApodos}>✎ Apodos de chat</button>
             <button type="button" className="btn btn-secondary" onClick={() => apodosExcelRef.current?.click()}>
-              📥 Importar Excel de referencias
+              📥 Excel Referencias
             </button>
             <input ref={apodosExcelRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={onApodosExcelSeleccionado} />
           </div>
@@ -1086,7 +1079,7 @@ export default function Estadisticas({ session }) {
             <div className="section-title">Apodos de chat</div>
           </div>
           <p className="section-sub">
-            Hasta 3 nombres o apodos con los que un jugador puede aparecer firmando mensajes en el chat de WhatsApp, además de su Alias PokerStars y su Nombre. Se usan para reconocer quién mató a quién. "Importar Excel de referencias" agrega lo que traiga el archivo sin borrar nada de lo que ya está cargado — recordá tocar "Guardar apodos" para confirmar los cambios.
+            Hasta 3 nombres o apodos con los que un jugador puede aparecer firmando mensajes en el chat de WhatsApp, además de su Alias PokerStars y su Nombre. Se usan para reconocer quién mató a quién. "Excel Referencias" siempre reemplaza lo que ya estaba guardado — recordá tocar "Guardar apodos" para confirmar el reemplazo.
           </p>
           <div className="tbl" style={{ overflowX: "auto" }}>
             <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 1fr 1fr 1fr" }}>

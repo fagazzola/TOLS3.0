@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/tablero.json";
 import { syncTablero } from "./lib/msgraph.js";
+import { exportarTodoDesdeBlobs } from "./lib/exportar-excel.js";
 import { PUNTOS_PRACTICA_KEY } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -189,6 +190,17 @@ export default async (req) => {
       body = await req.json();
     } catch (e) {
       return new Response(JSON.stringify({ error: "JSON inválido." }), { status: 400, headers: HEADERS });
+    }
+
+    // 83ª entrega: "Exportar todo a Excel" — a pedido de Federico, regenera el archivo completo a
+    // demanda desde Blobs (ver lib/exportar-excel.js), en vez de depender de la sincronización
+    // automática silenciosa de siempre. Vive como una acción más de este endpoint (porque el botón se
+    // pidió puntualmente en la pantalla Tablero de Control) pero no toca `mapa` para nada — recorre
+    // TODOS los módulos del sitio, no solo el Tablero — así que se resuelve aparte, antes de leer/tocar
+    // el store de tols-tablero, y devuelve un reporte módulo por módulo en vez del mapa de siempre.
+    if (body?.accion === "exportarExcel") {
+      const reporte = await exportarTodoDesdeBlobs();
+      return new Response(JSON.stringify(reporte), { headers: HEADERS });
     }
 
     const raw = await store.get("data", { type: "json", consistency: "strong" });

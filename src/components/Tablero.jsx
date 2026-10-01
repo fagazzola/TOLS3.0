@@ -139,6 +139,14 @@ export default function Tablero({ session, perfiles }) {
   const [paramError, setParamError] = useState("");
   const [confirmPortal, setConfirmPortal] = useState(false);
 
+  // 83ª entrega: "Exportar todo a Excel" — a pedido de Federico, regenera el archivo completo a demanda
+  // desde Blobs en vez de depender de la sincronización automática silenciosa de siempre (ver
+  // netlify/functions/lib/exportar-excel.js). Igual que Parámetros Generales, esto NO depende del
+  // campeonato elegido arriba: toca TODOS los módulos del sitio de una sola vez.
+  const [exportando, setExportando] = useState(false);
+  const [reporteExport, setReporteExport] = useState(null); // { resultados: [{modulo, ok, error}], ok, exportadoEn }
+  const [confirmExport, setConfirmExport] = useState(false);
+
   const [gestionAbierta, setGestionAbierta] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [renombres, setRenombres] = useState({});
@@ -417,6 +425,33 @@ export default function Tablero({ session, perfiles }) {
     }
   }
 
+  // 83ª entrega: a diferencia del portal (que solo tiene 2 valores posibles), acá no hace falta
+  // confirmar "sí/no" — solo advertir, una vez, que esto va a reemplazar lo que haya en el Excel. Por
+  // eso el modal de confirmación se abre siempre, nunca se dispara directo como `cambiarPortal(true)`.
+  function pedirExportarExcel() {
+    setConfirmExport(true);
+  }
+
+  async function exportarExcel() {
+    setExportando(true);
+    setReporteExport(null);
+    try {
+      const r = await fetch(API, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion: "exportarExcel" }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo exportar.");
+      setReporteExport(json);
+    } catch (e) {
+      setReporteExport({ resultados: [], ok: false, error: e.message || "No se pudo exportar a Excel." });
+    } finally {
+      setExportando(false);
+      setConfirmExport(false);
+    }
+  }
+
   function pedirAgregarCampeonato() {
     const nombre = nuevoNombre.trim();
     if (!nombre) return;
@@ -621,6 +656,77 @@ export default function Tablero({ session, perfiles }) {
             )}
           </div>
           {paramError && <div className="login-error">{paramError}</div>}
+        </div>
+      )}
+
+      {/* 83ª entrega: "Exportar todo a Excel" — a pedido de Federico, botón que regenera el archivo
+          completo a demanda desde Blobs (ver netlify/functions/lib/exportar-excel.js), en vez de
+          depender de la sincronización automática silenciosa de siempre. Igual que Parámetros
+          Generales, no depende del campeonato elegido arriba: toca todos los módulos de una sola vez. */}
+      {editable && (
+        <div className="section" style={{ marginTop: 24 }}>
+          <div className="section-head"><div className="section-title">Excel</div></div>
+          <div className="login-field-row" style={{ alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Exportar todo a Excel</div>
+              <div className="section-note">
+                Regenera el archivo completo a demanda, módulo por módulo, directamente desde lo que hay
+                guardado ahora mismo en el sitio — reemplaza lo que haya en cada hoja. Úsalo si sospechas
+                que la sincronización automática (la que corre sola cada vez que alguien guarda algo) se
+                quedó atrás en algún módulo.
+              </div>
+            </div>
+            <button type="button" className="btn btn-secondary" disabled={exportando} onClick={pedirExportarExcel}>
+              {exportando ? "Exportando…" : "Exportar todo a Excel"}
+            </button>
+          </div>
+          {reporteExport && (
+            <div style={{ marginTop: 12 }}>
+              <div className="section-note" style={{ fontWeight: 600 }}>
+                {reporteExport.error
+                  ? "No se pudo completar la exportación."
+                  : reporteExport.ok
+                  ? "Exportación completa — todos los módulos se sincronizaron bien."
+                  : "Exportación terminada con errores en algunos módulos (detalle abajo)."}
+              </div>
+              {reporteExport.error && <div className="login-error">{reporteExport.error}</div>}
+              {reporteExport.resultados?.length > 0 && (
+                <div className="tbl" style={{ marginTop: 6 }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: "1fr 100px 1fr" }}>
+                    <div>Módulo</div><div>Estado</div><div>Detalle</div>
+                  </div>
+                  {reporteExport.resultados.map((r) => (
+                    <div className="trow" style={{ gridTemplateColumns: "1fr 100px 1fr" }} key={r.modulo}>
+                      <div>{r.modulo}</div>
+                      <div>{r.ok ? "✓ OK" : "✕ Falló"}</div>
+                      <div className="section-note">{r.ok ? "" : r.error}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {confirmExport && (
+        <div className="modal-backdrop" onClick={() => !exportando && setConfirmExport(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge danger">⚠</div>
+            <div className="modal-title">Exportar todo a Excel</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Esto va a <b>reemplazar</b> el contenido de todas las hojas del Excel con lo que hay guardado
+              ahora mismo en el sitio. Puede tardar un momento — no cierres esta pantalla mientras corre.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmExport(false)} disabled={exportando}>
+                Cancelar
+              </button>
+              <button className="btn btn-danger" disabled={exportando} onClick={exportarExcel}>
+                {exportando ? "Exportando…" : "Sí, exportar todo"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

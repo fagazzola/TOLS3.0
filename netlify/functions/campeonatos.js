@@ -33,7 +33,11 @@ async function estaEnCurso(nombre) {
 // limpia la lista: quita espacios y duplicados, sin tronar si viene algo raro. "activo" es el
 // campeonato que gobierna el sitio (el que se ve/edita en el Tablero de Control) — el mismo que debe
 // reflejarse en el Calendario y en cualquier otra pantalla que necesite saber "cuál es el torneo vigente".
-function normalizar(data) {
+// 83ª entrega: exportada para que lib/exportar-excel.js ("Exportar todo a Excel" en Tablero de
+// Control) pueda normalizar tols-campeonatos de la misma forma que esta pantalla, en vez de confiar en
+// que lo guardado en Blobs ya esté siempre en forma — mismo criterio que se usó para `normalizar()` de
+// perfiles.js (que ya estaba exportada).
+export function normalizar(data) {
   const base = data && typeof data === "object" ? data : {};
   const origen = Array.isArray(base.nombres) ? base.nombres : Array.isArray(seed.nombres) ? seed.nombres : [];
   const limpios = [];

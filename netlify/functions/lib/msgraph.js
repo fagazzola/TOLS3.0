@@ -325,15 +325,23 @@ async function safe(fn) {
   }
 }
 
+// 83ª entrega: cada syncX de abajo se partió en un "núcleo" sin envolver (nucleoSyncX, exportado) y el
+// mismo syncX de siempre, que sigue envolviendo ese núcleo en safe() exactamente como antes — ningún
+// llamador existente (campeonatos.js, tablero.js, etc.) cambia de comportamiento. El único motivo del
+// split es "Exportar todo a Excel" (ver lib/exportar-excel.js): ese botón necesita saber de verdad si
+// cada hoja se sincronizó o no, y safe() por diseño nunca deja pasar un error hacia afuera (así nunca
+// tumba un guardado del sitio) — así que exportar-excel.js llama a los núcleos directo, en su propio
+// try/catch, mientras el resto del sitio sigue usando los syncX de siempre sin enterarse del cambio.
+export async function nucleoSyncCampeonatos(data) {
+  const rows = (data.nombres || []).map((n) => [n]);
+  await writeSheetTable("Campeonatos", rows);
+}
 export function syncCampeonatos(data) {
-  return safe(async () => {
-    const rows = (data.nombres || []).map((n) => [n]);
-    await writeSheetTable("Campeonatos", rows);
-  });
+  return safe(() => nucleoSyncCampeonatos(data));
 }
 
-export function syncTablero(mapa) {
-  return safe(async () => {
+export async function nucleoSyncTablero(mapa) {
+  {
     // PUNTOS_PRACTICA_KEY no es un campeonato (ver src/lib/gamenight.js) — a propósito no tiene
     // premios/puntos/cobrosPorTorneo, así que se excluye de este loop (que sí los espera en cada
     // entrada) y se sincroniza aparte, más abajo, en su propia hoja.
@@ -373,49 +381,55 @@ export function syncTablero(mapa) {
     // que ya existían en el Excel maestro de Federico) — se asegura que exista antes de escribirle.
     await asegurarHoja("Puntos_Practica", ["Fecha", "Lugar", "Puntos"]);
     await writeSheetTable("Puntos_Practica", puntosPractica);
-  });
+  }
+}
+export function syncTablero(mapa) {
+  return safe(() => nucleoSyncTablero(mapa));
 }
 
+export async function nucleoSyncCalendario(data) {
+  const filas = (data.torneos || [])
+    .slice()
+    .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
+    .map((t) => [t.fecha, t.hora, t.main ? "Sí" : "No", t.temporada || ""]);
+  await writeSheetTable("Calendario", filas);
+
+  const config = [
+    ["Fecha de Pago Final", data.pagoFinal?.fecha || ""],
+    ["Nota de Pago Final", data.pagoFinal?.nota || ""],
+    ["Hora por Defecto (torneo nuevo)", data.defaultHora || ""],
+    ["Hora Límite Mejor Mano", data.horaLimiteMejorMano || ""],
+  ];
+  await writeSheetTable("Calendario_Config", config, { maxRows: 20 });
+}
 export function syncCalendario(data) {
-  return safe(async () => {
-    const filas = (data.torneos || [])
-      .slice()
-      .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
-      .map((t) => [t.fecha, t.hora, t.main ? "Sí" : "No", t.temporada || ""]);
-    await writeSheetTable("Calendario", filas);
-
-    const config = [
-      ["Fecha de Pago Final", data.pagoFinal?.fecha || ""],
-      ["Nota de Pago Final", data.pagoFinal?.nota || ""],
-      ["Hora por Defecto (torneo nuevo)", data.defaultHora || ""],
-      ["Hora Límite Mejor Mano", data.horaLimiteMejorMano || ""],
-    ];
-    await writeSheetTable("Calendario_Config", config, { maxRows: 20 });
-  });
+  return safe(() => nucleoSyncCalendario(data));
 }
 
+export async function nucleoSyncJugadores(jugadores) {
+  const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
+  const perfilesData = await perfilesStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
+  await escribirJugadoresUnificado(jugadores, perfilesData);
+}
 export function syncJugadores(jugadores) {
-  return safe(async () => {
-    const perfilesStore = getStore({ name: "tols-perfiles", consistency: "strong" });
-    const perfilesData = await perfilesStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
-    await escribirJugadoresUnificado(jugadores, perfilesData);
-  });
+  return safe(() => nucleoSyncJugadores(jugadores));
 }
 
 // espeja el módulo de Cobranza en las mismas 2 hojas que ya se armaron a mano en el Excel maestro
 // (Cobranza_Resumen y Cobranza) — a partir de esta entrega esas hojas dejan de tener fórmulas propias
 // y pasan a ser un espejo de solo lectura como el resto del sitio: cada guardado desde el Tesorero
 // las vuelve a escribir completas con los valores ya calculados.
+export async function nucleoSyncCobranza({ resumenRows, movimientoRows }) {
+  // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de esta hoja — esos datos ya viven
+  // (y se editan) solo en la hoja "Jugadores" (ver `filasJugadoresUnificadas()` más abajo). `resumenRows`
+  // ya no trae esas 3 columnas (ver `filasParaExcel()` en cobranza.js), pero `minClearCols: 8` asegura
+  // que las columnas C/D/E, que hasta la 57ª entrega tenían esos datos (y F/G/H el pago/depósito/saldo
+  // corrido), queden vacías en vez de con lo último que se alcanzó a escribir ahí.
+  await writeSheetTable("Cobranza_Resumen", resumenRows, { minClearCols: 8 });
+  await writeSheetTable("Cobranza", movimientoRows);
+}
 export function syncCobranza({ resumenRows, movimientoRows }) {
-  return safe(async () => {
-    // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de esta hoja — esos datos ya viven
-    // (y se editan) solo en la hoja "Jugadores" (ver `filasJugadoresUnificadas()` más abajo). `resumenRows`
-    // ya no trae esas 3 columnas (ver `filasParaExcel()` en cobranza.js), pero `minClearCols: 8` asegura
-    // que las columnas C/D/E, que hasta la 57ª entrega tenían esos datos (y F/G/H el pago/depósito/saldo
-    // corrido), queden vacías en vez de con lo último que se alcanzó a escribir ahí.
-    await writeSheetTable("Cobranza_Resumen", resumenRows, { minClearCols: 8 });
-    await writeSheetTable("Cobranza", movimientoRows);
-  });
+  return safe(() => nucleoSyncCobranza({ resumenRows, movimientoRows }));
 }
 
 // Game Night (MOD 5): a diferencia del resto de los módulos, sus 2 hojas se crean solas la primera
@@ -424,8 +438,8 @@ export function syncCobranza({ resumenRows, movimientoRows }) {
 // con su hora de inicio; "GameNight_Jugadores" es una fila por jugador+torneo con todo el detalle en
 // vivo (check-in, amonestación, buy-in/re-buys/add-on, killer, lugar, mejor mano) y su timestamp de
 // última actualización — la columna que permite reconciliar después contra lo que se vivió en la mesa.
-export function syncGameNight(mapa) {
-  return safe(async () => {
+export async function nucleoSyncGameNight(mapa) {
+  {
     const sesiones = [];
     const jugadores = [];
     for (const [campeonato, fechas] of Object.entries(mapa || {})) {
@@ -461,7 +475,10 @@ export function syncGameNight(mapa) {
       "Lugar", "Premio", "Puntos", "Actualizado",
     ]);
     await writeSheetTable("GameNight_Jugadores", jugadores, { maxRows: 600 });
-  });
+  }
+}
+export function syncGameNight(mapa) {
+  return safe(() => nucleoSyncGameNight(mapa));
 }
 
 // 51ª entrega: Federico pidió que, al confirmar "Jugada Concluida" en Game Night, quede un registro
@@ -474,8 +491,8 @@ export function syncGameNight(mapa) {
 // se cerró cada torneo, sin depender de que nadie haya tocado nada después. Como la hoja crece con cada
 // cierre (nunca se editan filas viejas), el `maxRows` de la limpieza se calcula sobre el tamaño real de
 // la lista en cada llamada.
-export function syncCierres(registros) {
-  return safe(async () => {
+export async function nucleoSyncCierres(registros) {
+  {
     const filas = (registros || [])
       .slice()
       .sort((a, b) => (a.concluidoEn || "").localeCompare(b.concluidoEn || ""))
@@ -496,20 +513,24 @@ export function syncCierres(registros) {
       "Balance Neto", "Acción", "Concluido En",
     ]);
     await writeSheetTable("Cobranza_Cierres", filas, { maxRows: filas.length + 50 });
-  });
+  }
+}
+export function syncCierres(registros) {
+  return safe(() => nucleoSyncCierres(registros));
 }
 
 // 59ª entrega: "Parametros_Generales" es una hoja nueva que el sitio arma sola (como las de Game
 // Night) — Federico nunca la arma a mano, así que siempre se reescribe el encabezado completo.
+export async function nucleoSyncParametros(data) {
+  await asegurarHoja("Parametros_Generales", ["Parámetro", "Valor"]);
+  const filas = [
+    ["Portal activo", data.portalActivo ? "Sí" : "No"],
+    ["Mensaje de mantenimiento", data.mensajeMantenimiento || ""],
+  ];
+  await writeSheetTable("Parametros_Generales", filas, { maxRows: 20 });
+}
 export function syncParametros(data) {
-  return safe(async () => {
-    await asegurarHoja("Parametros_Generales", ["Parámetro", "Valor"]);
-    const filas = [
-      ["Portal activo", data.portalActivo ? "Sí" : "No"],
-      ["Mensaje de mantenimiento", data.mensajeMantenimiento || ""],
-    ];
-    await writeSheetTable("Parametros_Generales", filas, { maxRows: 20 });
-  });
+  return safe(() => nucleoSyncParametros(data));
 }
 
 // 66ª entrega: "Estadísticas" (MOD 7) — reemplazo del flujo en vivo de Game Night por archivos que el
@@ -518,8 +539,8 @@ export function syncParametros(data) {
 // algo que sincronizar. "Estadisticas_Resultados" es una fila por jugador+torneo (publicado o no, con
 // su propia columna "Publicado" para que quede claro en el Excel); "Estadisticas_Apodos" es la tabla
 // de apodos de chat que usa el parser de Killers para reconocer a cada jugador en el WhatsApp.
-export function syncEstadisticas(torneosMapa, apodos) {
-  return safe(async () => {
+export async function nucleoSyncEstadisticas(torneosMapa, apodos) {
+  {
     const filas = [];
     for (const [campeonato, fechas] of Object.entries(torneosMapa || {})) {
       for (const [fecha, torneo] of Object.entries(fechas || {})) {
@@ -546,27 +567,31 @@ export function syncEstadisticas(torneosMapa, apodos) {
     ]);
     await asegurarHoja("Estadisticas_Apodos", ["Alias PokerStars", "Apodo 1", "Apodo 2", "Apodo 3"]);
     await writeSheetTable("Estadisticas_Apodos", filasApodos, { maxRows: 200 });
-  });
+  }
+}
+export function syncEstadisticas(torneosMapa, apodos) {
+  return safe(() => nucleoSyncEstadisticas(torneosMapa, apodos));
 }
 
-export function syncPerfiles(data) {
-  return safe(async () => {
-    // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el
-    // directorio de jugadores en la hoja única "Jugadores" (ver escribirJugadoresUnificado arriba)
-    const jugadoresStore = getStore({ name: "tols-jugadores", consistency: "strong" });
-    const jugadoresData = await jugadoresStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
-    await escribirJugadoresUnificado(jugadoresData?.jugadores || [], data);
+export async function nucleoSyncPerfiles(data) {
+  // la hoja "Usuarios" ya no existe por separado — las cuentas de acceso se escriben junto con el
+  // directorio de jugadores en la hoja única "Jugadores" (ver escribirJugadoresUnificado arriba)
+  const jugadoresStore = getStore({ name: "tols-jugadores", consistency: "strong" });
+  const jugadoresData = await jugadoresStore.get("data", { type: "json", consistency: "strong" }).catch(() => null);
+  await escribirJugadoresUnificado(jugadoresData?.jugadores || [], data);
 
-    // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores
-    const permisos = (data.roles || []).map((r) => [
-      r.tipo,
-      NIVEL_LABEL[r.permisos?.mod2] || "Sin acceso",
-      NIVEL_LABEL[r.permisos?.mod1] || "Sin acceso",
-      NIVEL_LABEL[r.permisos?.mod4] || "Sin acceso",
-      NIVEL_LABEL[r.permisos?.mod3] || "Sin acceso",
-      NIVEL_LABEL[r.permisos?.mod5] || "Sin acceso",
-      NIVEL_LABEL[r.permisos?.mod6] || "Sin acceso",
-    ]);
-    await writeSheetTable("Permisos", permisos, { maxRows: 30 });
-  });
+  // orden de columnas fijo, igual al de la hoja Permisos: Tablero, Calendario, Cobranza, Usuarios, Game Night, Jugadores
+  const permisos = (data.roles || []).map((r) => [
+    r.tipo,
+    NIVEL_LABEL[r.permisos?.mod2] || "Sin acceso",
+    NIVEL_LABEL[r.permisos?.mod1] || "Sin acceso",
+    NIVEL_LABEL[r.permisos?.mod4] || "Sin acceso",
+    NIVEL_LABEL[r.permisos?.mod3] || "Sin acceso",
+    NIVEL_LABEL[r.permisos?.mod5] || "Sin acceso",
+    NIVEL_LABEL[r.permisos?.mod6] || "Sin acceso",
+  ]);
+  await writeSheetTable("Permisos", permisos, { maxRows: 30 });
+}
+export function syncPerfiles(data) {
+  return safe(() => nucleoSyncPerfiles(data));
 }

@@ -108,7 +108,10 @@ function normalizarMapaPagos(v) {
   return out;
 }
 
-function normalizar(data) {
+// 83ª entrega: exportada (junto con respuestaCompleta/filasParaExcel más abajo) para que
+// lib/exportar-excel.js pueda reconstruir exactamente las mismas filas que ya arma esta pantalla al
+// guardar, en vez de reimplementar la lógica de Cobranza por su cuenta.
+export function normalizar(data) {
   const base = data && typeof data === "object" ? data : {};
   const jugadores = {};
   for (const [correo, j] of Object.entries(base.jugadores || (Array.isArray(seed.jugadores) ? {} : seed.jugadores) || {})) {
@@ -158,7 +161,7 @@ async function tableroMapaActual() {
 
 // arma la respuesta completa que consume el frontend: datos crudos + todo ya calculado, para que
 // Cobranza.jsx y Jugadores.jsx no tengan que reimplementar la lógica de cobranza.js
-async function respuestaCompleta(data) {
+export async function respuestaCompleta(data) {
   const [tableroMapa, { fecha: proximaFecha, torneos }, directorio] = await Promise.all([
     tableroMapaActual(),
     proximaFechaActiva(),
@@ -198,7 +201,7 @@ export async function marcarSaldoEnviado(campeonato, fecha, correo) {
   return respuestaCompleta(actual);
 }
 
-function filasParaExcel({ movimientos, resumen }) {
+export function filasParaExcel({ movimientos, resumen }) {
   // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de "Cobranza_Resumen" — ese dato
   // (con el fix de la 56ª, `celdaTexto()`) ya solo vive en la hoja "Jugadores"
   // (`filasJugadoresUnificadas()` en msgraph.js), que es donde se edita desde Mi Perfil/Cobranza. Tenerlo

@@ -202,6 +202,41 @@ export default function Tablero({ session, perfiles }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // 85ª entrega (bugfix, corregido de nuevo en esta misma ronda): si Federico recarga la pantalla
+  // mientras una exportación sigue corriendo en segundo plano, retoma el sondeo en vez de dejarlo
+  // huérfano — una sola consulta al entrar, silenciosa si no hay nada en curso.
+  //
+  // CRÍTICO — por qué este hook tiene que vivir ACÁ y no más abajo, junto a `exportarExcel()`: este
+  // componente tiene dos `return` tempranos más abajo (`if (loading) return ...`, `if (loadError ||
+  // !draft) return ...`), y React exige llamar exactamente los mismos hooks, en el mismo orden, en
+  // CADA render. Un `useEffect` colocado después de esos `return` (como había quedado en el primer
+  // intento de este fix) nunca se ejecuta mientras `loading` es `true` — pero en cuanto los datos
+  // terminan de cargar y `loading` pasa a `false`, el render siguiente SÍ llega hasta ese `useEffect` y
+  // lo llama por primera vez: React detecta que se llamaron más hooks que en el render anterior y
+  // truena con "Rendered more hooks than during the previous render". Como el sitio no tiene ningún
+  // Error Boundary, ese error no se recupera — tira abajo TODO el árbol de React, dejando solo el
+  // fondo de la página (el verde de la mesa) sin nada encima. Esto es exactamente lo que Federico
+  // reportó ("se ve que carga, pero de repente se queda la pantalla en verde") y afectaba a CUALQUIER
+  // usuario que entrara a Tablero de Control (la pestaña por default al iniciar sesión), no solo a
+  // quien tocara "Exportar todo a Excel". Lección: cualquier hook nuevo en un componente con
+  // `return` condicionales tempranos va SIEMPRE junto a los demás hooks, antes de esos `return` —
+  // nunca más abajo, aunque temáticamente encaje mejor cerca del código que usa.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API}?estadoExportarExcel=1`);
+        const json = await r.json();
+        if (json.estado === "en-curso") {
+          setExportando(true);
+          consultarEstadoExport();
+        }
+      } catch (e) {
+        // sin red o endpoint no disponible todavía — no hay nada que retomar, se ignora
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // siembra el borrador de "Puntos para torneos de práctica" en cuanto están cargados tanto el
   // Calendario (de ahí salen las fechas de práctica) como el Tablero (de ahí lo ya guardado bajo
   // PUNTOS_PRACTICA_KEY) — conserva lo que el administrador ya esté editando y solo rellena fechas
@@ -482,24 +517,6 @@ export default function Tablero({ session, perfiles }) {
       }
     })();
   }
-
-  // si Federico recarga la pantalla mientras una exportación sigue corriendo en segundo plano, retoma el
-  // sondeo en vez de dejarlo huérfano — una sola consulta al entrar, silenciosa si no hay nada en curso.
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch(`${API}?estadoExportarExcel=1`);
-        const json = await r.json();
-        if (json.estado === "en-curso") {
-          setExportando(true);
-          consultarEstadoExport();
-        }
-      } catch (e) {
-        // sin red o endpoint no disponible todavía — no hay nada que retomar, se ignora
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function pedirAgregarCampeonato() {
     const nombre = nuevoNombre.trim();

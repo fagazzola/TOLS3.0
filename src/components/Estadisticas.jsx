@@ -96,9 +96,14 @@ function leerExcelApodos(filas) {
   const header = (filas[0] || []).map((c) => String(c ?? "").trim().toLowerCase());
   const colAlias = header.findIndex((c) => c.includes("alias"));
   const colsRef = [];
-  header.forEach((c, i) => { if (c.includes("referencia")) colsRef.push(i); });
+  // 84ª entrega: Federico cambió el formato de este archivo — ya no trae columnas "Referencia1/2/3",
+  // ahora son "Chat"/"Apodo" (ver "Referencias_nombre-alias-chat-apodo.xlsx") — se amplía el
+  // reconocimiento de columnas para aceptar cualquiera de las tres palabras ("referencia", "chat",
+  // "apodo") en el encabezado, en vez de depender de un solo nombre fijo. Mantiene compatibilidad con el
+  // formato viejo (3 columnas "Referencia") por si Federico todavía tiene algún archivo así guardado.
+  header.forEach((c, i) => { if (c.includes("referencia") || c.includes("chat") || c.includes("apodo")) colsRef.push(i); });
   if (colAlias < 0 || !colsRef.length) {
-    return { filas: [], error: 'No se reconocieron las columnas "Alias PokerStars" / "Referencia" en el archivo.' };
+    return { filas: [], error: 'No se reconocieron las columnas "Alias PokerStars" / "Referencia"/"Chat"/"Apodo" en el archivo.' };
   }
   const resultado = [];
   for (let i = 1; i < filas.length; i++) {
@@ -972,6 +977,13 @@ export default function Estadisticas({ session }) {
             <input ref={apodosExcelRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={onApodosExcelSeleccionado} />
           </div>
           {excelError && <div className="section-sub" style={{ color: "#b00020" }}>{excelError}</div>}
+          {/* 84ª entrega (bugfix): el error de "Excel Referencias" se guarda en el mismo estado `error`
+              genérico de toda la pantalla, que solo se mostraba hasta arriba de todo (junto al título) —
+              muy lejos de este botón, que vive más abajo en "Subir resultados". Si el archivo fallaba al
+              leerse (columnas no reconocidas, archivo vacío, etc.), el aviso SÍ aparecía, pero fuera de
+              la vista de quien recién apretó el botón, dando la impresión de que "no pasó nada". Se
+              repite el mismo aviso acá, justo debajo del botón, para que sea imposible no verlo. */}
+          {error && <div className="section-sub" style={{ color: "#b00020" }}>{error}</div>}
 
           {preview && (
             <>

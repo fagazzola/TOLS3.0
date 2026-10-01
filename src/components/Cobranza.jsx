@@ -118,6 +118,10 @@ export default function Cobranza({ session, perfiles }) {
 
   const [correoEstado, setCorreoEstado] = useState("");
 
+  // 81ª entrega: agrupador de los totales de "Pagos y depósitos confirmados" — a pedido de Federico,
+  // antes de la tabla de detalle, agrupables por Motivo o por Fecha.
+  const [agruparPor, setAgruparPor] = useState("motivo"); // "motivo" | "fecha"
+
   const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
   const [motivoExcepcion, setMotivoExcepcion] = useState("");
 
@@ -183,10 +187,17 @@ export default function Cobranza({ session, perfiles }) {
       .sort((a, b) => a.numero - b.numero);
   }, [torneosCal, campeonatoSel, numeracion, estData]);
 
-  const movimientosDelCampeonato = useMemo(
-    () => (data?.movimientos || []).filter((m) => m.campeonato === campeonatoSel).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.correo.localeCompare(b.correo)),
-    [data, campeonatoSel]
-  );
+  // 81ª entrega: alias PokerStars por correo, sobre TODO el directorio de Jugadores (no solo
+  // `directorioActivo`, porque un pago/depósito confirmado puede pertenecer a un jugador que ya no está
+  // Activo) — a pedido de Federico, "Pagos y depósitos confirmados" muestra el Alias PS, no el nombre.
+  const aliasPorCorreoMap = useMemo(() => {
+    const m = {};
+    for (const j of jugadoresSitio) m[j.correo] = nombreCorto(j);
+    return m;
+  }, [jugadoresSitio]);
+  function aliasDeCorreo(correo) {
+    return aliasPorCorreoMap[correo] || data?.resumen?.[correo]?.nombre || correo;
+  }
 
   // 76ª entrega: los 3 conceptos de "Gastos del campeonato" del Tablero de Control — fuente del combo
   // de "motivo" cuando el tipo elegido es Depósito (Q3: "para estas 3 que mencionas, los montos
@@ -304,6 +315,29 @@ export default function Cobranza({ session, perfiles }) {
     }
     return filas.sort((a, b) => (b.registradoEn || "").localeCompare(a.registradoEn || ""));
   }, [data, campeonatoSel, numeracion]);
+
+  // 81ª entrega: totales de "Pagos y depósitos confirmados", a pedido de Federico — arriba de la tabla
+  // de detalle, agrupables por Motivo o por Fecha (toggle `agruparPor`). Separados en Pagos/Depósitos
+  // (igual que MontoPorTipo, nunca mezclados en una sola suma) más un total general, siempre desde la
+  // perspectiva de TOLS (Pago = ingreso, Depósito = egreso) — igual que el resto de esta tabla.
+  const totalesConfirmados = useMemo(() => {
+    const grupos = new Map();
+    for (const c of confirmadosCampeonato) {
+      const etiqueta = agruparPor === "fecha" ? (c.fecha ? fechaFmt(c.fecha) : "Sin fecha") : c.motivo;
+      if (!grupos.has(etiqueta)) grupos.set(etiqueta, { pagos: 0, depositos: 0 });
+      const g = grupos.get(etiqueta);
+      if (c.tipo === "Pago") g.pagos += Number(c.monto) || 0;
+      else g.depositos += Number(c.monto) || 0;
+    }
+    const filas = Array.from(grupos.entries())
+      .map(([etiqueta, g]) => ({ etiqueta, ...g }))
+      .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+    const total = filas.reduce(
+      (acc, f) => ({ pagos: acc.pagos + f.pagos, depositos: acc.depositos + f.depositos }),
+      { pagos: 0, depositos: 0 }
+    );
+    return { filas, total };
+  }, [confirmadosCampeonato, agruparPor]);
 
   // 79ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/Motivo/
   // Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre los mismos registros
@@ -459,42 +493,6 @@ export default function Cobranza({ session, perfiles }) {
       setErrorMov(e.message || "No se pudo guardar.");
     } finally {
       setGuardandoMov(false);
-    }
-  }
-
-  async function eliminarMovimiento(id) {
-    setGuardando(true);
-    try {
-      const r = await fetch(API, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accion: "eliminarMovimiento", id }),
-      });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo eliminar.");
-      setData(json);
-    } catch (e) {
-      setError(e.message || "No se pudo eliminar.");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  async function guardarDatosJugador(correo, cambios) {
-    setGuardando(true);
-    try {
-      const r = await fetch(API, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accion: "guardarJugador", correo, ...cambios }),
-      });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
-      setData(json);
-    } catch (e) {
-      setError(e.message || "No se pudo guardar.");
-    } finally {
-      setGuardando(false);
     }
   }
 
@@ -771,7 +769,7 @@ export default function Cobranza({ session, perfiles }) {
                 <button
                   className="btn btn-primary btn-add"
                   onClick={() => {
-                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: 0, fechaReal: "" });
+                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: "", fechaReal: "" });
                     setErrorMov("");
                   }}
                 >
@@ -866,12 +864,16 @@ export default function Cobranza({ session, perfiles }) {
                         </div>
                         <div className="login-field" style={{ maxWidth: 220 }}>
                           <label>Monto realmente {nuevoMov.tipo === "pago" ? "recibido" : "depositado"}</label>
+                          {/* 81ª entrega: sin el "0" fijo (se guarda como texto, no como número, para que
+                              el recuadro arranque vacío de verdad), sin flechitas (.field-no-spin) y
+                              admitiendo decimales (step="0.01") — a pedido de Federico. */}
                           <input
-                            className="field"
+                            className="field field-no-spin"
                             type="number"
+                            step="0.01"
                             min={0}
                             value={nuevoMov.montoReal}
-                            onChange={(e) => setNuevoMov({ ...nuevoMov, montoReal: Number(e.target.value) || 0 })}
+                            onChange={(e) => setNuevoMov({ ...nuevoMov, montoReal: e.target.value })}
                           />
                         </div>
                       </div>
@@ -907,7 +909,60 @@ export default function Cobranza({ session, perfiles }) {
             </div>
           )}
 
-          <div className="section-sub">Pagos y depósitos confirmados</div>
+          <div className="section-sub" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span>Pagos y depósitos confirmados</span>
+            <span style={{ marginLeft: "auto" }}>Agrupar totales por:</span>
+            <button
+              className={"btn btn-secondary btn-filtro" + (agruparPor === "motivo" ? " active" : "")}
+              onClick={() => setAgruparPor("motivo")}
+            >
+              Motivo
+            </button>
+            <button
+              className={"btn btn-secondary btn-filtro" + (agruparPor === "fecha" ? " active" : "")}
+              onClick={() => setAgruparPor("fecha")}
+            >
+              Fecha
+            </button>
+          </div>
+          {/* 81ª entrega: totales de "Pagos y depósitos confirmados", arriba de la tabla de detalle,
+              agrupados por Motivo o Fecha (toggle de arriba) — Pagos y Depósitos separados (nunca
+              mezclados en una sola suma), más un total general. Perspectiva de TOLS, como el resto de
+              esta tabla: Pago = ingreso (verde), Depósito = egreso (rojo). */}
+          <table style={{ width: "100%", borderCollapse: "collapse", margin: "8px 0 16px", fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>
+                  {agruparPor === "fecha" ? "Fecha" : "Motivo"}
+                </th>
+                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Total Pagos</th>
+                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Total Depósitos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totalesConfirmados.filas.map((f) => (
+                <tr key={f.etiqueta}>
+                  <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{f.etiqueta}</td>
+                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.pagos} /></td>
+                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.depositos} forzarNegativo /></td>
+                </tr>
+              ))}
+              {totalesConfirmados.filas.length === 0 && (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", border: "1px solid #eee", padding: 12, color: "var(--ink-soft)" }}>
+                    Sin datos.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: "bold" }}>
+                <td style={{ border: "1px solid #ccc", padding: "6px 8px" }}>Total general</td>
+                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}><Monto valor={totalesConfirmados.total.pagos} /></td>
+                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}><Monto valor={totalesConfirmados.total.depositos} forzarNegativo /></td>
+              </tr>
+            </tfoot>
+          </table>
           <div className="tbl">
             <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }}>
               <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div><div />
@@ -919,7 +974,7 @@ export default function Cobranza({ session, perfiles }) {
                   style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", padding: "12px", borderBottom: "1px solid #eee" }}
                 >
                   <div style={{ minWidth: 200, alignSelf: "center" }}>
-                    <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
+                    <div>{aliasDeCorreo(c.correo)}</div>
                     <div className="section-sub" style={{ marginTop: 2 }}>{c.tipo} — {c.motivo}</div>
                   </div>
                   <div className="login-field" style={{ maxWidth: 160 }}>
@@ -929,11 +984,12 @@ export default function Cobranza({ session, perfiles }) {
                   <div className="login-field" style={{ maxWidth: 160 }}>
                     <label>Monto real</label>
                     <input
-                      className="field"
+                      className="field field-no-spin"
                       type="number"
+                      step="0.01"
                       min={0}
                       value={editandoPago.monto}
-                      onChange={(e) => setEditandoPago({ ...editandoPago, monto: Number(e.target.value) || 0 })}
+                      onChange={(e) => setEditandoPago({ ...editandoPago, monto: e.target.value })}
                     />
                   </div>
                   <div className="login-field" style={{ maxWidth: 170 }}>
@@ -961,8 +1017,9 @@ export default function Cobranza({ session, perfiles }) {
                 </div>
               ) : (
                 <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }} key={c.clave}>
-                  <div>{data.resumen[c.correo]?.nombre || c.correo}</div>
-                  <div><span className={"badge " + (c.tipo === "Pago" ? "badge-regular" : "badge-main")}>{c.tipo}</span></div>
+                  <div>{aliasDeCorreo(c.correo)}</div>
+                  {/* 81ª entrega: "Tipo" sin óvalo/badge, texto normal, a pedido de Federico. */}
+                  <div>{c.tipo}</div>
                   <div>{c.motivo}</div>
                   <div className="num center"><MontoPorTipo valor={c.montoEsperado} tipo={c.tipo} /></div>
                   {/* 79ª entrega: "Real" con centavos (moneyConCentavos) — con money() (redondea a pesos
@@ -999,35 +1056,6 @@ export default function Cobranza({ session, perfiles }) {
               <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este campeonato.</div>
             )}
           </div>
-
-          <div className="section-sub" style={{ marginTop: 20 }}>Historial de movimientos (Debe/Ganó por torneo)</div>
-          <div className="tbl">
-            <div className="trow thead" style={{ gridTemplateColumns: "1fr 1.4fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr 0.9fr 40px" }}>
-              <div>Fecha</div><div>Jugador</div><div>Tipo</div><div>Debe</div><div>Ganó</div><div>Balance</div><div>Pagado</div><div>Lugar</div><div />
-            </div>
-            {movimientosDelCampeonato.map((m) => (
-              <div className="trow" style={{ gridTemplateColumns: "1fr 1.4fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr 0.9fr 40px" }} key={m.id}>
-                <div className="num">{m.fecha}</div>
-                <div>{data.resumen[m.correo]?.nombre || m.correo}</div>
-                <div><span className={"badge " + (m.tipo === "Main" ? "badge-main" : "badge-regular")}>{m.tipo}</span></div>
-                <div className="num right">{money(m.montoTotal)}</div>
-                <div className="num right">{money(m.totalGanado)}</div>
-                <div className={"num right " + (m.balanceNeto < 0 ? "" : "")}>{money(m.balanceNeto)}</div>
-                <div>
-                  <span className={"badge " + (m.pagado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{m.pagado ? "Sí" : "No"}</span>
-                </div>
-                <div className="num">{m.lugar ?? "—"}</div>
-                <div>
-                  {editable && (
-                    <button className="btn-icon-remove" title="Eliminar" onClick={() => eliminarMovimiento(m.id)}>
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {movimientosDelCampeonato.length === 0 && <div className="section-sub" style={{ padding: 16 }}>Todavía no hay movimientos cargados para este campeonato.</div>}
-          </div>
         </div>
       )}
 
@@ -1062,14 +1090,23 @@ export default function Cobranza({ session, perfiles }) {
               )}
 
               {/* 79ª/80ª entrega: "Estado de cuenta" — saldo corrido de los Pagos/Depósitos ya
-                  confirmados de este jugador en el campeonato activo, a pedido de Federico. Un Pago SUMA
-                  al saldo (ingreso para TOLS), un Depósito RESTA (egreso de TOLS) — arranca en 0 y el
-                  Saldo final de un renglón es el Saldo inicial del siguiente. A pedido de Federico, esta
-                  es la ÚNICA tabla de la pantalla (se quitaron los stat tiles, la edición de cuenta/
-                  banco y el historial viejo de Debe/Ganó que vivían acá antes) y usa el mismo formato de
-                  tabla cuadriculada (sin óvalos/badges) que ya usan Calendario/Estadísticas, en vez del
-                  estilo de tarjetas con badges del resto de Cobranza.*/}
-              <table style={{ width: "100%", borderCollapse: "collapse", margin: "20px 0 12px", fontSize: 14 }}>
+                  confirmados de este jugador en el campeonato activo, a pedido de Federico. Es la ÚNICA
+                  tabla de la pantalla (se quitaron los stat tiles, la edición de cuenta/banco y el
+                  historial viejo de Debe/Ganó que vivían acá antes) y usa el mismo formato de tabla
+                  cuadriculada (sin óvalos/badges) que ya usan Calendario/Estadísticas.
+                  81ª entrega: a diferencia de "Pagos y depósitos confirmados"/"Finanzas generales" (que
+                  son reportes PARA TOLS — Pago = ingreso = verde, Depósito = egreso = rojo), "Estado de
+                  cuenta" es el reporte de un jugador puntual, así que el color/signo acá se interpreta
+                  DESDE SU perspectiva: un Pago le cuesta (rojo) y un Depósito es un ingreso para él
+                  (verde) — exactamente lo opuesto. `estadoCuentaJugador` sigue calculando el saldo desde
+                  la perspectiva de TOLS (sin tocar esa lógica, que también alimenta otras cuentas), así
+                  que acá simplemente se niega el signo al mostrarlo — <Monto/> ya colorea por el signo
+                  del valor que recibe, no hace falta un componente nuevo. */}
+              <p className="section-sub" style={{ marginTop: 8 }}>
+                Montos y saldo desde la perspectiva de {r?.nombre || "el jugador"}: lo que paga es un costo
+                (rojo) y lo que recibe es un ingreso para él (verde).
+              </p>
+              <table style={{ width: "100%", borderCollapse: "collapse", margin: "8px 0 12px", fontSize: 14 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Fecha</th>
@@ -1086,9 +1123,9 @@ export default function Cobranza({ session, perfiles }) {
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.fechaOrden ? fechaFmt(f.fechaOrden) : "—"}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.tipo}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.motivo}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.saldoInicial} /></td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.montoFirmado} /></td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.saldoFinal} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.saldoInicial} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.montoFirmado} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.saldoFinal} /></td>
                     </tr>
                   ))}
                   {estadoCuentaJugador.length === 0 && (

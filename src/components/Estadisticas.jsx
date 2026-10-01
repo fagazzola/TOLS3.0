@@ -86,34 +86,47 @@ function leerExcelResultadosPokerStars(filas) {
   return { jugadores, error: jugadores.length ? "" : "El archivo no trae ningún jugador reconocible." };
 }
 
-// parser del Excel de referencias de chat que Federico ya tenía armado ("Referencias para Chat -
-// Killers.xlsx"): una fila por jugador con su Alias PokerStars y hasta 3 columnas de referencia (el
-// nombre/apodo con el que puede firmar en el chat de WhatsApp). El encabezado se busca por nombre de
-// columna ("alias" / "referencia"), tolerando que el archivo real las nombre "Referencia1",
-// "Referencia 2", "Referencia 3" (con o sin espacio, y numeración corrida).
-function leerExcelApodos(filas) {
-  if (!filas.length) return { filas: [], error: "El archivo está vacío." };
-  const header = (filas[0] || []).map((c) => String(c ?? "").trim().toLowerCase());
-  const colAlias = header.findIndex((c) => c.includes("alias"));
+// 85ª entrega (bugfix de fondo): hasta la 84ª, este parser decidía SOLO cuáles eran las columnas de
+// "Alias"/"Referencia" por palabras clave fijas en el encabezado — y cada vez que Federico cambiaba el
+// formato real de su archivo (pasó de "Referencia1/2/3" a "Chat"/"Apodo", y después ni siquiera esas
+// palabras alcanzaron para su archivo más reciente), el reconocimiento volvía a fallar en silencio o con
+// un error genérico, sin mostrar nunca qué había en el archivo de verdad. Pedido explícito de Federico:
+// "Olvida los formatos previos... siempre que lo cargue, tráeme y muéstrame las columnas del archivo, y a
+// partir de ahí, guardas y comparas." Se abandona por completo la idea de ADIVINAR y aceptar el archivo
+// de una — ahora SIEMPRE se muestran las columnas reales (ver el paso nuevo "Mapear columnas" en el
+// render, y `onApodosExcelSeleccionado` más abajo) y el administrador elige a mano, en cada carga, cuál
+// columna es el Alias PokerStars y cuáles son de referencia — sin importar cómo se llamen ni cuántas
+// haya. Esta función ya no decide nada por su cuenta: sigue existiendo solo para proponer una selección
+// inicial razonable (que el administrador ve y puede cambiar antes de confirmar), nunca como la decisión
+// final.
+function adivinarColumnasApodos(header) {
+  const limpio = (header || []).map((c) => String(c ?? "").trim().toLowerCase());
+  const colAlias = limpio.findIndex((c) => c.includes("alias"));
   const colsRef = [];
-  // 84ª entrega: Federico cambió el formato de este archivo — ya no trae columnas "Referencia1/2/3",
-  // ahora son "Chat"/"Apodo" (ver "Referencias_nombre-alias-chat-apodo.xlsx") — se amplía el
-  // reconocimiento de columnas para aceptar cualquiera de las tres palabras ("referencia", "chat",
-  // "apodo") en el encabezado, en vez de depender de un solo nombre fijo. Mantiene compatibilidad con el
-  // formato viejo (3 columnas "Referencia") por si Federico todavía tiene algún archivo así guardado.
-  header.forEach((c, i) => { if (c.includes("referencia") || c.includes("chat") || c.includes("apodo")) colsRef.push(i); });
-  if (colAlias < 0 || !colsRef.length) {
-    return { filas: [], error: 'No se reconocieron las columnas "Alias PokerStars" / "Referencia"/"Chat"/"Apodo" en el archivo.' };
+  limpio.forEach((c, i) => {
+    if (i !== colAlias && (c.includes("referencia") || c.includes("chat") || c.includes("apodo"))) colsRef.push(i);
+  });
+  return { colAlias, colsRef };
+}
+
+// arma el borrador del editor (mismo criterio de "siempre reemplaza" desde la 82ª entrega) a partir de
+// las filas crudas del archivo y la columna de Alias / columnas de referencia que el administrador haya
+// confirmado en el paso de mapeo — ya no hay ninguna palabra clave de por medio acá, son índices de
+// columna elegidos a mano.
+function construirApodosDesdeMapeo(filasCrudas, colAlias, colsRef, directorio) {
+  const base = {};
+  for (const j of directorio) {
+    const alias = nombreCorto(j);
+    if (alias) base[alias] = ["", "", ""];
   }
-  const resultado = [];
-  for (let i = 1; i < filas.length; i++) {
-    const fila = filas[i] || [];
+  for (let i = 1; i < filasCrudas.length; i++) {
+    const fila = filasCrudas[i] || [];
     const alias = String(fila[colAlias] ?? "").trim();
     if (!alias) continue;
     const referencias = colsRef.map((c) => String(fila[c] ?? "").trim()).filter(Boolean);
-    resultado.push({ alias, referencias });
+    base[alias] = [referencias[0] || "", referencias[1] || "", referencias[2] || ""];
   }
-  return { filas: resultado, error: "" };
+  return base;
 }
 
 function etiquetaTipo(campeonato, tipo) {
@@ -196,6 +209,19 @@ export default function Estadisticas({ session }) {
   const [editorApodos, setEditorApodos] = useState(false);
   const [apodosBorrador, setApodosBorrador] = useState({});
   const [guardandoApodos, setGuardandoApodos] = useState(false);
+  // 85ª entrega: paso nuevo de "Mapear columnas" — antes de construir la tabla de apodos, se muestran las
+  // columnas reales del archivo subido (nombre de encabezado + una muestra de la primera fila) y el
+  // administrador confirma a mano cuál es el Alias PokerStars y cuáles son de referencia, en vez de que
+  // el código intente adivinarlo. `apodosMapColAlias`/`apodosMapColsRef` arrancan con una propuesta
+  // (misma heurística de siempre, ver adivinarColumnasApodos) pero son completamente editables antes de
+  // confirmar con "Usar estas columnas".
+  const [apodosMapeo, setApodosMapeo] = useState(false);
+  const [apodosHeader, setApodosHeader] = useState([]); // encabezado real del archivo, tal cual viene
+  const [apodosMuestra, setApodosMuestra] = useState([]); // primera fila de datos, para mostrar un ejemplo por columna
+  const [apodosFilasCrudas, setApodosFilasCrudas] = useState([]);
+  const [apodosNombreArchivo, setApodosNombreArchivo] = useState("");
+  const [apodosMapColAlias, setApodosMapColAlias] = useState(-1);
+  const [apodosMapColsRef, setApodosMapColsRef] = useState([]);
 
   useEffect(() => {
     cargarTodo();
@@ -654,6 +680,9 @@ export default function Estadisticas({ session }) {
   // conserva un valor que ya estuviera guardado del lado del servidor si el archivo no lo repite. Se
   // muestra de inmediato en formato tabla (el mismo editor de siempre); sigue haciendo falta tocar
   // "Guardar apodos" para confirmar el reemplazo contra el servidor.
+  // 85ª entrega: ya no se intenta leer/aceptar el archivo de una — se lee nada más para mostrar sus
+  // columnas reales (encabezado + un ejemplo de la primera fila) y se abre el paso de mapeo
+  // (`apodosMapeo`). Nada se guarda ni se reemplaza todavía en este paso.
   async function onApodosExcelSeleccionado(e) {
     const archivo = e.target.files?.[0];
     e.target.value = "";
@@ -664,25 +693,53 @@ export default function Estadisticas({ session }) {
       const libro = XLSX.read(buffer, { type: "array" });
       const hoja = libro.Sheets[libro.SheetNames[0]];
       const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: null });
-      const { filas, error: err } = leerExcelApodos(filasCrudas);
-      if (err) {
-        setError(err);
+      if (!filasCrudas.length) {
+        setError("El archivo está vacío.");
         return;
       }
-      const base = {};
-      for (const j of directorio) {
-        const alias = nombreCorto(j);
-        if (alias) base[alias] = ["", "", ""];
+      const header = filasCrudas[0] || [];
+      if (!header.length) {
+        setError("No se encontró ninguna columna en la primera fila del archivo.");
+        return;
       }
-      for (const { alias, referencias } of filas) {
-        base[alias] = [referencias[0] || "", referencias[1] || "", referencias[2] || ""];
-      }
-      setApodosBorrador(base);
-      setEditorApodos(true);
-      setAviso(`Referencias importadas de "${archivo.name}" — reemplazaron lo que había guardado. Revisá y guardá para confirmar.`);
+      const { colAlias, colsRef } = adivinarColumnasApodos(header);
+      setApodosHeader(header);
+      setApodosMuestra(filasCrudas[1] || []);
+      setApodosFilasCrudas(filasCrudas);
+      setApodosNombreArchivo(archivo.name);
+      setApodosMapColAlias(colAlias);
+      setApodosMapColsRef(colsRef);
+      setApodosMapeo(true);
     } catch {
       setError("No se pudo leer el archivo de referencias. ¿Seguro que es un .xlsx?");
     }
+  }
+
+  function alternarColRef(i) {
+    setApodosMapColsRef((prev) => (prev.includes(i) ? prev.filter((c) => c !== i) : [...prev, i].sort((a, b) => a - b)));
+  }
+
+  // 85ª entrega: confirma el mapeo elegido a mano y recién ahí arma el borrador (mismo criterio de
+  // "siempre reemplaza" desde la 82ª entrega) — este es el único lugar donde el archivo efectivamente se
+  // usa para construir la tabla editable de apodos.
+  function confirmarMapeoApodos() {
+    if (apodosMapColAlias < 0) {
+      setError("Elegí cuál columna es el Alias PokerStars antes de continuar.");
+      return;
+    }
+    const base = construirApodosDesdeMapeo(apodosFilasCrudas, apodosMapColAlias, apodosMapColsRef, directorio);
+    setApodosBorrador(base);
+    setApodosMapeo(false);
+    setEditorApodos(true);
+    setAviso(`Referencias importadas de "${apodosNombreArchivo}" — reemplazaron lo que había guardado. Revisá y guardá para confirmar.`);
+  }
+
+  function cancelarMapeoApodos() {
+    setApodosMapeo(false);
+    setApodosHeader([]);
+    setApodosMuestra([]);
+    setApodosFilasCrudas([]);
+    setApodosNombreArchivo("");
   }
   async function guardarApodos() {
     setGuardandoApodos(true);
@@ -1082,6 +1139,50 @@ export default function Estadisticas({ session }) {
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {admin && apodosMapeo && (
+        <div className="section">
+          <div className="section-head">
+            <div className="section-title">Mapear columnas — "{apodosNombreArchivo}"</div>
+          </div>
+          <p className="section-sub">
+            Estas son las columnas reales que trae el archivo. Elegí cuál es el Alias PokerStars (una sola)
+            y cuáles son de referencia (las que quieras, pueden ser más o menos de 3) — nada se guarda
+            todavía.
+          </p>
+          <div className="tbl" style={{ overflowX: "auto" }}>
+            <div className="trow thead" style={{ gridTemplateColumns: "80px 1fr 1fr 90px 90px" }}>
+              <div>Columna</div><div>Encabezado</div><div>Ejemplo (fila 1)</div><div>Alias</div><div>Referencia</div>
+            </div>
+            {apodosHeader.map((col, i) => (
+              <div className="trow" style={{ gridTemplateColumns: "80px 1fr 1fr 90px 90px" }} key={i}>
+                <div className="section-note">Col. {i + 1}</div>
+                <div>{String(col ?? "").trim() || <span className="section-note">(sin nombre)</span>}</div>
+                <div className="section-note">{String(apodosMuestra[i] ?? "").trim() || "—"}</div>
+                <div>
+                  <input
+                    type="radio"
+                    name="apodos-col-alias"
+                    checked={apodosMapColAlias === i}
+                    onChange={() => setApodosMapColAlias(i)}
+                  />
+                </div>
+                <div>
+                  <input
+                    type="checkbox"
+                    checked={apodosMapColsRef.includes(i)}
+                    onChange={() => alternarColRef(i)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
+            <button type="button" className="btn btn-primary" onClick={confirmarMapeoApodos}>Usar estas columnas</button>
+            <button type="button" className="btn btn-secondary" onClick={cancelarMapeoApodos}>Cancelar</button>
+          </div>
         </div>
       )}
 

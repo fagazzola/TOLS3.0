@@ -1,7 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/tablero.json";
 import { syncTablero } from "./lib/msgraph.js";
-import { exportarTodoDesdeBlobs } from "./lib/exportar-excel.js";
 import { PUNTOS_PRACTICA_KEY } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -175,6 +174,17 @@ export default async (req) => {
   const store = getStore({ name: "tols-tablero", consistency: "strong" });
 
   if (req.method === "GET") {
+    // 84ª entrega (bugfix "Exportar todo a Excel"): la pantalla consulta este parámetro cada pocos
+    // segundos mientras la exportación corre en segundo plano (ver exportar-excel-background.js), para
+    // enterarse de cuándo termina (y con qué resultado) sin tener que mantener abierta una sola
+    // respuesta larga — que era justo lo que agotaba el tiempo máximo de una función síncrona y
+    // disparaba el bug. No toca `tols-tablero` para nada.
+    if (new URL(req.url).searchParams.get("estadoExportarExcel") === "1") {
+      const estadoStore = getStore({ name: "tols-exportar-estado", consistency: "strong" });
+      const estado = (await estadoStore.get("data", { type: "json", consistency: "strong" }).catch(() => null)) || { estado: "idle" };
+      return new Response(JSON.stringify(estado), { headers: HEADERS });
+    }
+
     const raw = await store.get("data", { type: "json", consistency: "strong" });
     const normalizado = normalizarMapa(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
@@ -197,10 +207,33 @@ export default async (req) => {
     // automática silenciosa de siempre. Vive como una acción más de este endpoint (porque el botón se
     // pidió puntualmente en la pantalla Tablero de Control) pero no toca `mapa` para nada — recorre
     // TODOS los módulos del sitio, no solo el Tablero — así que se resuelve aparte, antes de leer/tocar
-    // el store de tols-tablero, y devuelve un reporte módulo por módulo en vez del mapa de siempre.
+    // el store de tols-tablero.
+    //
+    // 84ª entrega (bugfix): hasta la 83ª esta acción esperaba (`await exportarTodoDesdeBlobs()`) a que
+    // los 10 módulos terminaran de sincronizarse contra Microsoft Graph API antes de responder — eso
+    // superaba el tiempo máximo que Netlify permite para una función síncrona, y lo que llegaba de
+    // vuelta al navegador era una página de error HTML en vez de JSON (el bug que reportó Federico: "no
+    // se pudo completar la exportación... Unexpected token '<'..."). Ahora esta acción solo DISPARA la
+    // exportación real (que corre aparte, en segundo plano — ver exportar-excel-background.js) y
+    // responde de inmediato; la pantalla consulta el resultado con la acción de solo lectura
+    // "estadoExportarExcel" del GET de arriba, cada pocos segundos, hasta ver "listo" o "error".
     if (body?.accion === "exportarExcel") {
-      const reporte = await exportarTodoDesdeBlobs();
-      return new Response(JSON.stringify(reporte), { headers: HEADERS });
+      const estadoStore = getStore({ name: "tols-exportar-estado", consistency: "strong" });
+      const actual = (await estadoStore.get("data", { type: "json", consistency: "strong" }).catch(() => null)) || null;
+      if (actual?.estado === "en-curso") {
+        // ya hay una exportación corriendo (ej. alguien la disparó y recargó la página) — no disparar
+        // una segunda en paralelo, devolver el estado actual para que la pantalla siga el mismo polling.
+        return new Response(JSON.stringify(actual), { headers: HEADERS });
+      }
+      await estadoStore.setJSON("data", { estado: "en-curso", iniciadoEn: new Date().toISOString() });
+      try {
+        const origin = new URL(req.url).origin;
+        await fetch(`${origin}/api/exportar-excel-background`, { method: "POST" });
+      } catch (e) {
+        await estadoStore.setJSON("data", { estado: "error", error: "No se pudo iniciar la exportación: " + (e?.message || e), terminadoEn: new Date().toISOString() });
+        return new Response(JSON.stringify({ error: "No se pudo iniciar la exportación." }), { status: 500, headers: HEADERS });
+      }
+      return new Response(JSON.stringify({ estado: "en-curso" }), { headers: HEADERS });
     }
 
     const raw = await store.get("data", { type: "json", consistency: "strong" });

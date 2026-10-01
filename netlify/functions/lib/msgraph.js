@@ -64,9 +64,26 @@ export function celdaTexto(valor) {
   return /^\d+$/.test(s) ? "'" + s : s;
 }
 
-// intercambia el refresh_token guardado por un access_token fresco — Microsoft rota el refresh_token
-// en cada uso, así que el nuevo se vuelve a guardar cada vez (si no se hace, deja de servir en unos días)
+// 84ª entrega (bugfix "Exportar todo a Excel"): cache en memoria del access_token dentro de UNA misma
+// invocación de función. Antes, cada graphFetch() llamaba a getAccessToken() de cero — y esta, a su vez,
+// siempre pedía un token nuevo a Microsoft (con su propio viaje de red + reescritura del refresh_token en
+// Blobs), sin importar si el token anterior todavía era válido. Para una sincronización normal (un solo
+// módulo, pocas llamadas) el costo extra pasaba inadvertido, pero "Exportar todo a Excel" (83ª entrega)
+// encadena decenas de llamadas a graphFetch en una sola invocación — cada una renovando el token de cero
+// — y eso, sumado al tiempo real de cada escritura a Graph API, hacía que la función completa superara el
+// tiempo máximo que Netlify permite para una función síncrona, devolviendo una página de error HTML en vez
+// de JSON (el error "Unexpected token '<'..." que vio Federico). Este cache reutiliza el mismo
+// access_token mientras no esté por vencer (con un margen de 60 segundos), sin cambiar en nada el
+// contrato de getAccessToken() para quien ya la llama. No resuelve el problema de fondo del todo —
+// "Exportar todo a Excel" ahora corre en segundo plano (ver exportar-excel-background.js) precisamente
+// para no depender de que esto alcance — pero reduce el tiempo real de cualquier sincronización, de una
+// en una o de todas juntas.
+let tokenCache = null; // { access_token, vencePor } en memoria del proceso — se pierde entre invocaciones frías, y eso está bien
+
 async function getAccessToken() {
+  if (tokenCache && tokenCache.vencePor > Date.now()) {
+    return tokenCache.access_token;
+  }
   const store = getStore({ name: "tols-ms-token", consistency: "strong" });
   const saved = await store.get("data", { type: "json", consistency: "strong" });
   if (!saved?.refresh_token) {
@@ -83,7 +100,44 @@ async function getAccessToken() {
   const json = await r.json();
   if (!r.ok) throw new Error("No se pudo renovar el token de OneDrive: " + (json.error_description || json.error || r.status));
   await store.setJSON("data", { refresh_token: json.refresh_token || saved.refresh_token, updated_at: Date.now() });
+  const expiresInMs = (Number(json.expires_in) || 3600) * 1000;
+  tokenCache = { access_token: json.access_token, vencePor: Date.now() + expiresInMs - 60000 };
   return json.access_token;
+}
+
+// 84ª entrega: pedido de Federico al reportar el bug de "Exportar todo a Excel" — antes de sobrescribir
+// las hojas, dejar una copia de respaldo del archivo TAL CUAL está en ese momento, en la misma carpeta de
+// OneDrive, con el nombre "aaaa-mm-dd TOLS3.0-Base-de-Datos_bkp.xlsx" (fecha de hoy + el nombre del
+// archivo real + "_bkp", conservando la extensión). Usa la acción "copy" de Graph API (asíncrona del lado
+// de Microsoft: alcanza con que la acepte con 202, no hace falta esperar a que termine de copiarse para
+// seguir con la exportación) — `conflictBehavior: "rename"` evita que una segunda exportación el mismo
+// día falle por el nombre ya ocupado (OneDrive agrega "(1)" solo). Se exporta por separado de
+// exportarTodoDesdeBlobs() para que un fallo acá (ej. OneDrive sin espacio, token vencido) quede
+// reportado aparte y NUNCA bloquee el resto de la exportación — un respaldo que falla no debería impedir
+// que el Excel se actualice igual.
+export async function respaldarExcelActual() {
+  const token = await getAccessToken();
+  const partes = EXCEL_PATH.split("/");
+  const archivo = partes[partes.length - 1];
+  const carpeta = partes.slice(0, -1).join("/");
+  const stem = archivo.replace(/\.xlsx$/i, "");
+  const fecha = new Date().toISOString().slice(0, 10);
+  const nombreBackup = `${fecha} ${stem}_bkp.xlsx`;
+  const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}:/copy`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      parentReference: { path: `/drive/root:/${encodePath(carpeta)}` },
+      name: nombreBackup,
+      "@microsoft.graph.conflictBehavior": "rename",
+    }),
+  });
+  if (!r.ok && r.status !== 202) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`No se pudo crear la copia de respaldo (Graph API ${r.status}): ${text}`);
+  }
+  return { ok: true, nombre: nombreBackup };
 }
 
 async function graphFetch(pathSuffix, options = {}) {

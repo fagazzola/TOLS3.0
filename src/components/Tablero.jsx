@@ -143,6 +143,9 @@ export default function Tablero({ session, perfiles }) {
   // desde Blobs en vez de depender de la sincronización automática silenciosa de siempre (ver
   // netlify/functions/lib/exportar-excel.js). Igual que Parámetros Generales, esto NO depende del
   // campeonato elegido arriba: toca TODOS los módulos del sitio de una sola vez.
+  // 84ª entrega (bugfix): la exportación real ahora corre en segundo plano (ver
+  // exportar-excel-background.js) — `exportando` sigue significando "hay una exportación en curso", pero
+  // ahora se arma a partir de sondear el estado guardado en Blobs, no de esperar una sola respuesta larga.
   const [exportando, setExportando] = useState(false);
   const [reporteExport, setReporteExport] = useState(null); // { resultados: [{modulo, ok, error}], ok, exportadoEn }
   const [confirmExport, setConfirmExport] = useState(false);
@@ -432,6 +435,14 @@ export default function Tablero({ session, perfiles }) {
     setConfirmExport(true);
   }
 
+  // 84ª entrega (bugfix): hasta la 83ª, este botón esperaba una sola respuesta larga del servidor (que
+  // corría los 10 módulos de la exportación de punta a punta antes de responder) — eso superaba el
+  // tiempo máximo que Netlify permite para una función síncrona, y lo que volvía era una página de error
+  // HTML en vez de JSON ("Unexpected token '<'..."), el bug que reportó Federico. Ahora la exportación
+  // real corre en segundo plano (ver exportar-excel-background.js); este botón solo la DISPARA y, en
+  // cuanto el servidor confirma que arrancó, empieza a consultar el estado cada 3 segundos
+  // (`?estadoExportarExcel=1`) hasta ver "listo" o "error" — sin mantener ninguna petición abierta por
+  // mucho tiempo, que era justo lo que fallaba.
   async function exportarExcel() {
     setExportando(true);
     setReporteExport(null);
@@ -442,15 +453,53 @@ export default function Tablero({ session, perfiles }) {
         body: JSON.stringify({ accion: "exportarExcel" }),
       });
       const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo exportar.");
-      setReporteExport(json);
+      if (!r.ok) throw new Error(json.error || "No se pudo iniciar la exportación.");
+      if (json.estado === "error") throw new Error(json.error || "No se pudo iniciar la exportación.");
+      consultarEstadoExport();
     } catch (e) {
       setReporteExport({ resultados: [], ok: false, error: e.message || "No se pudo exportar a Excel." });
-    } finally {
       setExportando(false);
       setConfirmExport(false);
     }
   }
+
+  function consultarEstadoExport() {
+    (async function poll() {
+      try {
+        const r = await fetch(`${API}?estadoExportarExcel=1`);
+        const json = await r.json();
+        if (json.estado === "en-curso") {
+          setTimeout(poll, 3000);
+          return;
+        }
+        // "listo" o "error" (o cualquier otro valor inesperado): se da por terminada la espera
+        setReporteExport(json);
+      } catch (e) {
+        setReporteExport({ resultados: [], ok: false, error: "No se pudo consultar el estado de la exportación." });
+      } finally {
+        setExportando(false);
+        setConfirmExport(false);
+      }
+    })();
+  }
+
+  // si Federico recarga la pantalla mientras una exportación sigue corriendo en segundo plano, retoma el
+  // sondeo en vez de dejarlo huérfano — una sola consulta al entrar, silenciosa si no hay nada en curso.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API}?estadoExportarExcel=1`);
+        const json = await r.json();
+        if (json.estado === "en-curso") {
+          setExportando(true);
+          consultarEstadoExport();
+        }
+      } catch (e) {
+        // sin red o endpoint no disponible todavía — no hay nada que retomar, se ignora
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function pedirAgregarCampeonato() {
     const nombre = nuevoNombre.trim();
@@ -673,7 +722,9 @@ export default function Tablero({ session, perfiles }) {
                 Regenera el archivo completo a demanda, módulo por módulo, directamente desde lo que hay
                 guardado ahora mismo en el sitio — reemplaza lo que haya en cada hoja. Úsalo si sospechas
                 que la sincronización automática (la que corre sola cada vez que alguien guarda algo) se
-                quedó atrás en algún módulo.
+                quedó atrás en algún módulo. Antes de escribir nada, deja una copia de respaldo del
+                archivo tal cual está, en la misma carpeta. Corre en segundo plano — podés seguir usando
+                el sitio mientras tanto, el resultado aparece acá cuando termina.
               </div>
             </div>
             <button type="button" className="btn btn-secondary" disabled={exportando} onClick={pedirExportarExcel}>
@@ -690,6 +741,13 @@ export default function Tablero({ session, perfiles }) {
                   : "Exportación terminada con errores en algunos módulos (detalle abajo)."}
               </div>
               {reporteExport.error && <div className="login-error">{reporteExport.error}</div>}
+              {reporteExport.backup && (
+                <div className="section-sub" style={{ marginTop: 4 }}>
+                  {reporteExport.backup.ok
+                    ? `Respaldo creado: "${reporteExport.backup.nombre}" (misma carpeta de OneDrive).`
+                    : `⚠ No se pudo crear la copia de respaldo: ${reporteExport.backup.error} (la exportación igual continuó).`}
+                </div>
+              )}
               {reporteExport.resultados?.length > 0 && (
                 <div className="tbl" style={{ marginTop: 6 }}>
                   <div className="trow thead" style={{ gridTemplateColumns: "1fr 100px 1fr" }}>
@@ -716,7 +774,9 @@ export default function Tablero({ session, perfiles }) {
             <div className="modal-title">Exportar todo a Excel</div>
             <p className="section-sub" style={{ marginTop: 0 }}>
               Esto va a <b>reemplazar</b> el contenido de todas las hojas del Excel con lo que hay guardado
-              ahora mismo en el sitio. Puede tardar un momento — no cierres esta pantalla mientras corre.
+              ahora mismo en el sitio (se deja antes una copia de respaldo del archivo actual). Corre en
+              segundo plano — podés cerrar esta pantalla o seguir usando el sitio mientras tanto, el
+              resultado va a estar disponible acá la próxima vez que entres a Tablero de Control.
             </p>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setConfirmExport(false)} disabled={exportando}>

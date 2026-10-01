@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
-import { finanzasCampeonato, TIPOS_CUENTA, longitudEsperada, validarCuentaCobro } from "../lib/cobranza.js";
+import { finanzasCampeonato } from "../lib/cobranza.js";
 import { mapaNumeracionTorneos } from "../lib/gamenight.js";
 
 const API = "/api/cobranza";
-const API_ENVIAR = "/api/cobranza-enviar-estado";
 const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
 const API_TABLERO = "/api/tablero";
 const API_CAL = "/api/calendario";
@@ -81,23 +80,6 @@ function etiquetaCorta(entry) {
   return entry.tipo === "Main" ? `${entry.numero} - Main` : `${entry.numero}`;
 }
 
-function borradorEstadoCuenta(r, pendientes, proximaFecha) {
-  const detalle = pendientes
-    .map((m) => `• ${m.fecha} (${m.tipo}) — ${money(m.montoTotal)}`)
-    .join("\n");
-  const totalPendiente = pendientes.reduce((a, m) => a + m.montoTotal, 0);
-  const cuerpo =
-    `Hola ${r.nombre || ""},\n\n` +
-    `Te escribimos desde la Tesorería de TOLS 3.0 porque tienes pagos pendientes de las siguientes fechas:\n\n` +
-    `${detalle}\n\n` +
-    `Total pendiente: ${money(totalPendiente)}\n\n` +
-    `Te pedimos regularizar el pago antes del próximo torneo` +
-    (proximaFecha ? ` (${proximaFecha})` : "") +
-    `. Mientras el adeudo siga pendiente, no vas a estar habilitado para participar en el siguiente torneo, salvo que un administrador o el Tesorero apruebe una excepción.\n\n` +
-    `Gracias por tu comprensión.`;
-  return { asunto: "Pagos pendientes — TOLS 3.0", cuerpo };
-}
-
 export default function Cobranza({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod4");
 
@@ -135,30 +117,13 @@ export default function Cobranza({ session, perfiles }) {
   const [errorEdicion, setErrorEdicion] = useState("");
 
   const [correoEstado, setCorreoEstado] = useState("");
-  const [borrador, setBorrador] = useState(null); // { asunto, cuerpo }
-  const [enviando, setEnviando] = useState(false);
-  const [envioAviso, setEnvioAviso] = useState("");
 
   const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
   const [motivoExcepcion, setMotivoExcepcion] = useState("");
 
-  // 44ª entrega: cuenta/banco/tipoCuenta ahora viven en tols-jugadores (centralizados, editables desde
-  // Mi Perfil) — este mini-formulario deja al Tesorero editarlos en nombre de otro jugador desde acá,
-  // con la misma validación de CLABE (18 dígitos)/Tarjeta de Débito (16 dígitos). Estado local propio
-  // (no controlado directo por `data.resumen`) para poder mostrar el error antes de guardar.
-  const [cuentaForm, setCuentaForm] = useState({ cuenta: "", banco: "", tipoCuenta: "" });
-  const [cuentaError, setCuentaError] = useState("");
-
   useEffect(() => {
     cargar();
   }, []);
-
-  useEffect(() => {
-    const r = correoEstado ? data?.resumen?.[correoEstado] : null;
-    setCuentaForm({ cuenta: r?.cuenta || "", banco: r?.banco || "", tipoCuenta: r?.tipoCuenta || "" });
-    setCuentaError("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [correoEstado]);
 
   function cargar() {
     setLoading(true);
@@ -183,18 +148,6 @@ export default function Cobranza({ session, perfiles }) {
       .catch((e) => setError(e.message || "No se pudo cargar Cobranza."))
       .finally(() => setLoading(false));
   }
-
-  const directorio = useMemo(() => {
-    // combina el directorio de Jugadores del sitio con el de Cobranza (jugadores que no se
-    // autorregistraron pero el Tesorero ya cargó a mano) — la fuente de verdad del nombre es Cobranza
-    // una vez que existe ahí, porque es lo que edita el Tesorero
-    const porCorreo = {};
-    for (const j of jugadoresSitio) porCorreo[j.correo] = { correo: j.correo, nombre: j.nombre };
-    for (const [correo, j] of Object.entries(data?.jugadores || {})) {
-      porCorreo[correo] = { correo, nombre: j.nombre || porCorreo[correo]?.nombre || "" };
-    }
-    return Object.values(porCorreo).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  }, [jugadoresSitio, data]);
 
   // 51ª entrega: "Resultados de Torneos" — si se cambia de campeonato arriba mientras esta vista está
   // abierta, el torneo elegido ya no aplica (pertenece a otro campeonato) — se limpia solo para no dejar
@@ -545,37 +498,6 @@ export default function Cobranza({ session, perfiles }) {
     }
   }
 
-  // 44ª entrega: guarda cuenta/banco/tipoCuenta en /api/jugadores (accion "autoeditar", por correo) en
-  // vez de /api/cobranza — ahí es donde vive esa información desde esta entrega. Solo tiene sentido
-  // cuando el correo ya tiene un registro real en Jugadores (ver `tieneRegistroJugador` en el render).
-  async function guardarCuentaCobro(correo) {
-    const errorValidacion = validarCuentaCobro(cuentaForm.cuenta, cuentaForm.tipoCuenta);
-    if (errorValidacion) {
-      setCuentaError(errorValidacion);
-      return;
-    }
-    setCuentaError("");
-    setGuardando(true);
-    try {
-      const r = await fetch(API_JUG, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accion: "autoeditar", correo, ...cuentaForm }),
-      });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
-      setJugadoresSitio(json.jugadores || []);
-      // el resumen de Cobranza saca cuenta/banco/tipoCuenta del directorio de Jugadores (44ª entrega) —
-      // se refresca para reflejar el cambio sin recargar toda la pantalla
-      const cob = await fetch(API).then((rr) => rr.json());
-      setData(cob);
-    } catch (e) {
-      setCuentaError(e.message || "No se pudo guardar.");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
   async function aprobarExcepcion() {
     if (!excepcionModal || !data?.proximaFecha) return;
     setGuardando(true);
@@ -597,27 +519,6 @@ export default function Cobranza({ session, perfiles }) {
     }
   }
 
-  async function enviarEstadoCuenta() {
-    if (!borrador || !correoEstado) return;
-    setEnviando(true);
-    setEnvioAviso("");
-    try {
-      const r = await fetch(API_ENVIAR, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ correo: correoEstado, asunto: borrador.asunto, cuerpo: borrador.cuerpo }),
-      });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error || "No se pudo enviar el correo.");
-      setEnvioAviso("Correo enviado.");
-      setBorrador(null);
-    } catch (e) {
-      setEnvioAviso("Error: " + (e.message || "no se pudo enviar."));
-    } finally {
-      setEnviando(false);
-    }
-  }
-
   if (loading) {
     return (
       <div>
@@ -629,13 +530,7 @@ export default function Cobranza({ session, perfiles }) {
   }
 
   const r = correoEstado ? data?.resumen?.[correoEstado] : null;
-  const movimientosJugador = correoEstado ? (data?.movimientos || []).filter((m) => m.correo === correoEstado).sort((a, b) => b.fecha.localeCompare(a.fecha)) : [];
-  const pendientesJugador = movimientosJugador.filter((m) => !m.pagado && m.montoTotal > 0);
   const adeudaJugador = correoEstado ? data?.adeudos?.[correoEstado] : false;
-  // 44ª entrega: cuenta/banco/tipoCuenta solo se pueden guardar para un correo que ya tiene un
-  // registro real en Jugadores (ahí es donde viven) — un correo registrado únicamente en Cobranza (sin
-  // Jugadores) no tiene dónde guardarlos.
-  const tieneRegistroJugador = correoEstado ? jugadoresSitio.some((j) => j.correo === correoEstado) : false;
 
   const finanzas = campeonatoSel ? finanzasCampeonato(campeonatoSel, data?.movimientos || [], tableroMapa) : null;
 
@@ -655,11 +550,6 @@ export default function Cobranza({ session, perfiles }) {
     }
     return total;
   }
-
-  const confirmadoPagadoJugador = correoEstado ? sumaMapaConfirmado(data?.pagosTorneo, correoEstado) : 0;
-  const confirmadoDepositadoJugador = correoEstado
-    ? sumaMapaConfirmado(data?.depositosTorneo, correoEstado) + sumaMapaConfirmado(data?.depositosGasto, correoEstado)
-    : 0;
 
   const totalPagosConfirmados = sumaMapaConfirmado(data?.pagosTorneo);
   const totalDepositosConfirmados = sumaMapaConfirmado(data?.depositosTorneo) + sumaMapaConfirmado(data?.depositosGasto);
@@ -1144,44 +1034,24 @@ export default function Cobranza({ session, perfiles }) {
       {vista === "estado" && (
         <div className="section">
           <div className="section-head">
-            <div className="section-title">Estado de cuenta por jugador</div>
+            <div className="section-title">Estado de cuenta</div>
           </div>
-          <select className="field" style={{ maxWidth: 320 }} value={correoEstado} onChange={(e) => { setCorreoEstado(e.target.value); setBorrador(null); setEnvioAviso(""); }}>
+          {/* 80ª entrega: combo por Alias PokerStars, mismo criterio que los demás combos de la pantalla
+              (ej. "Jugador" en "Registrar pagos y depósitos") — antes este combo mostraba nombre+correo,
+              distinto al resto. */}
+          <select className="field" style={{ maxWidth: 320 }} value={correoEstado} onChange={(e) => setCorreoEstado(e.target.value)}>
             <option value="">— elegir jugador —</option>
-            {directorio.map((d) => (
-              <option key={d.correo} value={d.correo}>
-                {d.nombre} ({d.correo})
+            {directorioActivo.map((j) => (
+              <option key={j.correo} value={j.correo}>
+                {nombreCorto(j)} (#{j.id})
               </option>
             ))}
           </select>
 
-          {r && (
+          {correoEstado && (
             <>
-              <div className="stats stats-compact" style={{ marginTop: 20 }}>
-                <div className="stat">
-                  <div className="stat-label">Total debido</div>
-                  <div className="stat-value"><Monto valor={r.pago} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Total ganado</div>
-                  <div className="stat-value"><Monto valor={r.deposito} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Saldo</div>
-                  <div className="stat-value"><Monto valor={r.saldo} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Pagado confirmado</div>
-                  <div className="stat-value"><Monto valor={confirmadoPagadoJugador} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Depositado confirmado</div>
-                  <div className="stat-value"><Monto valor={confirmadoDepositadoJugador} forzarNegativo /></div>
-                </div>
-              </div>
-
-              {adeudaJugador && (
-                <div className="campeonato-banner campeonato-banner-alerta campeonato-banner-row">
+              {r && adeudaJugador && (
+                <div className="campeonato-banner campeonato-banner-alerta campeonato-banner-row" style={{ marginTop: 20 }}>
                   <span>⚠ Tiene un adeudo pendiente — no está habilitado para el próximo torneo ({data.proximaFecha}).</span>
                   {editable && (
                     <button className="btn btn-secondary" onClick={() => setExcepcionModal({ correo: r.correo, nombre: r.nombre })}>
@@ -1191,136 +1061,45 @@ export default function Cobranza({ session, perfiles }) {
                 </div>
               )}
 
-              {editable && (
-                <div style={{ marginTop: 16 }}>
-                  {!tieneRegistroJugador ? (
-                    <div className="section-sub" style={{ marginTop: 0 }}>
-                      Este correo no tiene un registro en Jugadores — los datos de cobro (CLABE/Tarjeta) solo
-                      se pueden guardar para jugadores ya registrados en el sitio.
-                    </div>
-                  ) : (
-                    <>
-                      <div className="login-field-row">
-                        <div className="login-field" style={{ maxWidth: 200 }}>
-                          <label>Tipo de cuenta</label>
-                          <select
-                            className="field"
-                            value={cuentaForm.tipoCuenta}
-                            onChange={(e) => { setCuentaForm({ ...cuentaForm, tipoCuenta: e.target.value }); setCuentaError(""); }}
-                          >
-                            <option value="">— elegir —</option>
-                            {TIPOS_CUENTA.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="login-field" style={{ maxWidth: 220 }}>
-                          <label>
-                            {cuentaForm.tipoCuenta ? `${cuentaForm.tipoCuenta} (${longitudEsperada(cuentaForm.tipoCuenta)} dígitos)` : "Número de cuenta"}
-                          </label>
-                          <input
-                            className="field"
-                            inputMode="numeric"
-                            maxLength={longitudEsperada(cuentaForm.tipoCuenta) || 20}
-                            value={cuentaForm.cuenta}
-                            onChange={(e) => { setCuentaForm({ ...cuentaForm, cuenta: e.target.value.replace(/\D/g, "") }); setCuentaError(""); }}
-                          />
-                        </div>
-                        <div className="login-field" style={{ maxWidth: 220 }}>
-                          <label>Banco</label>
-                          <input
-                            className="field"
-                            value={cuentaForm.banco}
-                            onChange={(e) => setCuentaForm({ ...cuentaForm, banco: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      {cuentaError && <div className="login-error">{cuentaError}</div>}
-                      <button className="btn btn-secondary btn-filtro" disabled={guardando} onClick={() => guardarCuentaCobro(r.correo)}>
-                        {guardando ? "Guardando…" : "Guardar cuenta de cobro"}
-                      </button>
-                    </>
+              {/* 79ª/80ª entrega: "Estado de cuenta" — saldo corrido de los Pagos/Depósitos ya
+                  confirmados de este jugador en el campeonato activo, a pedido de Federico. Un Pago SUMA
+                  al saldo (ingreso para TOLS), un Depósito RESTA (egreso de TOLS) — arranca en 0 y el
+                  Saldo final de un renglón es el Saldo inicial del siguiente. A pedido de Federico, esta
+                  es la ÚNICA tabla de la pantalla (se quitaron los stat tiles, la edición de cuenta/
+                  banco y el historial viejo de Debe/Ganó que vivían acá antes) y usa el mismo formato de
+                  tabla cuadriculada (sin óvalos/badges) que ya usan Calendario/Estadísticas, en vez del
+                  estilo de tarjetas con badges del resto de Cobranza.*/}
+              <table style={{ width: "100%", borderCollapse: "collapse", margin: "20px 0 12px", fontSize: 14 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Fecha</th>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Tipo</th>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Motivo</th>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Saldo inicial</th>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Monto</th>
+                    <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Saldo final</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {estadoCuentaJugador.map((f) => (
+                    <tr key={f.clave}>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.fechaOrden ? fechaFmt(f.fechaOrden) : "—"}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.tipo}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.motivo}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.saldoInicial} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.montoFirmado} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.saldoFinal} /></td>
+                    </tr>
+                  ))}
+                  {estadoCuentaJugador.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", border: "1px solid #eee", padding: 16, color: "var(--ink-soft)" }}>
+                        Todavía no hay pagos ni depósitos confirmados para este jugador en este campeonato.
+                      </td>
+                    </tr>
                   )}
-                </div>
-              )}
-
-              {/* 79ª entrega: "Estado de cuenta" — saldo corrido de los Pagos/Depósitos ya confirmados
-                  de este jugador en el campeonato activo, a pedido de Federico. Un Pago SUMA al saldo
-                  (ingreso para TOLS), un Depósito RESTA (egreso de TOLS) — arranca en 0 y el Saldo final
-                  de un renglón es el Saldo inicial del siguiente. */}
-              <div className="section-sub" style={{ marginTop: 20 }}>Estado de cuenta — {campeonatoSel}</div>
-              <div className="tbl">
-                <div className="trow thead" style={{ gridTemplateColumns: "1fr 0.7fr 1.2fr 1fr 1fr 1fr" }}>
-                  <div>Fecha</div><div>Tipo</div><div>Motivo</div><div>Saldo inicial</div><div>Monto</div><div>Saldo final</div>
-                </div>
-                {estadoCuentaJugador.map((f) => (
-                  <div className="trow" style={{ gridTemplateColumns: "1fr 0.7fr 1.2fr 1fr 1fr 1fr" }} key={f.clave}>
-                    <div className="num">{f.fechaOrden ? fechaFmt(f.fechaOrden) : "—"}</div>
-                    <div><span className={"badge " + (f.tipo === "Pago" ? "badge-regular" : "badge-main")}>{f.tipo}</span></div>
-                    <div>{f.motivo}</div>
-                    <div className="num center"><Monto valor={f.saldoInicial} /></div>
-                    <div className="num center"><Monto valor={f.montoFirmado} /></div>
-                    <div className="num center"><Monto valor={f.saldoFinal} /></div>
-                  </div>
-                ))}
-                {estadoCuentaJugador.length === 0 && (
-                  <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este jugador en este campeonato.</div>
-                )}
-              </div>
-
-              <div className="section-sub" style={{ marginTop: 20 }}>Historial de movimientos (Debe/Ganó por torneo)</div>
-              <div className="tbl">
-                <div className="trow thead" style={{ gridTemplateColumns: "1fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr" }}>
-                  <div>Fecha</div><div>Tipo</div><div>Debe</div><div>Ganó</div><div>Balance</div><div>Pagado</div>
-                </div>
-                {movimientosJugador.map((m) => (
-                  <div className="trow" style={{ gridTemplateColumns: "1fr 0.7fr 0.9fr 0.9fr 0.9fr 0.7fr" }} key={m.id}>
-                    <div className="num">{m.campeonato} — {m.fecha}</div>
-                    <div><span className={"badge " + (m.tipo === "Main" ? "badge-main" : "badge-regular")}>{m.tipo}</span></div>
-                    <div className="num right">{money(m.montoTotal)}</div>
-                    <div className="num right">{money(m.totalGanado)}</div>
-                    <div className="num right">{money(m.balanceNeto)}</div>
-                    <div><span className={"badge " + (m.pagado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{m.pagado ? "Sí" : "No"}</span></div>
-                  </div>
-                ))}
-              </div>
-
-              {editable && pendientesJugador.length > 0 && !borrador && (
-                <button className="btn btn-secondary btn-add" onClick={() => setBorrador(borradorEstadoCuenta(r, pendientesJugador, data.proximaFecha))}>
-                  Redactar estado de cuenta por correo
-                </button>
-              )}
-
-              {borrador && (
-                <div className="tbl" style={{ padding: 16, marginTop: 12 }}>
-                  <div className="section-sub" style={{ marginTop: 0 }}>
-                    Revisá y editá el mensaje antes de enviarlo — se manda tal cual quede acá.
-                  </div>
-                  <div className="login-field">
-                    <label>Asunto</label>
-                    <input className="field" value={borrador.asunto} onChange={(e) => setBorrador({ ...borrador, asunto: e.target.value })} />
-                  </div>
-                  <div className="login-field">
-                    <label>Cuerpo del mensaje</label>
-                    <textarea
-                      className="field"
-                      rows={10}
-                      value={borrador.cuerpo}
-                      onChange={(e) => setBorrador({ ...borrador, cuerpo: e.target.value })}
-                      style={{ fontFamily: "inherit", resize: "vertical" }}
-                    />
-                  </div>
-                  <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
-                    <button className="btn btn-primary" disabled={enviando} onClick={enviarEstadoCuenta}>
-                      {enviando ? "Enviando…" : "Aprobar y enviar"}
-                    </button>
-                    <button className="btn btn-secondary" disabled={enviando} onClick={() => setBorrador(null)}>
-                      Cancelar
-                    </button>
-                  </div>
-                  {envioAviso && <div className={envioAviso.startsWith("Error") ? "login-error" : "check-line check-ok"}>{envioAviso}</div>}
-                </div>
-              )}
+                </tbody>
+              </table>
             </>
           )}
         </div>

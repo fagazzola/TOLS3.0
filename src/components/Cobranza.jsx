@@ -203,6 +203,12 @@ export default function Cobranza({ session, perfiles }) {
   // de "motivo" cuando el tipo elegido es Depósito (Q3: "para estas 3 que mencionas, los montos
   // definidos en el tablero de control").
   const gastosCampeonatoActivo = tableroMapa?.[campeonatoSel]?.gastosCampeonato || [];
+  // 87ª entrega: la Cuota de inscripción del Tablero de Control (Parámetros Generales) — a diferencia de
+  // los "Gastos del campeonato", es un cargo fijo por jugador, una sola vez por campeonato, que el
+  // jugador le paga a TOLS (no TOLS al jugador) — por eso es un motivo más del combo de PAGO, no de
+  // Depósito. Pedido de Federico: "Necesitamos agregar un motivo más... para el tipo 'pago'. Es todo lo
+  // del tablero de control, así es que nos faltó la inscripción."
+  const cuotaInscripcionActiva = Number(tableroMapa?.[campeonatoSel]?.cuotaInscripcion) || 0;
 
   // 76ª entrega: resultado (premioTotal - debeTotal) de un jugador en un torneo puntual ya publicado —
   // mismo cálculo que ya usa "Resultados de Torneos" más arriba, reutilizado acá para decidir el "monto
@@ -225,6 +231,15 @@ export default function Cobranza({ session, perfiles }) {
           .filter((t) => resultadoTorneo(nuevoMov.correo, t.fecha) < 0)
           .filter((t) => !data?.pagosTorneo?.[`${campeonatoSel}|${t.fecha}|${nuevoMov.correo}`])
       : [];
+  // 87ª entrega: opción de "Inscripción" en el combo de motivo de un Pago — solo aparece si el Tablero
+  // de Control tiene una cuota de inscripción configurada (> 0) para el campeonato activo y ese jugador
+  // todavía no tiene una inscripción confirmada en este campeonato (mismo criterio que el resto de los
+  // combos: un motivo ya confirmado no vuelve a aparecer, para no duplicar una confirmación ya hecha).
+  const opcionInscripcionPago =
+    nuevoMov?.tipo === "pago" &&
+    nuevoMov.correo &&
+    cuotaInscripcionActiva > 0 &&
+    !data?.pagosInscripcion?.[`${campeonatoSel}|inscripcion|${nuevoMov.correo}`];
   const opcionesDepositoTorneo =
     nuevoMov?.tipo === "deposito" && nuevoMov.correo
       ? torneosSaldoOpciones
@@ -243,10 +258,16 @@ export default function Cobranza({ session, perfiles }) {
   // siempre reflejen el dato más reciente de Estadísticas/Tablero).
   let montoEsperadoMov = 0;
   let etiquetaMotivoMov = "";
-  if (nuevoMov?.tipo === "pago" && nuevoMov.motivo) {
-    const entry = torneosSaldoOpciones.find((t) => t.fecha === nuevoMov.motivo);
-    montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, nuevoMov.motivo));
-    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : nuevoMov.motivo;
+  if (nuevoMov?.tipo === "pago" && nuevoMov.motivo === "inscripcion") {
+    // 87ª entrega: motivo nuevo — Cuota de inscripción, monto fijo definido en Tablero de Control, sin
+    // torneo asociado.
+    montoEsperadoMov = cuotaInscripcionActiva;
+    etiquetaMotivoMov = "Inscripción";
+  } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo?.startsWith("torneo:")) {
+    const fecha = nuevoMov.motivo.slice("torneo:".length);
+    const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
+    montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, fecha));
+    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : fecha;
   } else if (nuevoMov?.tipo === "deposito" && nuevoMov.motivo?.startsWith("torneo:")) {
     const fecha = nuevoMov.motivo.slice("torneo:".length);
     const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
@@ -280,6 +301,21 @@ export default function Cobranza({ session, perfiles }) {
         motivoTipo: "torneo",
         motivoId: fechaTorneo,
         motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""}`,
+        correo,
+        ...reg,
+      });
+    }
+    // 87ª entrega: motivo nuevo de Pago — Cuota de inscripción (sin torneo/fecha propia asociada).
+    for (const [clave, reg] of Object.entries(data?.pagosInscripcion || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, , correo] = clave.split("|");
+      filas.push({
+        clave,
+        tipo: "Pago",
+        tipoAccion: "pago",
+        motivoTipo: "inscripcion",
+        motivoId: "inscripcion",
+        motivo: "Inscripción",
         correo,
         ...reg,
       });
@@ -374,6 +410,9 @@ export default function Cobranza({ session, perfiles }) {
   if (editandoPago) {
     if (editandoPago.motivoTipo === "torneo") {
       montoEsperadoEdicion = Math.abs(resultadoTorneo(editandoPago.correo, editandoPago.motivoId));
+    } else if (editandoPago.motivoTipo === "inscripcion") {
+      // 87ª entrega
+      montoEsperadoEdicion = cuotaInscripcionActiva;
     } else {
       const g = gastosCampeonatoActivo.find((x) => x.concepto === editandoPago.motivoId);
       montoEsperadoEdicion = Number(g?.monto) || 0;
@@ -396,10 +435,16 @@ export default function Cobranza({ session, perfiles }) {
     try {
       let body;
       if (editandoPago.tipoAccion === "pago") {
+        // 87ª entrega: se manda `motivoTipo`/`motivoId` (igual que ya hace un Depósito) para que el
+        // servidor sepa si esto va a `pagosTorneo` (motivoTipo "torneo", como siempre) o a
+        // `pagosInscripcion` (motivoTipo "inscripcion", motivo nuevo) — `fecha` se sigue mandando para
+        // el caso "torneo" por compatibilidad con el esquema de siempre.
         body = {
           accion: "registrarPago",
           campeonato: campeonatoSel,
-          fecha: editandoPago.motivoId,
+          motivoTipo: editandoPago.motivoTipo,
+          motivoId: editandoPago.motivoId,
+          fecha: editandoPago.motivoTipo === "torneo" ? editandoPago.motivoId : undefined,
           correo: editandoPago.correo,
           montoEsperado: montoEsperadoEdicion,
           monto,
@@ -442,7 +487,7 @@ export default function Cobranza({ session, perfiles }) {
       return;
     }
     if (!nuevoMov.motivo) {
-      setErrorMov(nuevoMov.tipo === "pago" ? "Elegí un torneo." : "Elegí un motivo.");
+      setErrorMov("Elegí un motivo.");
       return;
     }
     const monto = Number(nuevoMov.montoReal);
@@ -458,10 +503,16 @@ export default function Cobranza({ session, perfiles }) {
     try {
       let body;
       if (nuevoMov.tipo === "pago") {
+        // 87ª entrega: `nuevoMov.motivo` ahora puede ser "torneo:{fecha}" (como antes, solo que con el
+        // prefijo que ya usaba Depósito) o el motivo fijo nuevo "inscripcion".
+        const esInscripcion = nuevoMov.motivo === "inscripcion";
+        const fechaTorneo = esInscripcion ? "" : nuevoMov.motivo.slice("torneo:".length);
         body = {
           accion: "registrarPago",
           campeonato: campeonatoSel,
-          fecha: nuevoMov.motivo,
+          motivoTipo: esInscripcion ? "inscripcion" : "torneo",
+          motivoId: esInscripcion ? "inscripcion" : fechaTorneo,
+          fecha: esInscripcion ? undefined : fechaTorneo,
           correo,
           montoEsperado: montoEsperadoMov,
           monto,
@@ -827,12 +878,17 @@ export default function Cobranza({ session, perfiles }) {
                         onChange={(e) => setNuevoMov({ ...nuevoMov, motivo: e.target.value })}
                       >
                         <option value="">— elegir —</option>
-                        {nuevoMov.tipo === "pago" &&
-                          opcionesPago.map((t) => (
-                            <option key={t.fecha} value={t.fecha}>
-                              Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
-                            </option>
-                          ))}
+                        {nuevoMov.tipo === "pago" && (
+                          <>
+                            {opcionesPago.map((t) => (
+                              <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
+                                Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                              </option>
+                            ))}
+                            {/* 87ª entrega: motivo nuevo — Cuota de inscripción (Tablero de Control) */}
+                            {opcionInscripcionPago && <option value="inscripcion">Inscripción</option>}
+                          </>
+                        )}
                         {nuevoMov.tipo === "deposito" && (
                           <>
                             {opcionesDepositoTorneo.map((t) => (
@@ -850,9 +906,10 @@ export default function Cobranza({ session, perfiles }) {
                       </select>
                       {nuevoMov.correo &&
                         nuevoMov.tipo === "pago" &&
-                        opcionesPago.length === 0 && (
+                        opcionesPago.length === 0 &&
+                        !opcionInscripcionPago && (
                           <div className="section-sub" style={{ marginTop: 4 }}>
-                            No hay torneos con pago pendiente de confirmar para este jugador.
+                            No hay pagos pendientes de confirmar para este jugador.
                           </div>
                         )}
                       {nuevoMov.correo &&

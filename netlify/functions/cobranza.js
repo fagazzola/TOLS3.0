@@ -125,10 +125,18 @@ export function normalizar(data) {
   //   pagosTorneo:     "campeonato|fecha|correo"          (el jugador le pagó a TOLS su Debe de ese torneo)
   //   depositosTorneo: "campeonato|fecha|correo"          (TOLS le depositó al jugador su Premio de ese torneo)
   //   depositosGasto:  "campeonato|concepto|correo"       (TOLS le depositó a un jugador un gasto del Tablero)
+  // 87ª entrega: cuarto mapa, mismo criterio — Federico señaló que en "Registrar pagos y depósitos",
+  // tipo Pago, faltaba la Cuota de inscripción (definida en Tablero de Control, "es todo lo del tablero
+  // de control, así es que nos faltó la inscripción") junto a los torneos con Debe pendiente. A
+  // diferencia de un torneo, la inscripción no tiene una fecha propia que la identifique — es un cargo
+  // fijo, una sola vez por jugador por campeonato — así que la llave usa el concepto fijo "inscripcion"
+  // en el lugar donde un gasto del Tablero usa su propio concepto.
+  //   pagosInscripcion: "campeonato|inscripcion|correo"   (el jugador le pagó a TOLS su cuota de inscripción)
   const pagosTorneo = normalizarMapaPagos(base.pagosTorneo);
   const depositosTorneo = normalizarMapaPagos(base.depositosTorneo);
   const depositosGasto = normalizarMapaPagos(base.depositosGasto);
-  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto };
+  const pagosInscripcion = normalizarMapaPagos(base.pagosInscripcion);
+  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -184,6 +192,7 @@ export async function respuestaCompleta(data) {
     pagosTorneo: data.pagosTorneo || {},
     depositosTorneo: data.depositosTorneo || {},
     depositosGasto: data.depositosGasto || {},
+    pagosInscripcion: data.pagosInscripcion || {},
   };
 }
 
@@ -363,7 +372,9 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   const r2 = remapearClavesCampeonato(actual.pagosTorneo, de, a);
   const r3 = remapearClavesCampeonato(actual.depositosTorneo, de, a);
   const r4 = remapearClavesCampeonato(actual.depositosGasto, de, a);
-  const cambia = actual.movimientos.some((m) => m.campeonato === de) || r1.cambio || r2.cambio || r3.cambio || r4.cambio;
+  const r5 = remapearClavesCampeonato(actual.pagosInscripcion, de, a); // 87ª entrega
+  const cambia =
+    actual.movimientos.some((m) => m.campeonato === de) || r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio;
   if (!cambia) return;
   const prefijoViejo = `gn-${de}-`;
   actual.movimientos = actual.movimientos.map((m) => {
@@ -375,6 +386,7 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   actual.pagosTorneo = r2.mapa;
   actual.depositosTorneo = r3.mapa;
   actual.depositosGasto = r4.mapa;
+  actual.pagosInscripcion = r5.mapa; // 87ª entrega
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
@@ -438,19 +450,43 @@ export default async (req) => {
       // Estadísticas cargados); acá solo se valida y persiste. Ojo: `fecha` es la fecha DEL TORNEO (la
       // clave del registro), no la fecha en que el Tesorero recibió el pago — esa es `fechaRegistro`,
       // un campo aparte (para no pisar uno con el otro).
+      //
+      // 87ª entrega: se agrega un segundo motivo posible para un Pago — la Cuota de inscripción del
+      // Tablero de Control (Federico: "nos faltó la inscripción... es todo lo del tablero de control"),
+      // que a diferencia de un torneo no tiene una fecha propia que la identifique. Se generaliza el
+      // body para aceptar `motivoTipo`/`motivoId` (mismo esquema que ya usa `registrarDeposito` para
+      // distinguir torneo/gasto) sin romper nada de lo ya guardado: cuando `motivoTipo` es "torneo" (o
+      // viene ausente, como mandaba el frontend antes de esta entrega), el comportamiento y la llave de
+      // `pagosTorneo` son EXACTAMENTE los de siempre (`motivoId`/`fecha` = la fecha del torneo). Cuando es
+      // "inscripcion", se guarda en el mapa nuevo `pagosInscripcion`, con el concepto fijo "inscripcion"
+      // en el lugar de la fecha — no hace falta ningún torneo puntual para este motivo.
       const campeonato = String(body.campeonato || "").trim();
-      const fecha = String(body.fecha || "").trim();
+      const motivoTipo = body.motivoTipo === "inscripcion" ? "inscripcion" : "torneo";
       const correo = String(body.correo || "").trim().toLowerCase();
-      if (!campeonato || !fecha || !correo) {
-        return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del pago." }), { status: 400, headers: HEADERS });
+      if (motivoTipo === "inscripcion") {
+        if (!campeonato || !correo) {
+          return new Response(JSON.stringify({ error: "Falta el campeonato o el jugador del pago." }), { status: 400, headers: HEADERS });
+        }
+        const clave = `${campeonato}|inscripcion|${correo}`;
+        actual.pagosInscripcion[clave] = normalizarRegistroPago({
+          montoEsperado: body.montoEsperado,
+          monto: body.monto,
+          fecha: body.fechaRegistro,
+          hora: body.horaRegistro,
+        });
+      } else {
+        const fecha = String(body.fecha || body.motivoId || "").trim();
+        if (!campeonato || !fecha || !correo) {
+          return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del pago." }), { status: 400, headers: HEADERS });
+        }
+        const clave = `${campeonato}|${fecha}|${correo}`;
+        actual.pagosTorneo[clave] = normalizarRegistroPago({
+          montoEsperado: body.montoEsperado,
+          monto: body.monto,
+          fecha: body.fechaRegistro,
+          hora: body.horaRegistro,
+        });
       }
-      const clave = `${campeonato}|${fecha}|${correo}`;
-      actual.pagosTorneo[clave] = normalizarRegistroPago({
-        montoEsperado: body.montoEsperado,
-        monto: body.monto,
-        fecha: body.fechaRegistro,
-        hora: body.horaRegistro,
-      });
     } else if (body?.accion === "registrarDeposito") {
       // 76ª entrega: confirma que TOLS le depositó a un jugador — por el Premio de un torneo ya
       // publicado ("motivoTipo":"torneo", "motivoId": fecha del torneo) o por un gasto del Tablero de

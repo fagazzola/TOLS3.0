@@ -82,6 +82,10 @@ export function resumenPorJugador(movimientosConMontos, jugadoresDict) {
     resumen[correo] = {
       correo,
       nombre: jd.nombre || "",
+      // 92ª entrega: se agrega acá (puramente aditivo, nadie más lee este campo todavía salvo el
+      // export a Excel nuevo de "Pagos y depósitos confirmados") para no tener que repetir el lookup
+      // al directorio de Jugadores en otro lado.
+      aliasPokerStars: jd.aliasPokerStars || "",
       cuenta: jd.cuenta || "",
       banco: jd.banco || "",
       tipoCuenta: jd.tipoCuenta || "",

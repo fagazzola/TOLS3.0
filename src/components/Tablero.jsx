@@ -50,6 +50,14 @@ function fechaFmt(iso) {
   const [y, m, d] = String(iso || "").split("-");
   return y && m && d ? `${d}/${m}/${y}` : iso || "";
 }
+// 91ª entrega: para mostrar cuándo terminó "Exportar todo a Excel" — a diferencia de fechaFmt() (una
+// fecha simple "yyyy-mm-dd" del Calendario/Tablero), esto formatea un timestamp ISO completo (con hora),
+// como el que guarda `terminadoEn` en exportar-excel-background.js, en la hora local del navegador.
+function fechaHoraFmt(isoDatetime) {
+  const d = new Date(isoDatetime);
+  if (Number.isNaN(d.getTime())) return isoDatetime || "";
+  return d.toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
+}
 // puntos de respaldo para un torneo de práctica que todavía no tiene su propia configuración guardada
 // — mismo default que usaba la tabla fija de antes de esta entrega (ver src/lib/gamenight.js).
 function puntosPracticaDefault() {
@@ -235,6 +243,18 @@ export default function Tablero({ session, perfiles }) {
           setExportando(true);
           setProgresoExport(json);
           consultarEstadoExport();
+        } else if (json.estado === "listo" || json.estado === "error") {
+          // 91ª entrega (bugfix): Federico reportó que, si la exportación terminaba mientras había
+          // cambiado de pantalla (o cerrado/recargado el navegador), al volver a Tablero de Control no
+          // quedaba ningún rastro de que algo había corrido — "si cambio de página y la exportación se
+          // concluyó, cuando vuelvo se perdió el avance". Causa: `reporteExport` es estado de React, así
+          // que se pierde al desmontar el componente (cambiar de pestaña) o al recargar la página — este
+          // sondeo de montaje SOLO retomaba el caso "en-curso" (si la exportación seguía corriendo),
+          // nunca restauraba el ÚLTIMO resultado ya terminado que seguía disponible en Blobs. Como
+          // `tols-exportar-estado` ya guarda el reporte final hasta que corra la próxima exportación (no
+          // se borra solo), alcanza con leerlo acá también para "listo"/"error" — sin volver a disparar
+          // ningún sondeo, porque ya no hay nada corriendo.
+          setReporteExport(json);
         }
       } catch (e) {
         // sin red o endpoint no disponible todavía — no hay nada que retomar, se ignora
@@ -828,6 +848,30 @@ export default function Tablero({ session, perfiles }) {
                   : "Exportación terminada con errores en algunos módulos (detalle abajo)."}
               </div>
               {reporteExport.error && <div className="login-error">{reporteExport.error}</div>}
+              {/* 91ª entrega: Federico preguntó a qué archivo y en qué ruta quedaba la exportación —
+                  nunca se mostraba en pantalla, aunque siempre fue el mismo archivo "base" de OneDrive de
+                  siempre. Se muestra acá junto con la fecha/hora en que terminó, y queda visible aunque
+                  se cambie de pantalla y se vuelva después (ver el fix del sondeo de montaje, más arriba)
+                  — ya no depende de quedarse mirando la pantalla mientras corre. */}
+              {reporteExport.archivoInfo && (
+                <div className="section-sub" style={{ marginTop: 4 }}>
+                  Archivo: <b>{reporteExport.archivoInfo.archivo}</b> — carpeta (OneDrive):{" "}
+                  <b>{reporteExport.archivoInfo.carpeta}</b>
+                  {reporteExport.archivoInfo.webUrl && (
+                    <>
+                      {" "}
+                      (<a href={reporteExport.archivoInfo.webUrl} target="_blank" rel="noreferrer">
+                        abrir en OneDrive
+                      </a>)
+                    </>
+                  )}
+                </div>
+              )}
+              {reporteExport.terminadoEn && (
+                <div className="section-sub" style={{ marginTop: 2 }}>
+                  Terminó: <b>{fechaHoraFmt(reporteExport.terminadoEn)}</b>
+                </div>
+              )}
               {reporteExport.backup && (
                 <div className="section-sub" style={{ marginTop: 4 }}>
                   {reporteExport.backup.ok

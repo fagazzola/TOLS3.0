@@ -140,6 +140,34 @@ export async function respaldarExcelActual() {
   return { ok: true, nombre: nombreBackup };
 }
 
+// 91ª entrega: Federico preguntó, después de ver el reporte de "Exportar todo a Excel", a qué archivo y
+// en qué ruta queda exportado realmente — el reporte solo mostraba "✓ OK" por módulo, sin decir dónde
+// termina escribiendo. La respuesta ya existía de fondo (siempre fue EXCEL_PATH, el mismo archivo "base"
+// de siempre en OneDrive — el export nunca escribió a ningún otro lado), pero nunca se mostraba en
+// pantalla. `nombre`/`carpeta`/`rutaCompleta` salen directo de EXCEL_PATH, sin red (siempre disponibles,
+// no hay nada que pueda fallar); `webUrl` es best-effort — un link directo al archivo en OneDrive, si el
+// token está vigente y Graph responde a tiempo — y si esa llamada falla por cualquier motivo, se omite en
+// silencio y el resto de la info (que es la que de verdad pedía Federico: archivo + ruta) nunca se
+// pierde por eso.
+export async function obtenerInfoExcel() {
+  const partes = EXCEL_PATH.split("/");
+  const archivo = partes[partes.length - 1];
+  const carpeta = partes.slice(0, -1).join("/");
+  const info = { archivo, carpeta, rutaCompleta: EXCEL_PATH };
+  try {
+    const token = await getAccessToken();
+    const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}`;
+    const r = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    if (r.ok) {
+      const json = await r.json();
+      if (json.webUrl) info.webUrl = json.webUrl;
+    }
+  } catch (e) {
+    // best-effort únicamente — ver comentario arriba
+  }
+  return info;
+}
+
 async function graphFetch(pathSuffix, options = {}) {
   const token = await getAccessToken();
   const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}:${pathSuffix}`;
@@ -473,7 +501,7 @@ export function syncJugadores(jugadores) {
 // (Cobranza_Resumen y Cobranza) — a partir de esta entrega esas hojas dejan de tener fórmulas propias
 // y pasan a ser un espejo de solo lectura como el resto del sitio: cada guardado desde el Tesorero
 // las vuelve a escribir completas con los valores ya calculados.
-export async function nucleoSyncCobranza({ resumenRows, movimientoRows }) {
+export async function nucleoSyncCobranza({ resumenRows, movimientoRows, confirmadosRows }) {
   // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de esta hoja — esos datos ya viven
   // (y se editan) solo en la hoja "Jugadores" (ver `filasJugadoresUnificadas()` más abajo). `resumenRows`
   // ya no trae esas 3 columnas (ver `filasParaExcel()` en cobranza.js), pero `minClearCols: 8` asegura
@@ -481,9 +509,20 @@ export async function nucleoSyncCobranza({ resumenRows, movimientoRows }) {
   // corrido), queden vacías en vez de con lo último que se alcanzó a escribir ahí.
   await writeSheetTable("Cobranza_Resumen", resumenRows, { minClearCols: 8 });
   await writeSheetTable("Cobranza", movimientoRows);
+  // 92ª entrega: "Cobranza_Resumen"/"Cobranza" (de arriba) reflejan el modelo VIEJO de movimientos
+  // (Buy-in/Re-buys/Add-on, puente de Game Night) — nunca tuvieron columnas para los 4 mapas nuevos de
+  // "Registrar pagos y depósitos" (pagosTorneo/pagosInscripcion/depositosTorneo/depositosGasto, desde
+  // la 76ª entrega), que es de donde sale realmente "Pagos y depósitos confirmados" en pantalla. Hoja
+  // nueva, igual que las de Game Night (MOD 5) — se crea sola la primera vez (`asegurarHoja`), nunca
+  // depende de que Federico la arme a mano de antemano.
+  await asegurarHoja("Cobranza_Confirmados", [
+    "Campeonato", "Tipo", "Motivo", "Correo Electrónico", "Alias PokerStars / Nombre",
+    "Monto Esperado", "Monto Real", "Fecha", "Hora", "Registrado En",
+  ]);
+  await writeSheetTable("Cobranza_Confirmados", confirmadosRows || [], { maxRows: 800 });
 }
-export function syncCobranza({ resumenRows, movimientoRows }) {
-  return safe(() => nucleoSyncCobranza({ resumenRows, movimientoRows }));
+export function syncCobranza({ resumenRows, movimientoRows, confirmadosRows }) {
+  return safe(() => nucleoSyncCobranza({ resumenRows, movimientoRows, confirmadosRows }));
 }
 
 // Game Night (MOD 5): a diferencia del resto de los módulos, sus 2 hojas se crean solas la primera

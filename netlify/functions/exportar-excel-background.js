@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { exportarTodoDesdeBlobs, TOTAL_MODULOS_EXCEL } from "./lib/exportar-excel.js";
-import { respaldarExcelActual } from "./lib/msgraph.js";
+import { respaldarExcelActual, obtenerInfoExcel } from "./lib/msgraph.js";
 
 // 84ª entrega (bugfix): "Exportar todo a Excel" (83ª entrega) corría dentro de la misma función síncrona
 // que atiende /api/tablero, con un `await exportarTodoDesdeBlobs()` directo — 10 módulos, cada uno con
@@ -64,10 +64,22 @@ export default async () => {
       });
     });
 
+    // 91ª entrega: Federico preguntó a qué archivo y en qué ruta queda exportado el Excel — nunca se
+    // había mostrado en pantalla, aunque siempre fue el mismo archivo "base" de siempre (EXCEL_PATH en
+    // msgraph.js). `obtenerInfoExcel()` es best-effort del lado del link (`webUrl`, requiere un llamado
+    // a Graph) pero nombre/ruta son locales — nunca deberían faltar en el reporte final.
+    let archivoInfo;
+    try {
+      archivoInfo = await obtenerInfoExcel();
+    } catch (e) {
+      archivoInfo = null;
+    }
+
     await estadoStore.setJSON("data", {
       estado: "listo",
       ...reporte,
       backup,
+      archivoInfo,
       iniciadoEn,
       terminadoEn: new Date().toISOString(),
     });

@@ -2,6 +2,10 @@ import { getStore } from "@netlify/blobs";
 import seed from "../../src/data/cobranza.json";
 import { syncCobranza, syncCierres } from "./lib/msgraph.js";
 import { conMontos, resumenPorJugador, tieneAdeudoBloqueante } from "../../src/lib/cobranza.js";
+// 92ª entrega: mismo helper de numeración que ya usa "Resultados de Torneos" del lado del cliente
+// (Cobranza.jsx) — se reutiliza acá para que el export a Excel de "Pagos y depósitos confirmados"
+// etiquete cada torneo como "Torneo N"/"Torneo N - Main", igual que ve el Tesorero en pantalla.
+import { mapaNumeracionTorneos, etiquetaNumerada } from "../../src/lib/gamenight.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -45,6 +49,7 @@ function jugadoresParaResumen(cobranzaJugadores, directorio) {
     const dj = directorio?.[correo] || {};
     out[correo] = {
       nombre: dj.nombre || cj.nombre || "",
+      aliasPokerStars: dj.aliasPokerStars || "", // 92ª entrega: ver nota en resumenPorJugador()
       cuenta: dj.cuenta || "",
       banco: dj.banco || "",
       tipoCuenta: dj.tipoCuenta || "",
@@ -193,6 +198,10 @@ export async function respuestaCompleta(data) {
     depositosTorneo: data.depositosTorneo || {},
     depositosGasto: data.depositosGasto || {},
     pagosInscripcion: data.pagosInscripcion || {},
+    // 92ª entrega: el Calendario completo (todos los campeonatos, no solo el activo) — lo necesita
+    // filasParaExcel() para numerar los torneos de "Pagos y depósitos confirmados" ("Torneo N"), igual
+    // que ya hace Cobranza.jsx del lado del cliente con mapaNumeracionTorneos().
+    torneos,
   };
 }
 
@@ -210,7 +219,63 @@ export async function marcarSaldoEnviado(campeonato, fecha, correo) {
   return respuestaCompleta(actual);
 }
 
-export function filasParaExcel({ movimientos, resumen }) {
+// 92ª entrega: Federico comparó el Excel real contra el portal y no encontró en ningún lado "el
+// archivo de pagos y depósitos" — con razón: desde que "Registrar pagos y depósitos" se rediseñó por
+// completo en la 76ª entrega (los 4 mapas `pagosTorneo`/`pagosInscripcion`/`depositosTorneo`/
+// `depositosGasto`, que son la fuente real de la tabla "Pagos y depósitos confirmados" en pantalla),
+// nadie extendió el sync a Excel para incluirlos — `resumenRows`/`movimientoRows` siguen siendo,
+// exactamente como desde la 33ª entrega, un espejo de `movimientos`/`resumen`, el modelo VIEJO
+// (Buy-in/Re-buys/Add-on por torneo, alimentado solo por el puente de Game Night) que la propia
+// pantalla dejó de usar para registrar pagos/depósitos reales desde la 76ª. Las dos hojas vigentes
+// (Cobranza/Cobranza_Resumen) no tenían ninguna columna pensada para esos 4 mapas nuevos — no era un
+// bug puntual, es que esa parte del sitio nunca llegó a tener su propio export. Se agrega acá una
+// tercera pieza, `confirmadosRows`, que junta los 4 mapas (mismo criterio que `confirmadosCampeonato`
+// en Cobranza.jsx, pero sin acotar a un solo campeonato — el Excel debe reflejar TODOS) para una hoja
+// nueva, "Cobranza_Confirmados" (ver `nucleoSyncCobranza` en msgraph.js).
+function etiquetaTorneoExcel(numeracion, campeonato, fecha) {
+  const entry = numeracion[`${campeonato}|${fecha}`];
+  return entry ? `Torneo ${etiquetaNumerada(entry)}` : `Torneo (${fecha})`;
+}
+function aliasONombre(resumen, correo) {
+  const r = resumen?.[correo];
+  return (r?.aliasPokerStars || r?.nombre || "").trim();
+}
+function filasConfirmados({ pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, resumen, torneos }) {
+  const numeracion = mapaNumeracionTorneos(torneos);
+  const filas = [];
+  for (const [clave, reg] of Object.entries(pagosTorneo || {})) {
+    const [campeonato, fecha, correo] = clave.split("|");
+    filas.push([
+      campeonato, "Pago", etiquetaTorneoExcel(numeracion, campeonato, fecha), correo,
+      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
+  for (const [clave, reg] of Object.entries(pagosInscripcion || {})) {
+    const [campeonato, , correo] = clave.split("|");
+    filas.push([
+      campeonato, "Pago", "Inscripción", correo,
+      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
+  for (const [clave, reg] of Object.entries(depositosTorneo || {})) {
+    const [campeonato, fecha, correo] = clave.split("|");
+    filas.push([
+      campeonato, "Depósito", etiquetaTorneoExcel(numeracion, campeonato, fecha), correo,
+      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
+  for (const [clave, reg] of Object.entries(depositosGasto || {})) {
+    const [campeonato, concepto, correo] = clave.split("|");
+    filas.push([
+      campeonato, "Depósito", concepto, correo,
+      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
+  filas.sort((a, b) => (a[0] + (a[9] || "")).localeCompare(b[0] + (b[9] || "")));
+  return filas;
+}
+
+export function filasParaExcel({ movimientos, resumen, pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, torneos }) {
   // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de "Cobranza_Resumen" — ese dato
   // (con el fix de la 56ª, `celdaTexto()`) ya solo vive en la hoja "Jugadores"
   // (`filasJugadoresUnificadas()` en msgraph.js), que es donde se edita desde Mi Perfil/Cobranza. Tenerlo
@@ -229,7 +294,8 @@ export function filasParaExcel({ movimientos, resumen }) {
       m.pagado ? "Sí" : "No", m.fechaPago, m.lugar ?? "",
       m.premioPartida, m.premioCampeonato, m.balanceNeto,
     ]);
-  return { resumenRows, movimientoRows };
+  const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, resumen, torneos });
+  return { resumenRows, movimientoRows, confirmadosRows };
 }
 
 // Punto de integración con Game Night (MOD 5): cada torneo en vivo llama a esto para reflejar en

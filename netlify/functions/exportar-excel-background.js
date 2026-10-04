@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import { exportarTodoDesdeBlobs } from "./lib/exportar-excel.js";
+import { exportarTodoDesdeBlobs, TOTAL_MODULOS_EXCEL } from "./lib/exportar-excel.js";
 import { respaldarExcelActual } from "./lib/msgraph.js";
 
 // 84ª entrega (bugfix): "Exportar todo a Excel" (83ª entrega) corría dentro de la misma función síncrona
@@ -19,9 +19,27 @@ import { respaldarExcelActual } from "./lib/msgraph.js";
 // curso / lista / con error, más el reporte módulo por módulo cuando termina) se guarda en Blobs
 // (`tols-exportar-estado`) — es el único canal de comunicación entre esta función (que ya no tiene a
 // quién responderle) y la pantalla que está esperando el resultado.
+// 90ª entrega: hasta ahora el estado en Blobs solo se escribía al PRINCIPIO (implícito, nunca se
+// escribía nada hasta el final) y al FINAL — nada en el medio. Federico reportó justo eso: "no muestra
+// avance y si bien dice que terminando dirá el resultado, no lo he visto" (ver más abajo por qué
+// tampoco se veía el resultado final, era un bug aparte en Tablero.jsx). Ahora se escribe el estado en
+// Blobs en CADA paso — antes del respaldo, y una vez por cada módulo (al empezarlo y al terminarlo, vía
+// el `onProgreso` nuevo de `exportarTodoDesdeBlobs()`) — así que el sondeo de Tablero.jsx (cada 3
+// segundos, sin cambios en el intervalo) tiene siempre algo fresco para mostrar mientras la exportación
+// completa corre (puede tardar bastante: 10 módulos, cada uno con varias llamadas reales a Graph API).
 export default async () => {
   const estadoStore = getStore({ name: "tols-exportar-estado", consistency: "strong" });
+  const iniciadoEn = new Date().toISOString();
   try {
+    await estadoStore.setJSON("data", {
+      estado: "en-curso",
+      etapa: "respaldo",
+      indice: 0,
+      total: TOTAL_MODULOS_EXCEL,
+      resultados: [],
+      iniciadoEn,
+    });
+
     // 84ª entrega: pedido explícito de Federico — antes de reemplazar cualquier hoja, dejar una copia de
     // respaldo del archivo completo tal cual está en ese momento. Un fallo acá se reporta (campo
     // `backup`) pero NUNCA bloquea la exportación real — no tiene sentido dejar el Excel desactualizado
@@ -33,17 +51,31 @@ export default async () => {
       backup = { ok: false, error: e?.message || String(e) };
     }
 
-    const reporte = await exportarTodoDesdeBlobs();
+    const reporte = await exportarTodoDesdeBlobs(async (progreso) => {
+      await estadoStore.setJSON("data", {
+        estado: "en-curso",
+        etapa: progreso.etapa, // "corriendo" | "terminado"
+        moduloActual: progreso.moduloActual,
+        indice: progreso.indice,
+        total: progreso.total,
+        resultados: progreso.resultados,
+        backup,
+        iniciadoEn,
+      });
+    });
+
     await estadoStore.setJSON("data", {
       estado: "listo",
       ...reporte,
       backup,
+      iniciadoEn,
       terminadoEn: new Date().toISOString(),
     });
   } catch (e) {
     await estadoStore.setJSON("data", {
       estado: "error",
       error: e?.message || String(e),
+      iniciadoEn,
       terminadoEn: new Date().toISOString(),
     });
   }

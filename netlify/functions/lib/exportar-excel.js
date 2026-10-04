@@ -108,19 +108,41 @@ const MODULOS = [
   },
 ];
 
+// 90ª entrega: cuántos módulos tiene la exportación completa — exportado para que quien dispare la
+// corrida (exportar-excel-background.js) pueda escribir el "total" del progreso sin tener que duplicar
+// ni importar la lista `MODULOS` completa.
+export const TOTAL_MODULOS_EXCEL = MODULOS.length;
+
 // Se corre módulo por módulo (no en paralelo): cada uno hace varias llamadas a Graph API contra el
 // mismo archivo de Excel, y escribirlas todas a la vez multiplicaría el riesgo de choques/HTTP 429
 // contra Graph — mejor un poco más lento pero confiable, para una acción que de todas formas el
 // administrador pidió a propósito y una sola vez, no algo que corre a cada rato.
-export async function exportarTodoDesdeBlobs() {
+//
+// 90ª entrega: acepta un `onProgreso` opcional, llamado DOS veces por módulo (antes de correrlo, y de
+// nuevo apenas termina, ok o con error) — es lo que le permite a quien dispara la corrida (ver
+// exportar-excel-background.js) ir guardando el avance real en Blobs, en vez de solo poder reportar el
+// resultado una vez que los 10 módulos ya terminaron. `onProgreso` nunca puede hacer fallar la
+// exportación: cualquier error suyo (ej. un problema de red al guardar el progreso) se descarta en
+// silencio, porque el progreso es solo informativo — nunca debe poder tirar abajo la exportación real.
+export async function exportarTodoDesdeBlobs(onProgreso) {
   const resultados = [];
+  async function avisar(etapa, moduloActual) {
+    if (!onProgreso) return;
+    try {
+      await onProgreso({ etapa, moduloActual, indice: resultados.length, total: MODULOS.length, resultados: [...resultados] });
+    } catch (e) {
+      // informativo únicamente — ver comentario arriba
+    }
+  }
   for (const modulo of MODULOS) {
+    await avisar("corriendo", modulo.nombre);
     try {
       await modulo.run();
       resultados.push({ modulo: modulo.nombre, ok: true });
     } catch (e) {
       resultados.push({ modulo: modulo.nombre, ok: false, error: e?.message || String(e) });
     }
+    await avisar("terminado", modulo.nombre);
   }
   return {
     resultados,

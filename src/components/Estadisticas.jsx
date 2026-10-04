@@ -21,6 +21,14 @@ const API_TABLERO = "/api/tablero";
 function esAdmin(rol) {
   return rol === "Administrador General" || rol === "Administrador";
 }
+// 90ª entrega: el botón "Por resultado" de "Clasificación general" muestra montos de dinero (Debe/Premio
+// por jugador) — a pedido de Federico, solo administradores y el Tesorero pueden verlo/usarlo; el
+// jugador solo ve "Por puntos"/"Por killers". Mismo criterio que ya usa `puedeAlternarVistaJugador()` en
+// App.jsx (esAdmin(rol) || rol === "Tesorero") — se repite acá en vez de importarlo porque ese helper es
+// local a App.jsx y no está exportado.
+function puedeVerPorResultado(rol) {
+  return esAdmin(rol) || rol === "Tesorero";
+}
 
 function money(n) {
   return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
@@ -186,6 +194,13 @@ export default function Estadisticas({ session }) {
   // torneos individuales que existía en la primera versión de este bloque.
   const [vistaClasificacion, setVistaClasificacion] = useState("puntos"); // "puntos" | "killers" | "resultado"
   const [ordenClasif, setOrdenClasif] = useState({ col: "total", dir: "desc" }); // default: Total descendente
+
+  // 90ª entrega: si la vista queda en "resultado" (Tesorero la elige y después usa "Ver como jugador" en
+  // Mi Perfil, que cambia `session.rol` sin recargar el componente) se vuelve a "puntos" — nunca se deja
+  // a un jugador viendo la vista de dinero aunque ya no tenga el botón para volver a elegirla a mano.
+  useEffect(() => {
+    if (vistaClasificacion === "resultado" && !puedeVerPorResultado(session?.rol)) setVistaClasificacion("puntos");
+  }, [session?.rol, vistaClasificacion]);
 
   // ───────── admin: subir resultados ─────────
   const [torneoAdminSel, setTorneoAdminSel] = useState(""); // clave "campeonato|fecha"
@@ -788,7 +803,8 @@ export default function Estadisticas({ session }) {
           {[
             ["puntos", "Por puntos"],
             ["killers", "Por killers"],
-            ["resultado", "Por resultado"],
+            // 90ª entrega: "Por resultado" muestra Debe/Premio en dinero — solo administradores y Tesorero.
+            ...(puedeVerPorResultado(session?.rol) ? [["resultado", "Por resultado"]] : []),
           ].map(([key, label]) => (
             <button
               key={key}

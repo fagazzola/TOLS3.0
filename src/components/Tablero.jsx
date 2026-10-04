@@ -149,6 +149,11 @@ export default function Tablero({ session, perfiles }) {
   const [exportando, setExportando] = useState(false);
   const [reporteExport, setReporteExport] = useState(null); // { resultados: [{modulo, ok, error}], ok, exportadoEn }
   const [confirmExport, setConfirmExport] = useState(false);
+  // 90ª entrega: avance en vivo mientras la exportación corre en segundo plano ({ etapa, moduloActual,
+  // indice, total, resultados } — tal cual lo va guardando exportar-excel-background.js en Blobs, ver
+  // ese archivo). Separado de `reporteExport` a propósito: ese solo se usa para el resultado FINAL
+  // (listo/error), este para lo que va pasando mientras sigue "en-curso".
+  const [progresoExport, setProgresoExport] = useState(null);
 
   const [gestionAbierta, setGestionAbierta] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
@@ -228,6 +233,7 @@ export default function Tablero({ session, perfiles }) {
         const json = await r.json();
         if (json.estado === "en-curso") {
           setExportando(true);
+          setProgresoExport(json);
           consultarEstadoExport();
         }
       } catch (e) {
@@ -481,6 +487,7 @@ export default function Tablero({ session, perfiles }) {
   async function exportarExcel() {
     setExportando(true);
     setReporteExport(null);
+    setProgresoExport(null);
     try {
       const r = await fetch(API, {
         method: "PUT",
@@ -498,20 +505,36 @@ export default function Tablero({ session, perfiles }) {
     }
   }
 
+  // 90ª entrega (bugfix de fondo): el `return` de la rama "en-curso" vivía DENTRO del `try`, así que el
+  // `finally` de abajo (que hacía `setExportando(false)`/`setConfirmExport(false)`) se ejecutaba en
+  // CADA vuelta del sondeo — no solo al terminar. El resultado: a los ~3 segundos de arrancar, el botón
+  // volvía a su estado normal y el modal de confirmación se cerraba solo, aunque la exportación seguía
+  // corriendo de fondo (el `setTimeout(poll, 3000)` seguía reprogramándose) — exactamente lo que
+  // Federico reportó ("no muestra avance... y si bien dice que terminando dirá el resultado, no lo he
+  // visto"): no había avance visible porque la UI ya se veía "normal" segundos después de arrancar, y el
+  // resultado final, aunque sí se guardaba en `reporteExport` al terminar, aparecía sin ningún aviso
+  // nuevo (el botón ya no decía "Exportando…", así que nada indicaba que valía la pena mirar hacia
+  // abajo). Fix: `setExportando`/`setConfirmExport` solo se tocan cuando el sondeo de verdad termina
+  // (estado "listo"/"error"/excepción) — mientras sigue "en-curso" solo se actualiza `progresoExport`,
+  // que la pantalla usa para mostrar en qué módulo va (ver el JSX de la sección "Excel" más abajo).
   function consultarEstadoExport() {
     (async function poll() {
       try {
         const r = await fetch(`${API}?estadoExportarExcel=1`);
         const json = await r.json();
         if (json.estado === "en-curso") {
+          setProgresoExport(json);
           setTimeout(poll, 3000);
           return;
         }
         // "listo" o "error" (o cualquier otro valor inesperado): se da por terminada la espera
+        setProgresoExport(null);
         setReporteExport(json);
+        setExportando(false);
+        setConfirmExport(false);
       } catch (e) {
+        setProgresoExport(null);
         setReporteExport({ resultados: [], ok: false, error: "No se pudo consultar el estado de la exportación." });
-      } finally {
         setExportando(false);
         setConfirmExport(false);
       }
@@ -748,6 +771,53 @@ export default function Tablero({ session, perfiles }) {
               {exportando ? "Exportando…" : "Exportar todo a Excel"}
             </button>
           </div>
+          {/* 90ª entrega: avance en vivo mientras `progresoExport` sigue "en-curso" (ver el bugfix de
+              `consultarEstadoExport()` más arriba) — barra simple con el módulo que está corriendo (o el
+              que acaba de terminar) y una tabla con los módulos ya resueltos hasta ahora, para que se vea
+              que algo está pasando en vez de un botón "Exportando…" sin más información durante los
+              minutos que puede tardar la corrida completa. */}
+          {progresoExport && (
+            <div style={{ marginTop: 12 }}>
+              <div className="section-note">
+                {progresoExport.etapa === "respaldo"
+                  ? "Creando copia de respaldo del Excel actual…"
+                  : `Sincronizando "${progresoExport.moduloActual}"… (${Math.min(
+                      progresoExport.indice + (progresoExport.etapa === "terminado" ? 1 : 0),
+                      progresoExport.total
+                    )} de ${progresoExport.total} módulos)`}
+              </div>
+              <div style={{ background: "#eee", borderRadius: 6, height: 8, marginTop: 6, overflow: "hidden" }}>
+                <div
+                  style={{
+                    background: "#2e7d32",
+                    height: "100%",
+                    width: `${Math.round(
+                      (Math.min(
+                        progresoExport.indice + (progresoExport.etapa === "terminado" ? 1 : 0),
+                        progresoExport.total
+                      ) /
+                        Math.max(progresoExport.total, 1)) *
+                        100
+                    )}%`,
+                    transition: "width 0.3s",
+                  }}
+                />
+              </div>
+              {progresoExport.resultados?.length > 0 && (
+                <div className="tbl" style={{ marginTop: 10 }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: "1fr 100px" }}>
+                    <div>Módulo</div><div>Estado</div>
+                  </div>
+                  {progresoExport.resultados.map((r) => (
+                    <div className="trow" style={{ gridTemplateColumns: "1fr 100px" }} key={r.modulo}>
+                      <div>{r.modulo}</div>
+                      <div>{r.ok ? "✓ OK" : "✕ Falló"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {reporteExport && (
             <div style={{ marginTop: 12 }}>
               <div className="section-note" style={{ fontWeight: 600 }}>
@@ -785,7 +855,15 @@ export default function Tablero({ session, perfiles }) {
       )}
 
       {confirmExport && (
-        <div className="modal-backdrop" onClick={() => !exportando && setConfirmExport(false)}>
+        // 90ª entrega: antes de este fix, `confirmExport` solo se cerraba sin querer por el mismo bug
+        // de `consultarEstadoExport()` (ver más arriba) — nunca de verdad, porque el backdrop y el
+        // botón "Cancelar" quedaban `disabled`/sin efecto mientras `exportando` era true. Con el bug ya
+        // corregido, `exportando` se mantiene true por los minutos reales que dura la corrida — así que
+        // ahora SÍ hace falta poder cerrar este modal mientras exporta (tal como el propio texto del
+        // modal ya decía: "podés cerrar esta pantalla... mientras tanto"), sin que eso cancele nada del
+        // lado del servidor (la corrida sigue de fondo, independiente de este modal; el avance queda
+        // visible de todas formas en la sección "Excel" de abajo).
+        <div className="modal-backdrop" onClick={() => setConfirmExport(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-icon-badge danger">⚠</div>
             <div className="modal-title">Exportar todo a Excel</div>
@@ -795,9 +873,19 @@ export default function Tablero({ session, perfiles }) {
               segundo plano — podés cerrar esta pantalla o seguir usando el sitio mientras tanto, el
               resultado va a estar disponible acá la próxima vez que entres a Tablero de Control.
             </p>
+            {exportando && progresoExport && (
+              <p className="section-sub" style={{ marginTop: 0, fontWeight: 600 }}>
+                {progresoExport.etapa === "respaldo"
+                  ? "Creando copia de respaldo del Excel actual…"
+                  : `Sincronizando "${progresoExport.moduloActual}"… (${Math.min(
+                      progresoExport.indice + (progresoExport.etapa === "terminado" ? 1 : 0),
+                      progresoExport.total
+                    )} de ${progresoExport.total} módulos)`}
+              </p>
+            )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setConfirmExport(false)} disabled={exportando}>
-                Cancelar
+              <button className="btn btn-secondary" onClick={() => setConfirmExport(false)}>
+                {exportando ? "Cerrar (sigue en curso)" : "Cancelar"}
               </button>
               <button className="btn btn-danger" disabled={exportando} onClick={exportarExcel}>
                 {exportando ? "Exportando…" : "Sí, exportar todo"}

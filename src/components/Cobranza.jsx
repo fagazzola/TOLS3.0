@@ -5,6 +5,7 @@ import { mapaNumeracionTorneos } from "../lib/gamenight.js";
 
 const API = "/api/cobranza";
 const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
+const API_ENVIAR_DATOSCUENTA = "/api/cobranza-enviar-datoscuenta"; // 89ª entrega
 const API_TABLERO = "/api/tablero";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
@@ -118,6 +119,12 @@ export default function Cobranza({ session, perfiles }) {
 
   const [correoEstado, setCorreoEstado] = useState("");
 
+  // 89ª entrega: botón de "Registrar pagos y depósitos" para pedirle por correo al jugador sus datos de
+  // cuenta de cobro (tipo de cuenta/cuenta/banco) cuando van incompletos y se está armando un Depósito —
+  // ver más abajo, junto al bloque de datos de cuenta del formulario.
+  const [solicitandoDatosCuenta, setSolicitandoDatosCuenta] = useState(false);
+  const [avisoDatosCuenta, setAvisoDatosCuenta] = useState("");
+
   // 81ª entrega: agrupador de los totales de "Pagos y depósitos confirmados" — a pedido de Federico,
   // antes de la tabla de detalle, agrupables por Motivo o por Fecha.
   const [agruparPor, setAgruparPor] = useState("motivo"); // "motivo" | "fecha"
@@ -199,6 +206,36 @@ export default function Cobranza({ session, perfiles }) {
     return aliasPorCorreoMap[correo] || data?.resumen?.[correo]?.nombre || correo;
   }
 
+  // 89ª entrega: datos de cuenta de cobro (tipo de cuenta/cuenta/banco — los mismos que se editan en Mi
+  // Perfil) del jugador elegido en "+ Nuevo movimiento", para mostrarlos cuando el tipo es Depósito
+  // (Federico: "despliega los datos de cuenta, tipo y banco del jugador a depositar"). Se busca sobre
+  // TODO `jugadoresSitio`, no solo `directorioActivo`, por si alguna vez se deposita a alguien que ya no
+  // está Activo.
+  const jugadorDepositoSel =
+    nuevoMov?.tipo === "deposito" && nuevoMov.correo ? jugadoresSitio.find((j) => j.correo === nuevoMov.correo) || null : null;
+  const datosCuentaCompletos =
+    !!jugadorDepositoSel && !!jugadorDepositoSel.tipoCuenta?.trim() && !!jugadorDepositoSel.cuenta?.trim() && !!jugadorDepositoSel.banco?.trim();
+
+  async function solicitarDatosCuenta() {
+    if (!jugadorDepositoSel) return;
+    setSolicitandoDatosCuenta(true);
+    setAvisoDatosCuenta("");
+    try {
+      const r = await fetch(API_ENVIAR_DATOSCUENTA, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ correo: jugadorDepositoSel.correo, nombre: jugadorDepositoSel.nombre }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || "No se pudo enviar el correo.");
+      setAvisoDatosCuenta("Correo enviado correctamente.");
+    } catch (e) {
+      setAvisoDatosCuenta(e.message || "No se pudo enviar el correo.");
+    } finally {
+      setSolicitandoDatosCuenta(false);
+    }
+  }
+
   // 76ª entrega: los 3 conceptos de "Gastos del campeonato" del Tablero de Control — fuente del combo
   // de "motivo" cuando el tipo elegido es Depósito (Q3: "para estas 3 que mencionas, los montos
   // definidos en el tablero de control").
@@ -264,15 +301,16 @@ export default function Cobranza({ session, perfiles }) {
     montoEsperadoMov = cuotaInscripcionActiva;
     etiquetaMotivoMov = "Inscripción";
   } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo?.startsWith("torneo:")) {
+    // 89ª entrega: sin fecha — ver nota de homologación más abajo, junto al combo de Motivo.
     const fecha = nuevoMov.motivo.slice("torneo:".length);
     const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
     montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, fecha));
-    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : fecha;
+    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)}` : fecha;
   } else if (nuevoMov?.tipo === "deposito" && nuevoMov.motivo?.startsWith("torneo:")) {
     const fecha = nuevoMov.motivo.slice("torneo:".length);
     const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
     montoEsperadoMov = Math.abs(resultadoTorneo(nuevoMov.correo, fecha));
-    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)} (${fechaFmt(entry.fecha)})` : fecha;
+    etiquetaMotivoMov = entry ? `Torneo ${etiquetaCorta(entry)}` : fecha;
   } else if (nuevoMov?.tipo === "deposito" && nuevoMov.motivo?.startsWith("gasto:")) {
     const concepto = nuevoMov.motivo.slice("gasto:".length);
     const g = gastosCampeonatoActivo.find((x) => x.concepto === concepto);
@@ -324,13 +362,16 @@ export default function Cobranza({ session, perfiles }) {
       if (!clave.startsWith(prefijo)) continue;
       const [, fechaTorneo, correo] = clave.split("|");
       const entry = numeracion[`${campeonatoSel}|${fechaTorneo}`];
+      // 89ª entrega: sin fecha, igual que el Pago del mismo torneo (ver nota de homologación en el combo
+      // de Motivo) — antes el mismo "Torneo 1" salía con fecha acá y sin fecha en pagosTorneo, pareciendo
+      // dos motivos distintos. La fecha de CUÁNDO se depositó ya tiene su propia columna ("Registrado").
       filas.push({
         clave,
         tipo: "Depósito",
         tipoAccion: "deposito",
         motivoTipo: "torneo",
         motivoId: fechaTorneo,
-        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""} (${fechaFmt(fechaTorneo)})`,
+        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
       });
@@ -365,13 +406,17 @@ export default function Cobranza({ session, perfiles }) {
       if (c.tipo === "Pago") g.pagos += Number(c.monto) || 0;
       else g.depositos += Number(c.monto) || 0;
     }
+    // 89ª entrega: columna "Balance" por cada registro/grupo de la tabla, a pedido de Federico — Pago
+    // (ingreso para TOLS) menos Depósito (egreso), igual criterio de perspectiva que ya rige el resto de
+    // esta tabla (Pago = verde/positivo, Depósito = rojo/negativo).
     const filas = Array.from(grupos.entries())
-      .map(([etiqueta, g]) => ({ etiqueta, ...g }))
+      .map(([etiqueta, g]) => ({ etiqueta, ...g, balance: g.pagos - g.depositos }))
       .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
     const total = filas.reduce(
       (acc, f) => ({ pagos: acc.pagos + f.pagos, depositos: acc.depositos + f.depositos }),
       { pagos: 0, depositos: 0 }
     );
+    total.balance = total.pagos - total.depositos;
     return { filas, total };
   }, [confirmadosCampeonato, agruparPor]);
 
@@ -833,6 +878,7 @@ export default function Cobranza({ session, perfiles }) {
                   onClick={() => {
                     setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: "", fechaReal: "" });
                     setErrorMov("");
+                    setAvisoDatosCuenta("");
                   }}
                 >
                   + Nuevo movimiento
@@ -845,7 +891,10 @@ export default function Cobranza({ session, perfiles }) {
                       <select
                         className="field"
                         value={nuevoMov.tipo}
-                        onChange={(e) => setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "" })}
+                        onChange={(e) => {
+                          setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "" });
+                          setAvisoDatosCuenta("");
+                        }}
                       >
                         <option value="pago">Pago (jugador → TOLS)</option>
                         <option value="deposito">Depósito (TOLS → jugador)</option>
@@ -856,7 +905,10 @@ export default function Cobranza({ session, perfiles }) {
                       <select
                         className="field"
                         value={nuevoMov.correo}
-                        onChange={(e) => setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "" })}
+                        onChange={(e) => {
+                          setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "" });
+                          setAvisoDatosCuenta("");
+                        }}
                       >
                         <option value="">— elegir jugador —</option>
                         {directorioActivo.map((j) => (
@@ -867,6 +919,45 @@ export default function Cobranza({ session, perfiles }) {
                       </select>
                     </div>
                   </div>
+
+                  {/* 89ª entrega: datos de cuenta de cobro del jugador, solo para un Depósito (TOLS →
+                      jugador) — Federico: "despliega los datos de cuenta, tipo y banco del jugador a
+                      depositar. Si están incompletos, que aparezca un botón para... mandarle un correo...
+                      solicitando los datos". */}
+                  {jugadorDepositoSel && (
+                    <div className="login-field-row" style={{ alignItems: "flex-start" }}>
+                      <div className="login-field" style={{ flex: 2 }}>
+                        <label>Datos de cuenta de {nombreCorto(jugadorDepositoSel)}</label>
+                        {datosCuentaCompletos ? (
+                          <div className="section-sub" style={{ marginTop: 2 }}>
+                            {jugadorDepositoSel.tipoCuenta} — {jugadorDepositoSel.cuenta} — {jugadorDepositoSel.banco}
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 2 }}>
+                            <span className="login-error" style={{ margin: 0 }}>
+                              Faltan sus datos de cuenta — no se le podrá depositar hasta que los complete.
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={solicitandoDatosCuenta}
+                              onClick={solicitarDatosCuenta}
+                            >
+                              {solicitandoDatosCuenta ? "Enviando…" : "Solicitar datos por correo"}
+                            </button>
+                          </div>
+                        )}
+                        {avisoDatosCuenta && (
+                          <div
+                            className={avisoDatosCuenta.includes("No se pudo") ? "login-error" : "check-line check-ok"}
+                            style={{ marginTop: 6 }}
+                          >
+                            {avisoDatosCuenta}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="login-field-row">
                     <div className="login-field" style={{ flex: 2 }}>
@@ -880,9 +971,14 @@ export default function Cobranza({ session, perfiles }) {
                         <option value="">— elegir —</option>
                         {nuevoMov.tipo === "pago" && (
                           <>
+                            {/* 89ª entrega: sin fecha — a pedido de Federico, el mismo torneo (ej. "Torneo
+                                1") aparecía con fecha para un Depósito y sin fecha para un Pago, dando la
+                                impresión de ser dos cosas distintas. Se homologó para que ningún motivo de
+                                torneo muestre fecha al registrarlo (la fecha de cuándo se recibió/depositó
+                                ya tiene su propio campo más abajo). */}
                             {opcionesPago.map((t) => (
                               <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
-                                Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                                Torneo {etiquetaCorta(t)}
                               </option>
                             ))}
                             {/* 87ª entrega: motivo nuevo — Cuota de inscripción (Tablero de Control) */}
@@ -893,7 +989,7 @@ export default function Cobranza({ session, perfiles }) {
                           <>
                             {opcionesDepositoTorneo.map((t) => (
                               <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
-                                Torneo {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                                Torneo {etiquetaCorta(t)}
                               </option>
                             ))}
                             {opcionesDepositoGasto.map((g) => (
@@ -968,7 +1064,15 @@ export default function Cobranza({ session, perfiles }) {
                     <button className="btn btn-primary" disabled={guardandoMov} onClick={confirmarNuevoMov}>
                       {guardandoMov ? "Guardando…" : "Confirmar"}
                     </button>
-                    <button className="btn btn-secondary" disabled={guardandoMov} onClick={() => { setNuevoMov(null); setErrorMov(""); }}>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={guardandoMov}
+                      onClick={() => {
+                        setNuevoMov(null);
+                        setErrorMov("");
+                        setAvisoDatosCuenta("");
+                      }}
+                    >
                       Cancelar
                     </button>
                   </div>
@@ -1003,21 +1107,24 @@ export default function Cobranza({ session, perfiles }) {
                 <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>
                   {agruparPor === "fecha" ? "Fecha" : "Motivo"}
                 </th>
-                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Total Pagos</th>
-                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Total Depósitos</th>
+                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}>Total Pagos</th>
+                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}>Total Depósitos</th>
+                {/* 89ª entrega: columna Balance (Pago − Depósito), a pedido de Federico. */}
+                <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}>Balance</th>
               </tr>
             </thead>
             <tbody>
               {totalesConfirmados.filas.map((f) => (
                 <tr key={f.etiqueta}>
                   <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{f.etiqueta}</td>
-                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.pagos} /></td>
-                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={f.depositos} forzarNegativo /></td>
+                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={f.pagos} /></td>
+                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={f.depositos} forzarNegativo /></td>
+                  <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={f.balance} /></td>
                 </tr>
               ))}
               {totalesConfirmados.filas.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: "center", border: "1px solid #eee", padding: 12, color: "var(--ink-soft)" }}>
+                  <td colSpan={4} style={{ textAlign: "center", border: "1px solid #eee", padding: 12, color: "var(--ink-soft)" }}>
                     Sin datos.
                   </td>
                 </tr>
@@ -1026,13 +1133,14 @@ export default function Cobranza({ session, perfiles }) {
             <tfoot>
               <tr style={{ fontWeight: "bold" }}>
                 <td style={{ border: "1px solid #ccc", padding: "6px 8px" }}>Total general</td>
-                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}><Monto valor={totalesConfirmados.total.pagos} /></td>
-                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}><Monto valor={totalesConfirmados.total.depositos} forzarNegativo /></td>
+                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={totalesConfirmados.total.pagos} /></td>
+                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={totalesConfirmados.total.depositos} forzarNegativo /></td>
+                <td style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={totalesConfirmados.total.balance} /></td>
               </tr>
             </tfoot>
           </table>
           <div className="tbl">
-            <div className="trow thead" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }}>
+            <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 0.6fr 1fr 1.1fr 1.1fr 0.9fr 40px" }}>
               <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div><div />
             </div>
             {confirmadosCampeonato.map((c) =>
@@ -1084,7 +1192,7 @@ export default function Cobranza({ session, perfiles }) {
                   </div>
                 </div>
               ) : (
-                <div className="trow" style={{ gridTemplateColumns: "1.4fr 0.7fr 1.3fr 0.9fr 0.9fr 1fr 40px" }} key={c.clave}>
+                <div className="trow" style={{ gridTemplateColumns: "1.3fr 0.6fr 1fr 1.1fr 1.1fr 0.9fr 40px" }} key={c.clave}>
                   <div>{aliasDeCorreo(c.correo)}</div>
                   {/* 81ª entrega: "Tipo" sin óvalo/badge, texto normal, a pedido de Federico. */}
                   <div>{c.tipo}</div>
@@ -1191,9 +1299,9 @@ export default function Cobranza({ session, perfiles }) {
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.fechaOrden ? fechaFmt(f.fechaOrden) : "—"}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.tipo}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.motivo}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.saldoInicial} /></td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.montoFirmado} /></td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}><Monto valor={-f.saldoFinal} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.saldoInicial} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.montoFirmado} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.saldoFinal} /></td>
                     </tr>
                   ))}
                   {estadoCuentaJugador.length === 0 && (

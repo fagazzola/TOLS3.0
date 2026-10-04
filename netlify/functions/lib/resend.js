@@ -144,6 +144,39 @@ export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegi
   </div>`;
 }
 
+// 89ª entrega: correo que el Tesorero dispara desde "Registrar pagos y depósitos" (Cobranza), cuando va
+// a hacer un Depósito (TOLS → jugador) y los datos de cuenta de cobro del jugador (tipo de cuenta, cuenta,
+// banco — los mismos que se editan en Mi Perfil, src/lib/cobranza.js) están incompletos. Pedido de
+// Federico: "...que aparezca un botón para que el tesorero al oprimir le mande un correo corporativo de
+// TOLS a su correo solicitando los datos, indicando que en caso de que no se llenen, no se podrá pagar."
+export function plantillaSolicitarDatosCuenta(nombre) {
+  return `
+  <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
+    <div style="max-width:460px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
+      <div style="font-size:13px; letter-spacing:.06em; color:#8fd694; text-transform:uppercase; margin-bottom:8px;">♦ Torrente On Line Series - TOLS 3.0</div>
+      <h2 style="margin:0 0 16px; color:#fff;">Nos faltan tus datos de cuenta para depositarte</h2>
+      <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
+        Estimado${nombre ? " " + nombre : ""}:
+      </p>
+      <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
+        Tenemos un depósito pendiente de hacerte (premio, gasto del campeonato u otro concepto de TOLS), pero
+        no contamos con tus datos de cuenta para transferirte — tipo de cuenta, número de cuenta y banco.
+      </p>
+      <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
+        Por favor entra a <strong>Mi Perfil</strong> en el sitio y completa esos tres datos.
+      </p>
+      <p style="margin:0 0 8px; color:#ff5c5c; font-size:14px; font-weight:600;">
+        Importante: mientras esos datos no estén completos, no podremos hacerte el depósito.
+      </p>
+      <p style="margin:20px 0 0; color:#b6c2cd; font-size:14px;">
+        Atentamente,<br />
+        El Comité Organizador<br />
+        TOLS 3.0
+      </p>
+    </div>
+  </div>`;
+}
+
 export function plantillaCodigo(codigo, nombre) {
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">

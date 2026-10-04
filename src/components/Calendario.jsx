@@ -318,14 +318,15 @@ export default function Calendario({ session, perfiles }) {
     return { texto: "En curso", clase: "badge-nivel-lectura" };
   }
 
-  // Ganancias (Cobranza/Game Night) del jugador en sesión — mismo criterio que el resto del sitio para
-  // identificar al jugador (session.usuario, comparado contra el correo de Cobranza). Se asume que
-  // administradores también son jugadores de la liga (mismo supuesto que ya usa el resto de esta
-  // pantalla) y por eso ven sus propias ganancias igual que un Jugador.
+  // 89ª entrega: se quitó el recuadro "Ganancias acumuladas" de arriba de la pantalla (a pedido de
+  // Federico) — `gananciasAcumuladas` solo alimentaba ese recuadro y se eliminó por prolijidad;
+  // `misMovimientosCampeonato` sigue viva, la usa el lookup de ganancia por fecha más abajo.
+  // Identificación del jugador en sesión — mismo criterio que el resto del sitio (session.usuario,
+  // comparado contra el correo de Cobranza). Se asume que administradores también son jugadores de la
+  // liga (mismo supuesto que ya usa el resto de esta pantalla).
   const miCorreo = (session.usuario || "").trim().toLowerCase();
   const misMovimientos = (cobranza?.movimientos || []).filter((m) => m.correo === miCorreo);
   const misMovimientosCampeonato = misMovimientos.filter((m) => !campeonatoActivo || m.campeonato === campeonatoActivo);
-  const gananciasAcumuladas = misMovimientosCampeonato.reduce((a, m) => a + (Number(m.totalGanado) || 0), 0);
 
   // premio ganado por el jugador en sesión en UNA fecha puntual — null si no hay registro de Cobranza
   // para esa fecha (torneo futuro, o pasado pero todavía no capturado en Game Night). 43ª entrega: una
@@ -439,10 +440,6 @@ export default function Calendario({ session, perfiles }) {
             </span>
             <span className={"badge " + estatusTorneo().clase}>{estatusTorneo().texto}</span>
             <span className="cal-top-jugador">{session.nombre}</span>
-          </div>
-          <div className="cal-ganancia-box">
-            <span className="cal-ganancia-label">Ganancias acumuladas</span>
-            <span className="cal-ganancia-value">{money(gananciasAcumuladas)}</span>
           </div>
         </div>
 

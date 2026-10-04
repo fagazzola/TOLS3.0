@@ -275,27 +275,16 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, depositosTorneo, depo
   return filas;
 }
 
-export function filasParaExcel({ movimientos, resumen, pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, torneos }) {
-  // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de "Cobranza_Resumen" — ese dato
-  // (con el fix de la 56ª, `celdaTexto()`) ya solo vive en la hoja "Jugadores"
-  // (`filasJugadoresUnificadas()` en msgraph.js), que es donde se edita desde Mi Perfil/Cobranza. Tenerlo
-  // en dos hojas era justo lo que Federico no quería. `syncCobranza()` en msgraph.js limpia las columnas
-  // C/D/E que antes ocupaban estos tres campos (`minClearCols: 8`) para que no se queden con el último
-  // valor que alcanzaron a tener.
-  const resumenRows = Object.values(resumen)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre))
-    .map((r) => [r.correo, r.nombre, r.pago, r.deposito, r.saldo]);
-  const movimientoRows = [...movimientos]
-    .sort((a, b) => (a.campeonato + a.fecha).localeCompare(b.campeonato + b.fecha))
-    .map((m) => [
-      m.campeonato, m.fecha, m.tipo, m.correo,
-      m.buyInPagado ? "Sí" : "No", m.rebuys, m.addonComprado ? "Sí" : "No",
-      m.montoBuyIn, m.montoRebuys, m.montoAddOn, m.montoTotal,
-      m.pagado ? "Sí" : "No", m.fechaPago, m.lugar ?? "",
-      m.premioPartida, m.premioCampeonato, m.balanceNeto,
-    ]);
+// 93ª entrega: hasta la 92ª, esta función también armaba `resumenRows`/`movimientoRows` — el espejo del
+// modelo VIEJO de movimientos (Buy-in/Re-buys/Add-on, puente de Game Night) para las hojas
+// "Cobranza_Resumen"/"Cobranza". Federico confirmó, tras revisar el Excel real, que esas dos hojas
+// siempre están vacías (ese modelo quedó deprecado desde que Game Night se ocultó, 66ª entrega, y nunca
+// se usó en producción) y pidió dejar de escribirlas para poder borrarlas del Excel maestro sin riesgo.
+// `filasParaExcel()` quedó así en una sola pieza real, `confirmadosRows` (92ª entrega) — el resto de la
+// firma de esta función (`movimientos`/`resumen` ya no se usan directo acá) se simplificó acorde.
+export function filasParaExcel({ resumen, pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, torneos }) {
   const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, depositosTorneo, depositosGasto, resumen, torneos });
-  return { resumenRows, movimientoRows, confirmadosRows };
+  return { confirmadosRows };
 }
 
 // Punto de integración con Game Night (MOD 5): cada torneo en vivo llama a esto para reflejar en

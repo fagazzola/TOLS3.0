@@ -497,32 +497,32 @@ export function syncJugadores(jugadores) {
   return safe(() => nucleoSyncJugadores(jugadores));
 }
 
-// espeja el módulo de Cobranza en las mismas 2 hojas que ya se armaron a mano en el Excel maestro
-// (Cobranza_Resumen y Cobranza) — a partir de esta entrega esas hojas dejan de tener fórmulas propias
-// y pasan a ser un espejo de solo lectura como el resto del sitio: cada guardado desde el Tesorero
-// las vuelve a escribir completas con los valores ya calculados.
-export async function nucleoSyncCobranza({ resumenRows, movimientoRows, confirmadosRows }) {
-  // 58ª entrega: Federico pidió quitar Cuenta/Banco/Tipo de Cuenta de esta hoja — esos datos ya viven
-  // (y se editan) solo en la hoja "Jugadores" (ver `filasJugadoresUnificadas()` más abajo). `resumenRows`
-  // ya no trae esas 3 columnas (ver `filasParaExcel()` en cobranza.js), pero `minClearCols: 8` asegura
-  // que las columnas C/D/E, que hasta la 57ª entrega tenían esos datos (y F/G/H el pago/depósito/saldo
-  // corrido), queden vacías en vez de con lo último que se alcanzó a escribir ahí.
-  await writeSheetTable("Cobranza_Resumen", resumenRows, { minClearCols: 8 });
-  await writeSheetTable("Cobranza", movimientoRows);
-  // 92ª entrega: "Cobranza_Resumen"/"Cobranza" (de arriba) reflejan el modelo VIEJO de movimientos
-  // (Buy-in/Re-buys/Add-on, puente de Game Night) — nunca tuvieron columnas para los 4 mapas nuevos de
-  // "Registrar pagos y depósitos" (pagosTorneo/pagosInscripcion/depositosTorneo/depositosGasto, desde
-  // la 76ª entrega), que es de donde sale realmente "Pagos y depósitos confirmados" en pantalla. Hoja
-  // nueva, igual que las de Game Night (MOD 5) — se crea sola la primera vez (`asegurarHoja`), nunca
-  // depende de que Federico la arme a mano de antemano.
+// espeja el módulo de Cobranza en Excel — SOLO en "Cobranza_Confirmados" desde la 93ª entrega.
+//
+// 58ª→92ª entrega (histórico): hasta la 92ª, esta función también escribía "Cobranza_Resumen" y
+// "Cobranza" — las 2 hojas que Federico armó a mano en el Excel maestro para el modelo VIEJO de
+// movimientos (Buy-in/Re-buys/Add-on, puente de Game Night). Ese modelo quedó deprecado desde que
+// Game Night se ocultó (66ª entrega) y nunca se usó en producción, así que esas 2 hojas siempre
+// estuvieron vacías — Federico lo confirmó al revisar el Excel real después de la 92ª entrega y pidió
+// dejar de escribirlas para poder borrarlas sin que la próxima sincronización falle (`writeSheetTable`
+// asume que la hoja YA existe — a diferencia de `asegurarHoja`, no la crea sola — así que mientras el
+// código siguiera escribiéndolas, borrarlas de Excel habría roto el próximo sync con un error de "hoja
+// no encontrada").
+//
+// 93ª entrega: se quitaron esas 2 escrituras. `resumenRows`/`movimientoRows` (ver `filasParaExcel()` en
+// cobranza.js) ya no se calculan ni se pasan — toda la información real de pagos/depósitos vive en
+// "Cobranza_Confirmados" (92ª entrega), hoja que SÍ se crea sola (`asegurarHoja`) y nunca depende de que
+// Federico la arme a mano de antemano, así que puede borrarse y recrearse sin problema en cualquier
+// momento.
+export async function nucleoSyncCobranza({ confirmadosRows }) {
   await asegurarHoja("Cobranza_Confirmados", [
     "Campeonato", "Tipo", "Motivo", "Correo Electrónico", "Alias PokerStars / Nombre",
     "Monto Esperado", "Monto Real", "Fecha", "Hora", "Registrado En",
   ]);
   await writeSheetTable("Cobranza_Confirmados", confirmadosRows || [], { maxRows: 800 });
 }
-export function syncCobranza({ resumenRows, movimientoRows, confirmadosRows }) {
-  return safe(() => nucleoSyncCobranza({ resumenRows, movimientoRows, confirmadosRows }));
+export function syncCobranza({ confirmadosRows }) {
+  return safe(() => nucleoSyncCobranza({ confirmadosRows }));
 }
 
 // Game Night (MOD 5): a diferencia del resto de los módulos, sus 2 hojas se crean solas la primera

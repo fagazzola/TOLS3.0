@@ -257,18 +257,23 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, depositosTorneo, depo
       aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
+  // 94ª entrega: a pedido de Federico, en ESTA hoja (Cobranza_Confirmados) un Depósito se escribe en
+  // negativo — son salidas de dinero de TOLS — para que Monto Esperado/Monto Real reflejen esa
+  // perspectiva directo en el Excel. Esto es puramente de presentación en el espejo: `depositosTorneo`/
+  // `depositosGasto` en Blobs, y todo lo que la pantalla calcula a partir de ellos (Cobranza.jsx,
+  // "Centavos acumulados", etc.), siguen guardando/usando los montos tal cual, siempre positivos.
   for (const [clave, reg] of Object.entries(depositosTorneo || {})) {
     const [campeonato, fecha, correo] = clave.split("|");
     filas.push([
       campeonato, "Depósito", etiquetaTorneoExcel(numeracion, campeonato, fecha), correo,
-      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+      aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
   for (const [clave, reg] of Object.entries(depositosGasto || {})) {
     const [campeonato, concepto, correo] = clave.split("|");
     filas.push([
       campeonato, "Depósito", concepto, correo,
-      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+      aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
   filas.sort((a, b) => (a[0] + (a[9] || "")).localeCompare(b[0] + (b[9] || "")));

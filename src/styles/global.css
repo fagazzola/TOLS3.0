@@ -247,6 +247,16 @@ h1 {
 .section-sub { font-size: 13px; color: var(--ink-soft); margin: 10px 0 14px; line-height: 1.5; }
 .subhead { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 22px 0 10px; }
 
+/* 97ª entrega: "Finanzas generales" (Cobranza.jsx) se rediseñó para calzar con el Excel de Federico —
+   layout a dos columnas (INGRESOS/EGRESOS a la izquierda, PASIVOS a la derecha), apiladas en pantallas
+   angostas. `.stats` dentro de cada columna sigue siendo de 1 columna (no 3) para que los cuadros no
+   queden demasiado angostos. */
+.finanzas-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+.finanzas-cols .stats { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 900px) {
+  .finanzas-cols { grid-template-columns: 1fr; }
+}
+
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 40px 0 44px; }
 .stat {
   position: relative; background: var(--surface); padding: 24px 20px 18px;

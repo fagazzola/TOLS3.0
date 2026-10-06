@@ -626,7 +626,7 @@ export default function Cobranza({ session, perfiles }) {
   const adeudaJugador = correoEstado ? data?.adeudos?.[correoEstado] : false;
 
   // 76ª entrega: totales de pagos/depósitos ya CONFIRMADOS por el Tesorero (los 3 mapas nuevos) —
-  // desde la 96ª entrega, son la base de TODA "Finanzas generales" (ver más abajo), no solo de
+  // desde la 96ª/97ª entrega, son la base de TODA "Finanzas generales" (ver más abajo), no solo de
   // "Estado de cuenta".
   function sumaMapaConfirmado(mapa, filtroCorreo) {
     const prefijo = `${campeonatoSel}|`;
@@ -642,7 +642,6 @@ export default function Cobranza({ session, perfiles }) {
   }
 
   const totalPagosConfirmados = sumaMapaConfirmado(data?.pagosTorneo);
-  const totalDepositosConfirmados = sumaMapaConfirmado(data?.depositosTorneo) + sumaMapaConfirmado(data?.depositosGasto);
 
   // 78ª entrega: "Centavos acumulados" — los jugadores pagan su Debe + su Número de Referencia como
   // centavos (ej. Debe $900, referencia 15 → paga $900.15), para que el Tesorero pueda identificar quién
@@ -665,70 +664,68 @@ export default function Cobranza({ session, perfiles }) {
   }
   const centavosAcumulados = centavosAcumuladosCampeonato();
 
-  // 96ª entrega: rediseño completo de "Finanzas generales" a pedido de Federico. Reemplaza los cuadros
-  // viejos (Recaudado cobrado/pendiente, Premios pagados, Gastos fijos, Fondo acumulado estimado, Saldo
-  // neto — todos calculados sobre `movimientos`, el modelo deprecado desde la 66ª entrega que nunca se
-  // pobló en producción, así que siempre mostraban $0 reales) por cuatro grupos, todos calculados sobre
-  // los mapas REALMENTE confirmados por el Tesorero (pagosTorneo/depositosTorneo/depositosGasto/
-  // pagosInscripcion) y los montos que ya calcula Estadísticas por jugador y torneo.
+  // 97ª entrega: "Finanzas generales" se vuelve a rediseñar, esta vez para calzar EXACTO con el Excel
+  // que Federico adjuntó (hoja "Finanzas") — reemplaza el diseño de la 96ª entrega (3 cuadros + "Otros
+  // ingresos" + "Gastos operativos" sobre depósitos confirmados + "Finanzas por categoría" con Buy-in/
+  // Re-buys/Add-on, que no existe en el Excel y se eliminó). Sigue calculando todo sobre los mismos
+  // mapas REALMENTE confirmados por el Tesorero (pagosTorneo/depositosTorneo/depositosGasto/
+  // pagosInscripcion) y los montos que ya calcula Estadísticas por jugador y torneo — ver respuestas de
+  // Federico a las 7 preguntas de aclaración (quedan documentadas en el mapa del proyecto, sección de
+  // esta entrega) para el detalle de cada fórmula.
 
-  // Inscripciones confirmadas (separadas de "Ingresos confirmados (Pagos)" porque Federico las pidió
-  // en su propio cuadro, dentro de "Otros ingresos" — si se sumaran también arriba, se contarían dos veces).
+  // Inscripciones confirmadas (separadas de "Ingresos confirmados (pagos)" — ver más abajo, "Subtotal
+  // ingresos" las vuelve a sumar junto con los pagos de torneo).
   const totalInscripcionesConfirmadas = sumaMapaConfirmado(data?.pagosInscripcion);
 
-  // Fondo separado para el acumulado: mismo % que ya configura el Tablero de Control
-  // (premios.porTorneo.pctAcumulado), pero aplicado sobre el total REAL de "Ingresos confirmados"
-  // (antes se aplicaba sobre `movimientos`, que siempre daba $0 en producción — ver nota arriba).
-  const pctAcumuladoActivo = Number(tableroMapa?.[campeonatoSel]?.premios?.porTorneo?.pctAcumulado) || 0;
-  const fondoAcumuladoReservado = (totalPagosConfirmados * pctAcumuladoActivo) / 100;
-
-  // Gastos operativos: un cuadro por cada concepto configurado en el Tablero de Control (normalmente
-  // Tesorero/Pulsera/Hosting del sitio, tal como Federico los haya nombrado ahí — `gastosCampeonatoActivo`
-  // ya se lee más arriba, reutilizado también por el combo de Depósito) con el total ya depositado y
-  // confirmado para ese concepto específico en este campeonato.
-  function totalGastoConfirmado(concepto) {
-    const prefijo = `${campeonatoSel}|${concepto}|`;
-    let total = 0;
-    for (const [clave, reg] of Object.entries(data?.depositosGasto || {})) {
-      if (clave.startsWith(prefijo)) total += Number(reg.monto) || 0;
-    }
-    return total;
-  }
-  const gastosOperativos = gastosCampeonatoActivo.map((g) => ({ concepto: g.concepto, total: totalGastoConfirmado(g.concepto) }));
-
-  // "Finanzas por categoría": desglosa los MISMOS pagos/depósitos de torneo ya confirmados (no un
-  // cálculo aparte) usando los montos que Estadísticas ya calculó para ese jugador en ese torneo —
-  // debeBuyIn/debeRebuys/debeAddon para un Pago, premioLugar/premioBurbuja/premioMano para un Depósito.
-  // Por construcción, buy-in + re-buys + add-on suma (salvo los centavos de referencia, que van aparte
-  // en "Otros ingresos") el mismo total que "Ingresos confirmados (Pagos)" de arriba.
-  function categoriasPagosTorneo() {
-    const cats = { buyIn: 0, rebuys: 0, addon: 0 };
+  // Ingresos confirmados (pagos) por tipo de torneo — Federico pidió mostrarlos por separado
+  // ("torneos regulares" / "torneos main", como en el Excel).
+  function totalPagosTorneoPorTipo() {
+    const result = { Regular: 0, Main: 0 };
     const prefijo = `${campeonatoSel}|`;
     for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
       if (!clave.startsWith(prefijo)) continue;
       const partes = clave.split("|");
       const fecha = partes[1];
-      const correo = partes[partes.length - 1];
       const torneo = estData?.torneos?.[campeonatoSel]?.[fecha];
-      const j = torneo ? jugadorEnTorneo(torneo, { correo }) : null;
-      if (!j) continue;
-      cats.buyIn += Number(j.debeBuyIn) || 0;
-      cats.rebuys += Number(j.debeRebuys) || 0;
-      cats.addon += Number(j.debeAddon) || 0;
+      if (!torneo) continue;
+      const tipo = torneo.tipo === "Main" ? "Main" : "Regular";
+      result[tipo] += Number(reg.monto) || 0;
     }
-    return cats;
+    return result;
   }
-  const catPagosTorneo = categoriasPagosTorneo();
+  const { Regular: totalPagosRegular, Main: totalPagosMain } = totalPagosTorneoPorTipo();
 
-  // Depósitos por premios de torneo, separados por tipo (Regular/Main) — "regulares" por posición
-  // (1º/2º/3er lugar; cualquier otro lugar pagado cae en "otros", para no esconder dinero si el Tablero
-  // llegara a configurar más de 3 lugares) y "main" por los dos bonos propios de un Main (burbuja/mejor
-  // mano); el premio por POSICIÓN dentro de un Main (si el Tablero lo configura) se muestra aparte,
-  // como "Lugar premiado (Main)", para no perderlo — Federico no lo pidió explícitamente separado de
-  // burbuja/mejor mano, pero tampoco pidió excluirlo, así que se desglosa igual en vez de omitirlo.
+  // Respuestas de Federico (preguntas 1 y 2): el 15% (Provisión para el acumulado) y el 85%
+  // (Disponible para repartir) se calculan SOLO sobre pagos de torneos (regulares + main) — excluyen la
+  // inscripción. `totalPagosConfirmados` (arriba, "Estado de cuenta") ya suma exactamente eso (todo
+  // `pagosTorneo` del campeonato, sin tocar `pagosInscripcion`), así que no cambia la fórmula del fondo
+  // reservado, ya estaba bien desde la 96ª entrega — solo se agrega "Disponible (85%)" como el
+  // complemento, para mostrarlo en la vista.
+  const pctAcumuladoActivo = Number(tableroMapa?.[campeonatoSel]?.premios?.porTorneo?.pctAcumulado) || 0;
+  const fondoAcumuladoReservado = (totalPagosConfirmados * pctAcumuladoActivo) / 100; // "Provisión 15%"
+  const disponiblePagosTorneo = totalPagosConfirmados - fondoAcumuladoReservado; // "Disponible (85%)"
+
+  // "Subtotal ingresos" del Excel (A6: =B2+B4, pero en el archivo de Federico faltaba sumar B5/torneos
+  // main — ejemplo en el que Main daba $0, así que el faltante no se notaba; acá se suma siempre).
+  const subtotalIngresos = totalInscripcionesConfirmadas + totalPagosRegular + totalPagosMain;
+
+  // Gastos operativos: a diferencia de la 96ª entrega (que mostraba lo ya DEPOSITADO y confirmado por
+  // concepto), Federico aclaró (pregunta 3) que esto es el PRESUPUESTO fijo configurado en el Tablero de
+  // Control (`gastosCampeonato` — Tesorero/Hosting fijos, Pulsera puede variar), no lo efectivamente
+  // depositado — por eso ahora usa `g.monto` (el presupuesto) en vez de un total confirmado.
+  const gastosOperativos = gastosCampeonatoActivo.map((g) => ({ concepto: g.concepto, total: Number(g.monto) || 0 }));
+  const totalGastosOperativos = gastosOperativos.reduce((s, g) => s + g.total, 0);
+
+  // Depósitos por premios de torneo (egresos), separados por tipo (Regular/Main) y por posición —
+  // 1º/2º/3er lugar (cualquier otro lugar pagado cae en "otros", para no esconder dinero si el Tablero
+  // llegara a configurar más de 3 lugares). Para Main, además de la posición se desglosan los dos bonos
+  // fijos del torneo (burbuja / mejor mano) — Federico confirmó (pregunta 6) que esto YA se calcula bien
+  // server-side (Estadísticas descuenta primero los 2 fijos y reparte el resto por %), así que acá solo
+  // se re-categoriza lo que ya viene calculado por jugador, ahora separando el "lugar" del Main por
+  // posición igual que en los torneos regulares (antes se juntaba todo en un solo cuadro).
   function categoriasDepositosTorneo() {
     const regular = { 1: 0, 2: 0, 3: 0, otros: 0 };
-    const main = { lugar: 0, burbuja: 0, mano: 0 };
+    const main = { 1: 0, 2: 0, 3: 0, otros: 0, burbuja: 0, mano: 0 };
     const prefijo = `${campeonatoSel}|`;
     for (const [clave, reg] of Object.entries(data?.depositosTorneo || {})) {
       if (!clave.startsWith(prefijo)) continue;
@@ -738,30 +735,64 @@ export default function Cobranza({ session, perfiles }) {
       const torneo = estData?.torneos?.[campeonatoSel]?.[fecha];
       const j = torneo ? jugadorEnTorneo(torneo, { correo }) : null;
       if (!j || !torneo) continue;
+      const lugar = Number(j.lugar) || 0;
+      const premioLugar = Number(j.premioLugar) || 0;
+      const bucket = torneo.tipo === "Main" ? main : regular;
+      if (lugar === 1) bucket[1] += premioLugar;
+      else if (lugar === 2) bucket[2] += premioLugar;
+      else if (lugar === 3) bucket[3] += premioLugar;
+      else bucket.otros += premioLugar;
       if (torneo.tipo === "Main") {
-        main.lugar += Number(j.premioLugar) || 0;
         main.burbuja += Number(j.premioBurbuja) || 0;
         main.mano += Number(j.premioMano) || 0;
-      } else {
-        const lugar = Number(j.lugar) || 0;
-        const premio = Number(j.premioLugar) || 0;
-        if (lugar === 1) regular[1] += premio;
-        else if (lugar === 2) regular[2] += premio;
-        else if (lugar === 3) regular[3] += premio;
-        else regular.otros += premio;
       }
     }
     return { regular, main };
   }
   const { regular: catPremiosRegular, main: catPremiosMain } = categoriasDepositosTorneo();
+  const subtotalEgresosRegular = catPremiosRegular[1] + catPremiosRegular[2] + catPremiosRegular[3] + catPremiosRegular.otros;
+  const subtotalEgresosMain =
+    catPremiosMain[1] + catPremiosMain[2] + catPremiosMain[3] + catPremiosMain.otros + catPremiosMain.burbuja + catPremiosMain.mano;
+  const subtotalEgresos = subtotalEgresosRegular + subtotalEgresosMain; // premios de torneo YA depositados/confirmados
 
-  // Depósitos por premios en acumulado (final del campeonato): a diferencia de las categorías de
-  // arriba, esto NO tiene todavía ninguna forma de confirmarse desde "Registrar pagos y depósitos" —
-  // "premios.porCampeonato" en el Tablero de Control es solo la CONFIGURACIÓN (% por lugar + Rey
-  // Killer), nunca se calculó ni se guardó un monto real de este reparto en ningún lado del sitio. Se
-  // muestran los cuadros (uno por lugar configurado, dinámico — no se asume que sean siempre 5) en $0,
-  // con una nota explícita abajo, en vez de omitirlos o inventar un número.
+  // "BALANCE GENERAL" / "Existente en la cuenta de banco" del Excel: en el archivo de Federico son
+  // literalmente la misma fórmula (B23 y E17 ambas =B6+B21) — acá también se calculan una sola vez.
+  const balanceGeneral = subtotalIngresos - subtotalEgresos;
+
+  // Acum. Campeonato (al momento): el % por lugar configurado en el Tablero de Control
+  // (premios.porCampeonato.lugares, incluye "Rey Killer" como un lugar más con su propio %) aplicado
+  // sobre la Provisión del 15% ya reservada — pregunta 5 de Federico ("lo debe calcular automáticamente
+  // el sitio, para validar la cuenta de banco"). Es el monto RESERVADO por lugar, no todavía un pago
+  // confirmado (sigue sin existir una forma de registrar el pago real de este premio — ver nota al pie).
   const premiosCampeonatoConfig = tableroMapa?.[campeonatoSel]?.premios?.porCampeonato?.lugares || [];
+  const acumCampeonatoPorLugar = premiosCampeonatoConfig.map((l) => ({
+    label: l.label,
+    reyKiller: Boolean(l.reyKiller),
+    monto: (fondoAcumuladoReservado * (Number(l.pct) || 0)) / 100,
+  }));
+  const acumCampeonatoAlMomento = acumCampeonatoPorLugar.reduce((s, l) => s + l.monto, 0);
+
+  // Centavos acumulados: Federico confirmó (pregunta 4) que se muestra en positivo (es un ingreso extra
+  // a favor de TOLS, no un pasivo) — mismo cálculo que ya existía desde la 78ª entrega.
+  function centavosAcumuladosCampeonato() {
+    const prefijo = `${campeonatoSel}|`;
+    let total = 0;
+    for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const remanente = (Number(reg.monto) || 0) - (Number(reg.montoEsperado) || 0);
+      if (remanente > 0) total += remanente;
+    }
+    return total;
+  }
+  const centavosAcumulados = centavosAcumuladosCampeonato();
+
+  // Validación de cuenta de banco (pregunta 5): "Existente en la cuenta de banco" (=balanceGeneral,
+  // dinero real que ya entró y salió) menos lo que todavía hay que reservar (Provisión 15%) y los
+  // gastos operativos presupuestados que todavía están pendientes de pagar — el remanente ("Diff") es
+  // lo que debería quedar libre si se pagara todo lo pendiente ahora mismo.
+  const reservarAcum = -fondoAcumuladoReservado;
+  const gastosPendientes = -totalGastosOperativos;
+  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes;
 
   const hoy = new Date();
   const fechaHoyStr = `${String(hoy.getDate()).padStart(2, "0")}/${String(hoy.getMonth() + 1).padStart(2, "0")}/${hoy.getFullYear()}`;
@@ -1417,143 +1448,200 @@ export default function Cobranza({ session, perfiles }) {
           <div className="section-head">
             <div className="section-title">Finanzas generales — {campeonatoSel}</div>
           </div>
-
-          <div className="stats">
-            <div className="stat">
-              <div className="stat-label">Ingresos confirmados (Pagos)</div>
-              <div className="stat-value"><Monto valor={totalPagosConfirmados} /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Egresos confirmados (Depósitos)</div>
-              <div className="stat-value"><Monto valor={totalDepositosConfirmados} forzarNegativo /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Balance de Cobranza (al {fechaHoyStr})</div>
-              <div className="stat-value"><Monto valor={totalPagosConfirmados - totalDepositosConfirmados} /></div>
-            </div>
+          <div className="section-sub" style={{ marginTop: 0 }}>
+            Al {fechaHoyStr}. Mismo formato que la hoja "Finanzas" que Federico armó para llevar el control —
+            calculado siempre sobre los pagos y depósitos ya confirmados desde "Registrar pagos y depósitos" y
+            los montos que ya calcula Estadísticas por jugador y torneo.
           </div>
 
-          <div className="subhead">Otros ingresos</div>
-          <div className="stats">
-            <div className="stat">
-              <div className="stat-label">Inscripciones</div>
-              <div className="stat-value"><Monto valor={totalInscripcionesConfirmadas} /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Separado para el acumulado</div>
-              <div className="stat-value"><Monto valor={fondoAcumuladoReservado} /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Centavos acumulados</div>
-              <div className="stat-value"><Monto valor={centavosAcumulados} centavos /></div>
-            </div>
-          </div>
-
-          <div className="subhead">Gastos operativos</div>
-          <div className="stats">
-            {gastosOperativos.map((g) => (
-              <div className="stat" key={g.concepto}>
-                <div className="stat-label">{g.concepto}</div>
-                <div className="stat-value"><Monto valor={g.total} forzarNegativo /></div>
+          <div className="finanzas-cols">
+            {/* ───────── columna izquierda: INGRESOS / EGRESOS ───────── */}
+            <div>
+              <div className="subhead" style={{ marginTop: 0 }}>Ingresos</div>
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Inscripciones reales</div>
+                  <div className="stat-value"><Monto valor={totalInscripcionesConfirmadas} /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Ingresos confirmados — torneos regulares</div>
+                  <div className="stat-value"><Monto valor={totalPagosRegular} /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Ingresos confirmados — torneos main</div>
+                  <div className="stat-value"><Monto valor={totalPagosMain} /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Subtotal ingresos</div>
+                  <div className="stat-value"><Monto valor={subtotalIngresos} /></div>
+                </div>
               </div>
-            ))}
-            {gastosOperativos.length === 0 && (
-              <div className="stat">
-                <div className="stat-label">Sin conceptos configurados</div>
-                <div className="stat-value">—</div>
+              <div className="section-sub" style={{ margin: "0 0 20px" }}>
+                El 15%/85% de abajo se calcula solo sobre pagos de torneos (regulares + main) — excluye la inscripción.
               </div>
-            )}
-          </div>
-
-          <div className="subhead">Finanzas por categoría</div>
-
-          <div className="section-sub" style={{ margin: "0 0 10px" }}>Pagos por participar en torneos</div>
-          <div className="stats" style={{ margin: "0 0 30px" }}>
-            <div className="stat">
-              <div className="stat-label">Buy-in</div>
-              <div className="stat-value"><Monto valor={catPagosTorneo.buyIn} /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Re-buys</div>
-              <div className="stat-value"><Monto valor={catPagosTorneo.rebuys} /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Add-on</div>
-              <div className="stat-value"><Monto valor={catPagosTorneo.addon} /></div>
-            </div>
-          </div>
-
-          <div className="section-sub" style={{ margin: "0 0 10px" }}>Depósitos por premios en torneos regulares</div>
-          <div className="stats" style={{ margin: "0 0 30px" }}>
-            <div className="stat">
-              <div className="stat-label">1er lugar</div>
-              <div className="stat-value"><Monto valor={catPremiosRegular[1]} forzarNegativo /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">2do lugar</div>
-              <div className="stat-value"><Monto valor={catPremiosRegular[2]} forzarNegativo /></div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">3er lugar</div>
-              <div className="stat-value"><Monto valor={catPremiosRegular[3]} forzarNegativo /></div>
-            </div>
-            {catPremiosRegular.otros > 0 && (
-              <div className="stat">
-                <div className="stat-label">Otros lugares pagados</div>
-                <div className="stat-value"><Monto valor={catPremiosRegular.otros} forzarNegativo /></div>
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Provisión para acum. Camp. (15%)</div>
+                  <div className="stat-value"><Monto valor={fondoAcumuladoReservado} forzarNegativo /></div>
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="section-sub" style={{ margin: "0 0 10px" }}>Depósitos por premios en torneos Main</div>
-          <div className="stats" style={{ margin: "0 0 30px" }}>
-            <div className="stat">
-              <div className="stat-label">Burbuja</div>
-              <div className="stat-value"><Monto valor={catPremiosMain.burbuja} forzarNegativo /></div>
+              <div className="subhead">Egresos</div>
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Disponible (85%)</div>
+                  <div className="stat-value"><Monto valor={disponiblePagosTorneo} /></div>
+                </div>
+              </div>
+
+              <div className="section-sub" style={{ margin: "20px 0 10px" }}>Torneos regulares</div>
+              <div className="stats" style={{ margin: "0 0 20px" }}>
+                <div className="stat">
+                  <div className="stat-label">1er lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosRegular[1]} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">2do lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosRegular[2]} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">3er lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosRegular[3]} forzarNegativo /></div>
+                </div>
+                {catPremiosRegular.otros > 0 && (
+                  <div className="stat">
+                    <div className="stat-label">Otros lugares pagados</div>
+                    <div className="stat-value"><Monto valor={catPremiosRegular.otros} forzarNegativo /></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="section-sub" style={{ margin: "0 0 10px" }}>Torneos main</div>
+              <div className="stats" style={{ margin: "0 0 20px" }}>
+                <div className="stat">
+                  <div className="stat-label">1er lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosMain[1]} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">2do lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosMain[2]} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">3er lugar</div>
+                  <div className="stat-value"><Monto valor={catPremiosMain[3]} forzarNegativo /></div>
+                </div>
+                {catPremiosMain.otros > 0 && (
+                  <div className="stat">
+                    <div className="stat-label">Otros lugares pagados</div>
+                    <div className="stat-value"><Monto valor={catPremiosMain.otros} forzarNegativo /></div>
+                  </div>
+                )}
+                <div className="stat">
+                  <div className="stat-label">Burbuja</div>
+                  <div className="stat-value"><Monto valor={catPremiosMain.burbuja} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Mejor mano</div>
+                  <div className="stat-value"><Monto valor={catPremiosMain.mano} forzarNegativo /></div>
+                </div>
+              </div>
+
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Subtotal egresos</div>
+                  <div className="stat-value"><Monto valor={subtotalEgresos} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Balance general</div>
+                  <div className="stat-value"><Monto valor={balanceGeneral} /></div>
+                </div>
+              </div>
             </div>
-            <div className="stat">
-              <div className="stat-label">Mejor mano</div>
-              <div className="stat-value"><Monto valor={catPremiosMain.mano} forzarNegativo /></div>
+
+            {/* ───────── columna derecha: PASIVOS / validación de cuenta de banco ───────── */}
+            <div>
+              <div className="subhead" style={{ marginTop: 0 }}>Gastos operativos (de la inscripción)</div>
+              <div className="stats">
+                {gastosOperativos.map((g) => (
+                  <div className="stat" key={g.concepto}>
+                    <div className="stat-label">{g.concepto}</div>
+                    <div className="stat-value"><Monto valor={g.total} forzarNegativo /></div>
+                  </div>
+                ))}
+                {gastosOperativos.length === 0 && (
+                  <div className="stat">
+                    <div className="stat-label">Sin conceptos configurados</div>
+                    <div className="stat-value">—</div>
+                  </div>
+                )}
+                <div className="stat">
+                  <div className="stat-label">Subtotal gastos operativos</div>
+                  <div className="stat-value"><Monto valor={totalGastosOperativos} forzarNegativo /></div>
+                </div>
+              </div>
+              <div className="section-sub" style={{ margin: "0 0 20px" }}>
+                Presupuesto configurado en el Tablero de Control (Tesorero y Hosting son fijos, la Pulsera puede
+                variar), no lo efectivamente depositado — se toma inicialmente de las inscripciones.
+              </div>
+
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Centavos acumulados</div>
+                  <div className="stat-value"><Monto valor={centavosAcumulados} centavos /></div>
+                </div>
+              </div>
+
+              <div className="subhead">Acum. Campeonato (al momento)</div>
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Total reservado</div>
+                  <div className="stat-value"><Monto valor={acumCampeonatoAlMomento} forzarNegativo /></div>
+                </div>
+                {acumCampeonatoPorLugar.map((l, i) => (
+                  <div className="stat" key={i}>
+                    <div className="stat-label">{l.reyKiller ? "Rey Killer" : l.label}</div>
+                    <div className="stat-value"><Monto valor={l.monto} forzarNegativo /></div>
+                  </div>
+                ))}
+                {acumCampeonatoPorLugar.length === 0 && (
+                  <div className="stat">
+                    <div className="stat-label">Sin lugares configurados</div>
+                    <div className="stat-value">—</div>
+                  </div>
+                )}
+              </div>
+              <div className="section-sub">
+                Es el monto ya RESERVADO por lugar (Provisión del 15% repartida según los % del Tablero de
+                Control), no un pago confirmado — todavía no hay ninguna forma de registrar desde "Registrar
+                pagos y depósitos" el pago real de este premio (de fin de campeonato). Si quieres llevar esto
+                en el sitio, lo podemos agregar como un motivo de Depósito nuevo en una próxima entrega.
+              </div>
+
+              <div className="subhead">Ingresos − Egresos</div>
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-label">Existente en la cuenta de banco</div>
+                  <div className="stat-value"><Monto valor={balanceGeneral} /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Reservar</div>
+                  <div className="stat-value"><Monto valor={reservarAcum} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Gastos pendientes</div>
+                  <div className="stat-value"><Monto valor={gastosPendientes} forzarNegativo /></div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Diff</div>
+                  <div className="stat-value"><Monto valor={diffCuenta} /></div>
+                </div>
+              </div>
+              <div className="section-sub">
+                "Existente en la cuenta de banco" es el dinero real que ya entró y salió (Subtotal ingresos −
+                Subtotal egresos). "Diff" lo valida: le resta lo que todavía hay que reservar para el acumulado
+                y los gastos operativos presupuestados que todavía están pendientes de pagar.
+              </div>
             </div>
-            {catPremiosMain.lugar > 0 && (
-              <div className="stat">
-                <div className="stat-label">Lugar premiado (Main)</div>
-                <div className="stat-value"><Monto valor={catPremiosMain.lugar} forzarNegativo /></div>
-              </div>
-            )}
-          </div>
-
-          <div className="section-sub" style={{ margin: "0 0 10px" }}>Depósitos por premios en acumulado (final del campeonato)</div>
-          <div className="stats" style={{ margin: "0 0 10px" }}>
-            {premiosCampeonatoConfig.map((l, i) => (
-              <div className="stat" key={i}>
-                <div className="stat-label">{l.label}</div>
-                <div className="stat-value">{money(0)}</div>
-              </div>
-            ))}
-            {premiosCampeonatoConfig.length === 0 && (
-              <div className="stat">
-                <div className="stat-label">Sin lugares configurados</div>
-                <div className="stat-value">—</div>
-              </div>
-            )}
-          </div>
-          <div className="section-sub">
-            Todavía no hay ninguna forma de confirmar un depósito de premio acumulado (de fin de campeonato)
-            desde "Registrar pagos y depósitos" — por eso estos cuadros siempre muestran $0, aunque el
-            Tablero de Control ya tenga configurados los % de reparto. Si quieres llevar esto en el sitio,
-            lo podemos agregar como un motivo de Depósito nuevo en una próxima entrega.
-          </div>
-
-          <div className="section-sub">
-            "Ingresos/Egresos confirmados" y "Balance de Cobranza" solo cuentan los pagos y depósitos de
-            torneo ya confirmados desde "Registrar pagos y depósitos" — las inscripciones, el fondo separado
-            para el acumulado y los centavos de referencia se muestran aparte en "Otros ingresos", sin
-            mezclarse con ese balance. "Finanzas por categoría" desglosa esos mismos ingresos/egresos
-            confirmados por tipo, usando los montos que ya calcula Estadísticas para cada jugador y torneo —
-            por eso buy-in + re-buys + add-on no incluye los centavos de referencia (van en "Otros
-            ingresos"), y un lugar pagado fuera de 1º/2º/3er lugar en un torneo regular, o el premio por
-            posición dentro de un Main (si lo hay), se desglosan en su propio cuadro en vez de perderse.
           </div>
         </div>
       )}

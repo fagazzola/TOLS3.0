@@ -68,6 +68,17 @@ function normalizarTorneoEst(t) {
     publicadoEn: String(t?.publicadoEn || "").trim(),
     jugadores,
     logKillersNoResueltos: Array.isArray(t?.logKillersNoResueltos) ? t.logKillersNoResueltos : [],
+    // 97ª entrega: corrección manual del administrador general sobre el total de Kills de cada jugador,
+    // una vez publicado el torneo — Federico reportó quejas de jugadores sobre ese número y pidió poder
+    // ajustarlo directamente (acción "editarKills" más abajo), acotado entre 0 y (jugadores del
+    // torneo - 1). Cuando un alias tiene entrada acá, pisa el tally calculado a partir de `eliminadoPor`/
+    // `logKillersNoResueltos` (ver `killsPorAliasTorneo` en Estadisticas.jsx) — el resto de los alias
+    // sigue mostrando el tally calculado sin cambios.
+    killsManual: Object.fromEntries(
+      Object.entries(t?.killsManual || {})
+        .map(([alias, n]) => [String(alias || "").trim(), Math.max(0, Math.round(Number(n) || 0))])
+        .filter(([alias]) => alias)
+    ),
   };
 }
 
@@ -187,6 +198,42 @@ export default async (req) => {
       }
       torneo.publicado = true;
       torneo.publicadoEn = new Date().toISOString();
+      await store.setJSON("data", actual);
+      await syncEstadisticas(actual.torneos, actual.apodos);
+      return new Response(JSON.stringify(actual), { headers: HEADERS });
+    }
+
+    // accion "editarKills" (97ª entrega): el administrador general corrige a mano el total de Kills de
+    // un jugador en un torneo YA PUBLICADO (ver comentario en normalizarTorneoEst). `kills` debe ser un
+    // entero entre 0 y (cantidad de jugadores del torneo - 1) — nunca puede haber más kills que
+    // eliminaciones posibles en la mesa. El chequeo de rol ("Administrador General") es responsabilidad
+    // del cliente (Estadisticas.jsx), mismo criterio que el resto del sitio — ver "Nota de permisos" en
+    // tablero.js.
+    if (body?.accion === "editarKills") {
+      const campKey = String(body.campeonato || "").trim();
+      const fechaKey = String(body.fecha || "").trim();
+      const alias = String(body.alias || "").trim();
+      const torneo = actual.torneos[campKey]?.[fechaKey];
+      if (!torneo) {
+        return new Response(JSON.stringify({ error: "No se encontró ese torneo." }), { status: 404, headers: HEADERS });
+      }
+      if (!torneo.publicado) {
+        return new Response(JSON.stringify({ error: "El torneo todavía no está publicado." }), { status: 400, headers: HEADERS });
+      }
+      const totalJugadores = Object.keys(torneo.jugadores || {}).length;
+      const existeAlias = Object.values(torneo.jugadores || {}).some((j) => j.alias === alias);
+      if (!alias || !existeAlias) {
+        return new Response(JSON.stringify({ error: "No se encontró ese jugador en el torneo." }), { status: 400, headers: HEADERS });
+      }
+      const maximo = Math.max(0, totalJugadores - 1);
+      const kills = Math.round(Number(body.kills));
+      if (!Number.isFinite(kills) || kills < 0 || kills > maximo) {
+        return new Response(
+          JSON.stringify({ error: `El número de kills debe estar entre 0 y ${maximo}.` }),
+          { status: 400, headers: HEADERS }
+        );
+      }
+      torneo.killsManual = { ...(torneo.killsManual || {}), [alias]: kills };
       await store.setJSON("data", actual);
       await syncEstadisticas(actual.torneos, actual.apodos);
       return new Response(JSON.stringify(actual), { headers: HEADERS });

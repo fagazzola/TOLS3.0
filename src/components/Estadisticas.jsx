@@ -318,6 +318,9 @@ export default function Estadisticas({ session }) {
   // total de kills hechos por cada jugador en el torneo ya publicado: los confirmados en la tabla más los
   // "dudosos" que el administrador ya dejó asignados al publicar (campo `asignadoA`, guardado desde la
   // 68ª entrega — un torneo publicado antes de esa entrega simplemente no tiene ese campo y no suma nada).
+  // 97ª entrega: si el administrador general ya corrigió el total a mano para ese alias (`killsManual`,
+  // ver estadisticas.js), ese valor pisa el tally calculado — el resto de los alias sigue con el cálculo
+  // de siempre.
   const killsPorAliasTorneo = useMemo(() => {
     const tally = {};
     for (const j of jugadoresTorneoActual) {
@@ -326,8 +329,56 @@ export default function Estadisticas({ session }) {
     (torneoActual?.logKillersNoResueltos || []).forEach((l) => {
       if (l.asignadoA) tally[l.asignadoA] = (tally[l.asignadoA] || 0) + 1;
     });
+    for (const [alias, n] of Object.entries(torneoActual?.killsManual || {})) {
+      tally[alias] = n;
+    }
     return tally;
   }, [jugadoresTorneoActual, torneoActual]);
+
+  // ───────── 97ª entrega: corrección manual de Kills (post-publicación) ─────────
+  const [editandoKills, setEditandoKills] = useState(null); // alias en edición, o null
+  const [borradorKills, setBorradorKills] = useState("");
+  const [guardandoKills, setGuardandoKills] = useState(false);
+  const [errorKills, setErrorKills] = useState("");
+  const maxKillsTorneoActual = Math.max(0, jugadoresTorneoActual.length - 1);
+
+  // al cambiar de torneo abierto se descarta cualquier edición de Kills en curso (evita dejar el input
+  // abierto sobre un jugador de otro torneo si el administrador cambia de pestaña a mitad de edición).
+  useEffect(() => {
+    setEditandoKills(null);
+    setErrorKills("");
+  }, [torneoAbierto?.campeonato, torneoAbierto?.fecha]);
+
+  async function guardarKillsManual(alias) {
+    const kills = Math.round(Number(borradorKills));
+    if (!Number.isFinite(kills) || kills < 0 || kills > maxKillsTorneoActual) {
+      setErrorKills(`El número de kills debe estar entre 0 y ${maxKillsTorneoActual}.`);
+      return;
+    }
+    setErrorKills("");
+    setGuardandoKills(true);
+    try {
+      const r = await fetch(API_EST, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          accion: "editarKills",
+          campeonato: torneoAbierto.campeonato,
+          fecha: torneoAbierto.fecha,
+          alias,
+          kills,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "No se pudo guardar.");
+      setEstData(j);
+      setEditandoKills(null);
+    } catch (e) {
+      setErrorKills(e.message || "No se pudo guardar.");
+    } finally {
+      setGuardandoKills(false);
+    }
+  }
 
   // fila de totales al pie de la tabla publicada: Buy-ins, Re-buys, Add-ons, Debe, Premios y Saldo
   const totalesTorneo = useMemo(() => {
@@ -959,7 +1010,59 @@ export default function Estadisticas({ session }) {
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.addon ? 1 : 0}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{nombreKillerEnTorneo(j.eliminadoPor)}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
-                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{killsPorAliasTorneo[j.alias] || 0}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>
+                      {admin && editandoKills === j.alias ? (
+                        <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                          <input
+                            type="number"
+                            min={0}
+                            max={maxKillsTorneoActual}
+                            value={borradorKills}
+                            onChange={(e) => setBorradorKills(e.target.value)}
+                            style={{ width: 56, textAlign: "right" }}
+                            disabled={guardandoKills}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: "2px 6px" }}
+                            disabled={guardandoKills}
+                            onClick={() => guardarKillsManual(j.alias)}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: "2px 6px" }}
+                            disabled={guardandoKills}
+                            onClick={() => { setEditandoKills(null); setErrorKills(""); }}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ) : (
+                        <span>
+                          {killsPorAliasTorneo[j.alias] || 0}
+                          {admin && (
+                            <button
+                              type="button"
+                              title="Corregir kills"
+                              className="btn btn-secondary"
+                              style={{ padding: "0 4px", marginLeft: 6, fontSize: 11 }}
+                              onClick={() => {
+                                setEditandoKills(j.alias);
+                                setBorradorKills(String(killsPorAliasTorneo[j.alias] || 0));
+                                setErrorKills("");
+                              }}
+                            >
+                              ✎
+                            </button>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     {esMainActual && <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.mejorMano ? "Sí" : "No"}</td>}
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.puntos ?? 0}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{moneyContable(-(j.debeTotal || 0))}</td>
@@ -990,6 +1093,7 @@ export default function Estadisticas({ session }) {
               </tfoot>
             )}
           </table>
+          {errorKills && <div className="section-sub" style={{ color: "#b00020" }}>{errorKills}</div>}
           {torneoActual.logKillersNoResueltos?.length > 0 && (
             <details style={{ margin: "8px 0" }}>
               <summary>

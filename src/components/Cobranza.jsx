@@ -773,18 +773,8 @@ export default function Cobranza({ session, perfiles }) {
   const acumCampeonatoAlMomento = acumCampeonatoPorLugar.reduce((s, l) => s + l.monto, 0);
 
   // Centavos acumulados: Federico confirmó (pregunta 4) que se muestra en positivo (es un ingreso extra
-  // a favor de TOLS, no un pasivo) — mismo cálculo que ya existía desde la 78ª entrega.
-  function centavosAcumuladosCampeonato() {
-    const prefijo = `${campeonatoSel}|`;
-    let total = 0;
-    for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
-      if (!clave.startsWith(prefijo)) continue;
-      const remanente = (Number(reg.monto) || 0) - (Number(reg.montoEsperado) || 0);
-      if (remanente > 0) total += remanente;
-    }
-    return total;
-  }
-  const centavosAcumulados = centavosAcumuladosCampeonato();
+  // a favor de TOLS, no un pasivo) — mismo cálculo que ya existía desde la 78ª entrega
+  // (`centavosAcumuladosCampeonato()`/`centavosAcumulados`, definidos más arriba, no se repiten acá).
 
   // Validación de cuenta de banco (pregunta 5): "Existente en la cuenta de banco" (=balanceGeneral,
   // dinero real que ya entró y salió) menos lo que todavía hay que reservar (Provisión 15%) y los

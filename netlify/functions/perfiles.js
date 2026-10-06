@@ -17,8 +17,18 @@ export function normalizar(data) {
   for (const rolBase of base.roles) {
     if (!d.roles.find((r) => r.tipo === rolBase.tipo)) d.roles.push(structuredCloneSafe(rolBase));
   }
+  // 95ª entrega: el perfil "Host" se elimina del todo (ya no se necesita, a pedido de Federico) — se
+  // quitó de la semilla (perfiles.json) arriba, pero eso solo evita que un "Host" FALTANTE se vuelva a
+  // crear; si Blobs ya tenía guardado un rol "Host" de antes, el loop de arriba nunca lo toca (solo
+  // agrega lo que falta, nunca quita lo que sobra). Este filtro lo quita explícitamente, una sola vez,
+  // la próxima vez que se lea/guarde este store.
+  d.roles = d.roles.filter((r) => r.tipo !== "Host");
 
   d.usuarios = Array.isArray(d.usuarios) ? d.usuarios.map(normalizarUsuario) : [];
+  // 95ª entrega: si algún usuario había quedado con el perfil "Host" (ya eliminado arriba), se reasigna
+  // a "Jugador" — el perfil con menos acceso — en vez de dejarlo con un rol que ya no existe en la
+  // lista (lo que rompería el combo de Perfil en pantalla y la validación al guardar).
+  d.usuarios = d.usuarios.map((u) => (u.rol === "Host" ? { ...u, rol: "Jugador" } : u));
   if (!d.usuarios.some((u) => u.rol === "Administrador General")) {
     // nunca debe quedar la liga sin nadie que pueda administrar todo
     d.usuarios.push(structuredCloneSafe(base.usuarios[0]));

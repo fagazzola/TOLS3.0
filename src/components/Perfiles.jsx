@@ -132,10 +132,6 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
         <div>
           <div className="eyebrow">♠ Torrente On Line Series - TOLS 3.0</div>
           <h1>Usuarios</h1>
-          <p className="subtitle">
-            Usuarios de la liga y permisos por módulo. La contraseña de cada quien vive en el sitio — no es
-            seguridad bancaria, solo mantiene el sitio fuera de curiosos.
-          </p>
         </div>
       </div>
 
@@ -165,6 +161,10 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
       {esAdmin ? (
         <div className="section">
           <div className="section-head"><div className="section-title">Usuarios</div></div>
+          <p className="section-sub">
+            Permite cambiar el perfil de los usuarios, su correo, activarlos o desactivarlos y cambiar la
+            contraseña temporalmente
+          </p>
           <input
             className="field"
             style={{ maxWidth: 320, marginBottom: 10 }}

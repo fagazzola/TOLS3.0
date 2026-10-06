@@ -685,12 +685,9 @@ export default function Cobranza({ session, perfiles }) {
           ["resultado", "Resultados de Torneos"],
           ["movimientos", "Registrar pagos y depósitos"],
           ["estado", "Estado de cuenta"],
-          // 82ª entrega: "Finanzas generales" inhabilitado TEMPORALMENTE a pedido de Federico — el botón
-          // sigue visible (para no confundir con haberlo eliminado) pero deshabilitado, con un título que
-          // explica por qué al pasar el mouse. Si en algún momento esta vista quedaba seleccionada antes
-          // de inhabilitarla, el `useState` de `vista` no cambia solo — por eso el `return` de abajo cae
-          // en un aviso en vez de mostrar la pantalla, en vez de confiar en que nunca quede seleccionada.
-          ["finanzas", "Finanzas generales", true],
+          // 95ª entrega: "Finanzas generales" se reactivó a pedido de Federico (inhabilitada
+          // temporalmente desde la 82ª entrega) — vuelve a ser un botón normal, sin deshabilitar.
+          ["finanzas", "Finanzas generales"],
         ].map(([key, label, inhabilitado]) => (
           <button
             key={key}
@@ -1318,13 +1315,7 @@ export default function Cobranza({ session, perfiles }) {
         </div>
       )}
 
-      {vista === "finanzas" && (
-        <div className="section">
-          <p className="section-sub">Esta sección está temporalmente inhabilitada.</p>
-        </div>
-      )}
-
-      {false && vista === "finanzas" && finanzas && (
+      {vista === "finanzas" && finanzas && (
         <div className="section">
           <div className="section-head">
             <div className="section-title">Finanzas generales — {campeonatoSel}</div>

@@ -110,23 +110,10 @@ export function tieneAdeudoBloqueante(correo, movimientosConMontos, jugadoresDic
   );
 }
 
-// finanzas generales de UN campeonato: recaudado, premios pagados, gastos fijos y el fondo
-// acumulado (mismo % que ya se define en el Tablero de Control para ese campeonato)
-export function finanzasCampeonato(campeonato, movimientosConMontos, tableroMapa) {
-  const datos = tableroMapa?.[campeonato];
-  const deEsteCampeonato = movimientosConMontos.filter((m) => m.campeonato === campeonato);
-  const recaudadoCobrado = deEsteCampeonato.filter((m) => m.pagado).reduce((a, m) => a + m.montoTotal, 0);
-  const recaudadoPendiente = deEsteCampeonato.filter((m) => !m.pagado).reduce((a, m) => a + m.montoTotal, 0);
-  const premiosPagados = deEsteCampeonato.reduce((a, m) => a + m.totalGanado, 0);
-  const gastosFijos = (datos?.gastosCampeonato || []).reduce((a, g) => a + (Number(g.monto) || 0), 0);
-  const pctAcumulado = Number(datos?.premios?.porTorneo?.pctAcumulado) || 0;
-  const fondoAcumuladoEstimado = (recaudadoCobrado * pctAcumulado) / 100;
-  return {
-    recaudadoCobrado,
-    recaudadoPendiente,
-    premiosPagados,
-    gastosFijos,
-    fondoAcumuladoEstimado,
-    saldoNeto: recaudadoCobrado - premiosPagados - gastosFijos,
-  };
-}
+// 96ª entrega: `finanzasCampeonato()` (recaudado/premios pagados/gastos fijos/saldo neto, calculados
+// sobre `movimientos`) se eliminó por prolijidad — ese modelo quedó deprecado desde la 66ª entrega
+// (Game Night oculto) y `movimientos` nunca se puebla en producción, así que estos números siempre
+// daban $0 en el sitio real. "Finanzas generales" (Cobranza.jsx) se rediseñó en la 96ª entrega para
+// calcular todo desde los mapas confirmados de Cobranza (pagosTorneo/depositosTorneo/depositosGasto/
+// pagosInscripcion) y los montos ya calculados por Estadísticas — ver esa entrega en el mapa del
+// proyecto para el detalle completo.

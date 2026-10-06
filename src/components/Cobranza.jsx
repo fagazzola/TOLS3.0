@@ -48,6 +48,64 @@ function MontoPorTipo({ valor, tipo, centavos = false }) {
   const plano = centavos ? moneyConCentavos(Math.abs(Number(valor) || 0)) : money(Math.abs(Number(valor) || 0));
   return <span className={esPago ? "money-pos" : "money-neg"}>{esPago ? plano : `(${plano})`}</span>;
 }
+// 98ª entrega: Federico pidió que "Finanzas generales" deje de verse como recuadros/tarjetas ("difícil de
+// leer y seguir") y pase a una vista tipo hoja de trabajo/cuadrícula, como Excel. Estas tres filas armar la
+// tabla reemplazan los antiguos .stats/.stat (recuadros) — mismo patrón de cuadrícula ya usado en "Pagos y
+// depósitos confirmados"/"Estado de cuenta" (border 1px, celdas), nunca tarjetas.
+function FilaSeccionFin({ label }) {
+  return (
+    <tr>
+      <td
+        colSpan={2}
+        style={{
+          border: "1px solid #ccc",
+          background: "#e9edf1",
+          padding: "6px 10px",
+          fontWeight: 700,
+          fontSize: 12.5,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </td>
+    </tr>
+  );
+}
+function FilaFin({ label, children, bold = false, sangria = false }) {
+  return (
+    <tr style={bold ? { background: "#f4f6f8" } : undefined}>
+      <td
+        style={{
+          border: "1px solid #eee",
+          padding: "6px 10px",
+          paddingLeft: sangria ? 26 : 10,
+          fontWeight: bold ? 700 : 400,
+        }}
+      >
+        {label}
+      </td>
+      <td
+        style={{
+          border: "1px solid #eee",
+          padding: "6px 10px",
+          textAlign: "right",
+          whiteSpace: "nowrap",
+          fontWeight: bold ? 700 : 400,
+        }}
+      >
+        {children}
+      </td>
+    </tr>
+  );
+}
+function TablaFin({ children }) {
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5, marginBottom: 18 }}>
+      <tbody>{children}</tbody>
+    </table>
+  );
+}
 function norm(s) {
   return (s || "").trim().toLowerCase();
 }
@@ -1447,184 +1505,88 @@ export default function Cobranza({ session, perfiles }) {
           <div className="finanzas-cols">
             {/* ───────── columna izquierda: INGRESOS / EGRESOS ───────── */}
             <div>
-              <div className="subhead" style={{ marginTop: 0 }}>Ingresos</div>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Inscripciones reales</div>
-                  <div className="stat-value"><Monto valor={totalInscripcionesConfirmadas} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Ingresos confirmados — torneos regulares</div>
-                  <div className="stat-value"><Monto valor={totalPagosRegular} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Ingresos confirmados — torneos main</div>
-                  <div className="stat-value"><Monto valor={totalPagosMain} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Subtotal ingresos</div>
-                  <div className="stat-value"><Monto valor={subtotalIngresos} /></div>
-                </div>
-              </div>
-              <div className="section-sub" style={{ margin: "0 0 20px" }}>
-                El 15%/85% de abajo se calcula solo sobre pagos de torneos (regulares + main) — excluye la inscripción.
-              </div>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Provisión para acum. Camp. (15%)</div>
-                  <div className="stat-value"><Monto valor={fondoAcumuladoReservado} forzarNegativo /></div>
-                </div>
-              </div>
+              <TablaFin>
+                <FilaSeccionFin label="Ingresos" />
+                <FilaFin label="Inscripciones reales"><Monto valor={totalInscripcionesConfirmadas} /></FilaFin>
+                <FilaFin label="Ingresos confirmados — torneos regulares"><Monto valor={totalPagosRegular} /></FilaFin>
+                <FilaFin label="Ingresos confirmados — torneos main"><Monto valor={totalPagosMain} /></FilaFin>
+                <FilaFin label="Subtotal ingresos" bold><Monto valor={subtotalIngresos} /></FilaFin>
+                <FilaFin label="Provisión para acum. Camp. (15%)"><Monto valor={fondoAcumuladoReservado} forzarNegativo /></FilaFin>
 
-              <div className="subhead">Egresos</div>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Disponible (85%)</div>
-                  <div className="stat-value"><Monto valor={disponiblePagosTorneo} /></div>
-                </div>
-              </div>
+                <FilaSeccionFin label="Egresos" />
+                <FilaFin label="Disponible (85%)"><Monto valor={disponiblePagosTorneo} /></FilaFin>
 
-              <div className="section-sub" style={{ margin: "20px 0 10px" }}>Torneos regulares</div>
-              <div className="stats" style={{ margin: "0 0 20px" }}>
-                <div className="stat">
-                  <div className="stat-label">1er lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosRegular[1]} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">2do lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosRegular[2]} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">3er lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosRegular[3]} forzarNegativo /></div>
-                </div>
+                <FilaFin label="Torneos regulares — 1er lugar" sangria><Monto valor={catPremiosRegular[1]} forzarNegativo /></FilaFin>
+                <FilaFin label="Torneos regulares — 2do lugar" sangria><Monto valor={catPremiosRegular[2]} forzarNegativo /></FilaFin>
+                <FilaFin label="Torneos regulares — 3er lugar" sangria><Monto valor={catPremiosRegular[3]} forzarNegativo /></FilaFin>
                 {catPremiosRegular.otros > 0 && (
-                  <div className="stat">
-                    <div className="stat-label">Otros lugares pagados</div>
-                    <div className="stat-value"><Monto valor={catPremiosRegular.otros} forzarNegativo /></div>
-                  </div>
+                  <FilaFin label="Torneos regulares — otros lugares pagados" sangria>
+                    <Monto valor={catPremiosRegular.otros} forzarNegativo />
+                  </FilaFin>
                 )}
-              </div>
 
-              <div className="section-sub" style={{ margin: "0 0 10px" }}>Torneos main</div>
-              <div className="stats" style={{ margin: "0 0 20px" }}>
-                <div className="stat">
-                  <div className="stat-label">1er lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosMain[1]} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">2do lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosMain[2]} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">3er lugar</div>
-                  <div className="stat-value"><Monto valor={catPremiosMain[3]} forzarNegativo /></div>
-                </div>
+                <FilaFin label="Torneos main — 1er lugar" sangria><Monto valor={catPremiosMain[1]} forzarNegativo /></FilaFin>
+                <FilaFin label="Torneos main — 2do lugar" sangria><Monto valor={catPremiosMain[2]} forzarNegativo /></FilaFin>
+                <FilaFin label="Torneos main — 3er lugar" sangria><Monto valor={catPremiosMain[3]} forzarNegativo /></FilaFin>
                 {catPremiosMain.otros > 0 && (
-                  <div className="stat">
-                    <div className="stat-label">Otros lugares pagados</div>
-                    <div className="stat-value"><Monto valor={catPremiosMain.otros} forzarNegativo /></div>
-                  </div>
+                  <FilaFin label="Torneos main — otros lugares pagados" sangria>
+                    <Monto valor={catPremiosMain.otros} forzarNegativo />
+                  </FilaFin>
                 )}
-                <div className="stat">
-                  <div className="stat-label">Burbuja</div>
-                  <div className="stat-value"><Monto valor={catPremiosMain.burbuja} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Mejor mano</div>
-                  <div className="stat-value"><Monto valor={catPremiosMain.mano} forzarNegativo /></div>
-                </div>
-              </div>
+                <FilaFin label="Torneos main — burbuja" sangria><Monto valor={catPremiosMain.burbuja} forzarNegativo /></FilaFin>
+                <FilaFin label="Torneos main — mejor mano" sangria><Monto valor={catPremiosMain.mano} forzarNegativo /></FilaFin>
 
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Subtotal egresos</div>
-                  <div className="stat-value"><Monto valor={subtotalEgresos} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Balance general</div>
-                  <div className="stat-value"><Monto valor={balanceGeneral} /></div>
-                </div>
+                <FilaFin label="Subtotal egresos" bold><Monto valor={subtotalEgresos} forzarNegativo /></FilaFin>
+                <FilaFin label="Balance general" bold><Monto valor={balanceGeneral} /></FilaFin>
+              </TablaFin>
+              <div className="section-sub" style={{ marginTop: -8 }}>
+                El 15%/85% se calcula solo sobre pagos de torneos (regulares + main) — excluye la inscripción.
               </div>
             </div>
 
-            {/* ───────── columna derecha: PASIVOS / validación de cuenta de banco ───────── */}
+            {/* ───────── columna derecha: GASTOS OPERATIVOS / ACUM. CAMPEONATO / VALIDACIÓN ───────── */}
             <div>
-              <div className="subhead" style={{ marginTop: 0 }}>Gastos operativos (de la inscripción)</div>
-              <div className="stats">
+              <TablaFin>
+                <FilaSeccionFin label="Gastos operativos (de la inscripción)" />
                 {gastosOperativos.map((g) => (
-                  <div className="stat" key={g.concepto}>
-                    <div className="stat-label">{g.concepto}</div>
-                    <div className="stat-value"><Monto valor={g.total} forzarNegativo /></div>
-                  </div>
+                  <FilaFin key={g.concepto} label={g.concepto} sangria>
+                    <Monto valor={g.total} forzarNegativo />
+                  </FilaFin>
                 ))}
                 {gastosOperativos.length === 0 && (
-                  <div className="stat">
-                    <div className="stat-label">Sin conceptos configurados</div>
-                    <div className="stat-value">—</div>
-                  </div>
+                  <FilaFin label="Sin conceptos configurados" sangria>—</FilaFin>
                 )}
-                <div className="stat">
-                  <div className="stat-label">Subtotal gastos operativos</div>
-                  <div className="stat-value"><Monto valor={totalGastosOperativos} forzarNegativo /></div>
-                </div>
-              </div>
-              <div className="section-sub" style={{ margin: "0 0 20px" }}>
+                <FilaFin label="Subtotal gastos operativos" bold><Monto valor={totalGastosOperativos} forzarNegativo /></FilaFin>
+
+                <FilaFin label="Centavos acumulados"><Monto valor={centavosAcumulados} centavos /></FilaFin>
+
+                <FilaSeccionFin label="Acum. Campeonato (al momento)" />
+                <FilaFin label="Total reservado" bold><Monto valor={acumCampeonatoAlMomento} forzarNegativo /></FilaFin>
+                {acumCampeonatoPorLugar.map((l, i) => (
+                  <FilaFin key={i} label={l.reyKiller ? "Rey Killer" : l.label} sangria>
+                    <Monto valor={l.monto} forzarNegativo />
+                  </FilaFin>
+                ))}
+                {acumCampeonatoPorLugar.length === 0 && (
+                  <FilaFin label="Sin lugares configurados" sangria>—</FilaFin>
+                )}
+
+                <FilaSeccionFin label="Ingresos − Egresos" />
+                <FilaFin label="Existente en la cuenta de banco"><Monto valor={balanceGeneral} /></FilaFin>
+                <FilaFin label="Reservar"><Monto valor={reservarAcum} forzarNegativo /></FilaFin>
+                <FilaFin label="Gastos pendientes"><Monto valor={gastosPendientes} forzarNegativo /></FilaFin>
+                <FilaFin label="Diff" bold><Monto valor={diffCuenta} /></FilaFin>
+              </TablaFin>
+              <div className="section-sub" style={{ margin: "0 0 10px" }}>
                 Presupuesto configurado en el Tablero de Control (Tesorero y Hosting son fijos, la Pulsera puede
                 variar), no lo efectivamente depositado — se toma inicialmente de las inscripciones.
               </div>
-
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Centavos acumulados</div>
-                  <div className="stat-value"><Monto valor={centavosAcumulados} centavos /></div>
-                </div>
-              </div>
-
-              <div className="subhead">Acum. Campeonato (al momento)</div>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Total reservado</div>
-                  <div className="stat-value"><Monto valor={acumCampeonatoAlMomento} forzarNegativo /></div>
-                </div>
-                {acumCampeonatoPorLugar.map((l, i) => (
-                  <div className="stat" key={i}>
-                    <div className="stat-label">{l.reyKiller ? "Rey Killer" : l.label}</div>
-                    <div className="stat-value"><Monto valor={l.monto} forzarNegativo /></div>
-                  </div>
-                ))}
-                {acumCampeonatoPorLugar.length === 0 && (
-                  <div className="stat">
-                    <div className="stat-label">Sin lugares configurados</div>
-                    <div className="stat-value">—</div>
-                  </div>
-                )}
-              </div>
-              <div className="section-sub">
-                Es el monto ya RESERVADO por lugar (Provisión del 15% repartida según los % del Tablero de
-                Control), no un pago confirmado — todavía no hay ninguna forma de registrar desde "Registrar
-                pagos y depósitos" el pago real de este premio (de fin de campeonato). Si quieres llevar esto
-                en el sitio, lo podemos agregar como un motivo de Depósito nuevo en una próxima entrega.
-              </div>
-
-              <div className="subhead">Ingresos − Egresos</div>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-label">Existente en la cuenta de banco</div>
-                  <div className="stat-value"><Monto valor={balanceGeneral} /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Reservar</div>
-                  <div className="stat-value"><Monto valor={reservarAcum} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Gastos pendientes</div>
-                  <div className="stat-value"><Monto valor={gastosPendientes} forzarNegativo /></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Diff</div>
-                  <div className="stat-value"><Monto valor={diffCuenta} /></div>
-                </div>
+              <div className="section-sub" style={{ margin: "0 0 10px" }}>
+                "Acum. Campeonato" es el monto ya RESERVADO por lugar (Provisión del 15% repartida según los %
+                del Tablero de Control), no un pago confirmado — todavía no hay ninguna forma de registrar desde
+                "Registrar pagos y depósitos" el pago real de este premio (de fin de campeonato). Si quieres
+                llevar esto en el sitio, lo podemos agregar como un motivo de Depósito nuevo en una próxima
+                entrega.
               </div>
               <div className="section-sub">
                 "Existente en la cuenta de banco" es el dinero real que ya entró y salió (Subtotal ingresos −

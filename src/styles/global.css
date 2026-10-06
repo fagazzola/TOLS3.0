@@ -249,10 +249,11 @@ h1 {
 
 /* 97ª entrega: "Finanzas generales" (Cobranza.jsx) se rediseñó para calzar con el Excel de Federico —
    layout a dos columnas (INGRESOS/EGRESOS a la izquierda, PASIVOS a la derecha), apiladas en pantallas
-   angostas. `.stats` dentro de cada columna sigue siendo de 1 columna (no 3) para que los cuadros no
-   queden demasiado angostos. */
+   angostas. 98ª entrega: Federico pidió reemplazar los recuadros por una vista tipo hoja de
+   trabajo/cuadrícula (como Excel) — cada columna pasó de `.stats`/`.stat` a una tabla real
+   (`<TablaFin>`/`<FilaFin>`/`<FilaSeccionFin>`, en Cobranza.jsx), así que ya no queda ningún `.stats`
+   dentro de `.finanzas-cols` — el grid de dos columnas en sí no cambió.*/
 .finanzas-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
-.finanzas-cols .stats { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 900px) {
   .finanzas-cols { grid-template-columns: 1fr; }
 }

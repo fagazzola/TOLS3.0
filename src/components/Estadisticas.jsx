@@ -29,6 +29,22 @@ function esAdmin(rol) {
 function puedeVerPorResultado(rol) {
   return esAdmin(rol) || rol === "Tesorero";
 }
+// 98ª entrega: Federico pidió que la corrección manual de Kills quede reservada al "administrador
+// general" específicamente — a diferencia del resto de esta pantalla ("Subir resultados"/"Exportar a
+// Excel"/editar Kills hasta la 97ª entrega), que usan `esAdmin()` (Administrador General O
+// Administrador). Este helper exclusivo solo se usa para el gate de edición de Kills, nada más.
+function esAdminGeneral(rol) {
+  return rol === "Administrador General";
+}
+// 98ª entrega: colores de podio (oro/plata/bronce) para los renglones de 1°/2°/3° lugar de "Clasificación
+// general" — a propósito, un fondo tenue (no un color lleno, para no tapar los números) + un borde/texto
+// más saturado del mismo tono, distinto del dorado que ya usan las columnas de torneo Main (`#b8860b`)
+// para no confundir las dos cosas a simple vista.
+const PODIO_CLASIF = [
+  { fondo: "#fff8e1", borde: "#c9971e" }, // 1° — oro
+  { fondo: "#f2f2f2", borde: "#9a9a9a" }, // 2° — plata
+  { fondo: "#fbe9dc", borde: "#b5692f" }, // 3° — bronce
+];
 
 function money(n) {
   return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
@@ -175,6 +191,7 @@ function jugadorEnTorneo(torneo, jugadorDir) {
 
 export default function Estadisticas({ session }) {
   const admin = esAdmin(session?.rol);
+  const adminGeneral = esAdminGeneral(session?.rol); // 98ª entrega: solo este rol puede editar Kills
 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -888,7 +905,10 @@ export default function Estadisticas({ session }) {
                       title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
                       style={{
                         textAlign: "center",
-                        border: "1px solid #ccc",
+                        // 98ª entrega: además del color/negrita de siempre en el encabezado, un torneo Main
+                        // ahora lleva un recuadro propio (borde grueso del mismo color) para que se note, de
+                        // un vistazo, que esa columna es "especial" — se repite en las celdas del cuerpo.
+                        border: c.tipo === "Main" ? "2px solid #b8860b" : "1px solid #ccc",
                         padding: "6px 8px",
                         cursor: "pointer",
                         whiteSpace: "nowrap",
@@ -917,23 +937,52 @@ export default function Estadisticas({ session }) {
                 </tr>
               </thead>
               <tbody>
-                {filasClasifOrdenadas.map((f, i) => (
-                  <tr key={f.jugador.correo || f.alias}>
-                    <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{i + 1}</td>
-                    <td style={{ padding: "6px 8px", border: "1px solid #eee" }}>{f.alias}</td>
-                    {columnasClasif.map((c) => (
-                      <td key={c.fecha} style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>
-                        {fmtClasifValor(f.valores[c.fecha] || 0)}
+                {/* 98ª entrega: los renglones de 1°/2°/3° lugar (oro/plata/bronce) y los números de cada
+                    columna Main (coloreados + recuadrados, igual que su propio encabezado) son pedidos
+                    explícitos de Federico ("me gusta mucho esta tabla... pon todas esas columnas con un
+                    recuadro... los renglones de 1°/2°/3° hazlos visiblemente distintos, como oro/plata/
+                    bronce"). `PODIO[i]` es `undefined` del 4º lugar en adelante — sin cambio ahí. */}
+                {filasClasifOrdenadas.map((f, i) => {
+                  const podio = PODIO_CLASIF[i];
+                  return (
+                    <tr key={f.jugador.correo || f.alias} style={podio ? { background: podio.fondo } : undefined}>
+                      <td
+                        style={{
+                          padding: "6px 8px",
+                          border: podio ? `2px solid ${podio.borde}` : "1px solid #eee",
+                          textAlign: "center",
+                          fontWeight: podio ? 700 : undefined,
+                          color: podio ? podio.borde : undefined,
+                        }}
+                      >
+                        {i + 1}
                       </td>
-                    ))}
-                    {vistaClasificacion === "puntos" && (
-                      <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{f.practica}</td>
-                    )}
-                    <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", fontWeight: "bold" }}>
-                      {fmtClasifValor(f.total)}
-                    </td>
-                  </tr>
-                ))}
+                      <td style={{ padding: "6px 8px", border: "1px solid #eee", fontWeight: podio ? 700 : undefined }}>
+                        {f.alias}
+                      </td>
+                      {columnasClasif.map((c) => (
+                        <td
+                          key={c.fecha}
+                          style={{
+                            padding: "6px 8px",
+                            border: c.tipo === "Main" ? "2px solid #b8860b" : "1px solid #eee",
+                            textAlign: "center",
+                            color: c.tipo === "Main" ? "#b8860b" : undefined,
+                            fontWeight: c.tipo === "Main" ? 700 : undefined,
+                          }}
+                        >
+                          {fmtClasifValor(f.valores[c.fecha] || 0)}
+                        </td>
+                      ))}
+                      {vistaClasificacion === "puntos" && (
+                        <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{f.practica}</td>
+                      )}
+                      <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", fontWeight: "bold" }}>
+                        {fmtClasifValor(f.total)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1011,7 +1060,7 @@ export default function Estadisticas({ session }) {
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{nombreKillerEnTorneo(j.eliminadoPor)}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.lugar || ""}</td>
                     <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>
-                      {admin && editandoKills === j.alias ? (
+                      {adminGeneral && editandoKills === j.alias ? (
                         <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                           <input
                             type="number"
@@ -1045,7 +1094,7 @@ export default function Estadisticas({ session }) {
                       ) : (
                         <span>
                           {killsPorAliasTorneo[j.alias] || 0}
-                          {admin && (
+                          {adminGeneral && (
                             <button
                               type="button"
                               title="Corregir kills"

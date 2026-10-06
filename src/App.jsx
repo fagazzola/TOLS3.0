@@ -35,16 +35,19 @@ const API_PARAMETROS = "/api/parametros";
 // por completo — ver Jugadores.jsx y netlify/functions/jugadores.js.
 // "Estadísticas" es nueva, visible para CUALQUIER perfil con sesión (como Mi Perfil) — dentro de esa
 // pantalla, el botón para subir resultados se limita a Administrador General/Administrador.
+// 98ª entrega: Federico pidió mover el botón "Jugadores" para que quede a la derecha de "Resultados" en
+// el menú superior — el orden de los botones sigue el orden de este array (ver `tabsConPermiso` más
+// abajo), así que alcanzó con reordenar la entrada, sin tocar ninguna otra propiedad.
 const TABS = [
   { key: "tablero", modKey: "mod2", label: "Tablero de Control", Component: Tablero },
   { key: "calendario", modKey: "mod1", label: "Calendario", Component: Calendario },
   { key: "cobranza", modKey: "mod4", label: "Cobranza", Component: Cobranza },
-  { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "gamenight", modKey: "mod5", label: "Game Night", Component: GameNight, oculto: true },
   // 73ª entrega: el botón/pestaña se renombró de "Estadísticas" a "Resultados" (pedido de Federico) — la
   // `key` interna se dejó igual ("estadisticas") a propósito, para no tocar `SOLO_JUGADOR_TABS` ni nada
   // que dependa de esa clave; el componente y el archivo siguen llamándose Estadisticas.jsx.
   { key: "estadisticas", modKey: null, label: "Resultados", Component: Estadisticas, siempreVisible: true },
+  { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];

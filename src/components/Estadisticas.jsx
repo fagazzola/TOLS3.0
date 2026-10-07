@@ -162,10 +162,19 @@ function etiquetaTipo(campeonato, tipo) {
 // usaba killsPorAliasTorneo (más abajo, para la tabla de un torneo puntual), factoreada aparte para
 // poder reutilizarla también en el bloque de "Clasificación general" (vista "por killers"), que necesita
 // este mismo cálculo repetido para cada torneo publicado del campeonato, no solo el que está abierto.
+// 102ª entrega: ahora es consciente de `killsAsignados` (101ª entrega) — Federico señaló que una
+// corrección killer→killed hecha desde "Resultados Torneos" se veía en esa tabla pero no en
+// "Clasificación general" (por killers), porque esta función seguía contando solo el `eliminadoPor`
+// original. Mismo criterio exacto que `killerEfectivo()` (más abajo, para el torneo abierto): si el
+// torneo tiene una asignación manual para ese alias, esa pisa al `eliminadoPor`; si no, se usa el
+// original — recibe el `torneo` de CADA fecha publicada (no solo la abierta), así que lee la
+// `killsAsignados` propia de cada una.
 function killsTallyDeTorneo(torneo) {
+  const asign = torneo?.killsAsignados || {};
   const tally = {};
   Object.values(torneo?.jugadores || {}).forEach((j) => {
-    if (j.eliminadoPor) tally[j.eliminadoPor] = (tally[j.eliminadoPor] || 0) + 1;
+    const k = Object.prototype.hasOwnProperty.call(asign, j.alias) ? asign[j.alias] : j.eliminadoPor;
+    if (k) tally[k] = (tally[k] || 0) + 1;
   });
   (torneo?.logKillersNoResueltos || []).forEach((l) => {
     if (l.asignadoA) tally[l.asignadoA] = (tally[l.asignadoA] || 0) + 1;

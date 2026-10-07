@@ -905,9 +905,15 @@ export default function Estadisticas({ session }) {
                       title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
                       style={{
                         textAlign: "center",
-                        // 98ª entrega: además del color/negrita de siempre en el encabezado, un torneo Main
-                        // ahora lleva un recuadro propio (borde grueso del mismo color) para que se note, de
-                        // un vistazo, que esa columna es "especial" — se repite en las celdas del cuerpo.
+                        // 98ª/99ª entrega: el color/negrita de siempre en el encabezado de un torneo Main se
+                        // completa con UN SOLO recuadro externo alrededor de toda la columna (encabezado +
+                        // cuerpo) — Federico aclaró en la 99ª entrega que el pedido original ("pon todas esas
+                        // columnas con un recuadro alrededor") era ese marco exterior, no un recuadro por
+                        // celda (lo que la 98ª entrega había hecho, con `border` grueso en cada celda, dando
+                        // una grilla de cajitas en vez de un solo rectángulo). El encabezado lleva los 4 lados
+                        // gruesos (tapa superior del marco); el cuerpo solo lleva los lados IZQUIERDO/DERECHO
+                        // gruesos en cada fila (más ABAJO gruesa en la última fila, ver el `<tbody>`) — así el
+                        // marco queda continuo de arriba a abajo, con las líneas finas normales entre filas.
                         border: c.tipo === "Main" ? "2px solid #b8860b" : "1px solid #ccc",
                         padding: "6px 8px",
                         cursor: "pointer",
@@ -960,20 +966,35 @@ export default function Estadisticas({ session }) {
                       <td style={{ padding: "6px 8px", border: "1px solid #eee", fontWeight: podio ? 700 : undefined }}>
                         {f.alias}
                       </td>
-                      {columnasClasif.map((c) => (
-                        <td
-                          key={c.fecha}
-                          style={{
-                            padding: "6px 8px",
-                            border: c.tipo === "Main" ? "2px solid #b8860b" : "1px solid #eee",
-                            textAlign: "center",
-                            color: c.tipo === "Main" ? "#b8860b" : undefined,
-                            fontWeight: c.tipo === "Main" ? 700 : undefined,
-                          }}
-                        >
-                          {fmtClasifValor(f.valores[c.fecha] || 0)}
-                        </td>
-                      ))}
+                      {columnasClasif.map((c) => {
+                        const esMainCol = c.tipo === "Main";
+                        const esUltimaFila = i === filasClasifOrdenadas.length - 1;
+                        return (
+                          <td
+                            key={c.fecha}
+                            style={
+                              esMainCol
+                                ? {
+                                    padding: "6px 8px",
+                                    textAlign: "center",
+                                    color: "#b8860b",
+                                    fontWeight: 700,
+                                    // 99ª entrega: solo el marco EXTERIOR de la columna — grueso a los
+                                    // costados en toda fila, y grueso abajo únicamente en la última fila
+                                    // (el grueso de arriba lo aporta el borde inferior del encabezado,
+                                    // que "gana" sobre el borde fino de esta primera fila al colapsar).
+                                    borderLeft: "2px solid #b8860b",
+                                    borderRight: "2px solid #b8860b",
+                                    borderTop: "1px solid #eee",
+                                    borderBottom: esUltimaFila ? "2px solid #b8860b" : "1px solid #eee",
+                                  }
+                                : { padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }
+                            }
+                          >
+                            {fmtClasifValor(f.valores[c.fecha] || 0)}
+                          </td>
+                        );
+                      })}
                       {vistaClasificacion === "puntos" && (
                         <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{f.practica}</td>
                       )}

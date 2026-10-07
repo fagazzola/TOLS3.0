@@ -5,6 +5,7 @@ import { mapaNumeracionTorneos } from "../lib/gamenight.js";
 const API = "/api/cobranza";
 const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
 const API_ENVIAR_DATOSCUENTA = "/api/cobranza-enviar-datoscuenta"; // 89ª entrega
+const API_ENVIAR_ESTADO = "/api/cobranza-enviar-estado"; // 99ª entrega
 const API_TABLERO = "/api/tablero";
 const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
@@ -188,6 +189,16 @@ export default function Cobranza({ session, perfiles }) {
 
   const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
   const [motivoExcepcion, setMotivoExcepcion] = useState("");
+
+  // 99ª entrega: botón "Enviar por correo" en "Estado de cuenta" — a pedido de Federico. Reusa el
+  // endpoint cobranza-enviar-estado.js / plantillaEstadoCuenta() que ya existía en el servidor (de una
+  // entrega anterior) pero que ningún botón de la pantalla llamaba todavía: el Tesorero ve un borrador de
+  // asunto/cuerpo pre-armado a partir de `estadoCuentaJugador`, lo puede editar libremente en el modal
+  // (el servidor solo envía lo que ya fue aprobado acá, nunca decide el contenido) y recién ahí se manda.
+  const [enviarEstadoModal, setEnviarEstadoModal] = useState(null); // null | { correo, nombre, asunto, cuerpo }
+  const [enviandoEstado, setEnviandoEstado] = useState(false);
+  const [errorEnviarEstado, setErrorEnviarEstado] = useState("");
+  const [avisoEnviarEstado, setAvisoEnviarEstado] = useState("");
 
   useEffect(() => {
     cargar();
@@ -667,6 +678,66 @@ export default function Cobranza({ session, perfiles }) {
       setError(e.message || "No se pudo aprobar la excepción.");
     } finally {
       setGuardando(false);
+    }
+  }
+
+  // 99ª entrega: arma el borrador de asunto/cuerpo de "Estado de cuenta" en texto plano, a partir de
+  // `estadoCuentaJugador` (mismos valores/colores con signo desde la perspectiva del jugador que ya
+  // muestra la tabla en pantalla — ver el comentario de la 81ª entrega más abajo). El Tesorero puede
+  // editar este texto a mano antes de mandarlo; plantillaEstadoCuenta() en el servidor solo le pone el
+  // "sobre" visual del correo alrededor de los párrafos (separados por línea en blanco).
+  function abrirEnviarEstado() {
+    if (!correoEstado || !r) return;
+    const nombreJug = r.nombre || nombreCorto({ correo: correoEstado }) || correoEstado;
+    const lineas = estadoCuentaJugador.map((f) => {
+      const fecha = f.fechaOrden ? fechaFmt(f.fechaOrden) : "—";
+      const montoJugador = -f.montoFirmado; // perspectiva del jugador (81ª entrega): negado desde TOLS
+      return `${fecha} — ${f.tipo} (${f.motivo}): ${moneyContable(montoJugador)} → saldo ${moneyContable(-f.saldoFinal)}`;
+    });
+    const saldoFinal = estadoCuentaJugador.length
+      ? -estadoCuentaJugador[estadoCuentaJugador.length - 1].saldoFinal
+      : 0;
+    const cuerpo = [
+      `Hola ${nombreJug}, este es tu estado de cuenta en TOLS 3.0 (campeonato ${campeonatoSel}).`,
+      lineas.length ? lineas.join("\n") : "Todavía no hay pagos ni depósitos confirmados para este campeonato.",
+      `Saldo actual: ${moneyContable(saldoFinal)}${saldoFinal < 0 ? " (lo que pagaste de más, a tu favor)" : saldoFinal > 0 ? " (lo que nos falta cobrarte)" : ""}.`,
+    ].join("\n\n");
+    setErrorEnviarEstado("");
+    setAvisoEnviarEstado("");
+    setEnviarEstadoModal({
+      correo: correoEstado,
+      nombre: nombreJug,
+      asunto: `Estado de cuenta - TOLS 3.0`,
+      cuerpo,
+    });
+  }
+
+  async function enviarEstadoCuenta() {
+    if (!enviarEstadoModal) return;
+    if (!enviarEstadoModal.asunto.trim() || !enviarEstadoModal.cuerpo.trim()) {
+      setErrorEnviarEstado("El asunto y el cuerpo del correo no pueden quedar vacíos.");
+      return;
+    }
+    setEnviandoEstado(true);
+    setErrorEnviarEstado("");
+    try {
+      const r2 = await fetch(API_ENVIAR_ESTADO, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          correo: enviarEstadoModal.correo,
+          asunto: enviarEstadoModal.asunto,
+          cuerpo: enviarEstadoModal.cuerpo,
+        }),
+      });
+      const json = await r2.json().catch(() => ({}));
+      if (!r2.ok) throw new Error(json.error || "No se pudo enviar el correo.");
+      setEnviarEstadoModal(null);
+      setAvisoEnviarEstado(`Correo enviado a ${enviarEstadoModal.nombre}.`);
+    } catch (e) {
+      setErrorEnviarEstado(e.message || "No se pudo enviar el correo.");
+    } finally {
+      setEnviandoEstado(false);
     }
   }
 
@@ -1412,11 +1483,27 @@ export default function Cobranza({ session, perfiles }) {
         <div className="section">
           <div className="section-head">
             <div className="section-title">Estado de cuenta</div>
+            {/* 99ª entrega: "Agrega un botón para poder enviar el estado de cuenta por correo al jugador
+                seleccionado" — a pedido de Federico. Solo se habilita con un jugador elegido en el combo
+                de abajo; abre un modal con un borrador editable antes de mandar nada. */}
+            {correoEstado && (
+              <button className="btn btn-secondary" onClick={abrirEnviarEstado}>
+                ✉ Enviar por correo
+              </button>
+            )}
           </div>
           {/* 80ª entrega: combo por Alias PokerStars, mismo criterio que los demás combos de la pantalla
               (ej. "Jugador" en "Registrar pagos y depósitos") — antes este combo mostraba nombre+correo,
               distinto al resto. */}
-          <select className="field" style={{ maxWidth: 320 }} value={correoEstado} onChange={(e) => setCorreoEstado(e.target.value)}>
+          <select
+            className="field"
+            style={{ maxWidth: 320 }}
+            value={correoEstado}
+            onChange={(e) => {
+              setCorreoEstado(e.target.value);
+              setAvisoEnviarEstado("");
+            }}
+          >
             <option value="">— elegir jugador —</option>
             {directorioActivo.map((j) => (
               <option key={j.correo} value={j.correo}>
@@ -1424,6 +1511,9 @@ export default function Cobranza({ session, perfiles }) {
               </option>
             ))}
           </select>
+          {avisoEnviarEstado && (
+            <p className="section-sub" style={{ color: "var(--ok, #2e7d32)", marginTop: 8 }}>{avisoEnviarEstado}</p>
+          )}
 
           {correoEstado && (
             <>
@@ -1617,6 +1707,48 @@ export default function Cobranza({ session, perfiles }) {
               </button>
               <button className="btn btn-primary" disabled={guardando} onClick={aprobarExcepcion}>
                 {guardando ? "Un momento…" : "Aprobar excepción"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {enviarEstadoModal && (
+        <div className="modal-backdrop" onClick={() => (enviandoEstado ? null : setEnviarEstadoModal(null))}>
+          <div className="modal-card modal-card-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-badge">✉</div>
+            <div className="modal-title">Enviar estado de cuenta: {enviarEstadoModal.nombre}</div>
+            <p className="section-sub" style={{ marginTop: 0 }}>
+              Revisá o editá el asunto y el cuerpo antes de mandarlo a <b>{enviarEstadoModal.correo}</b>. El
+              correo sale con el mismo diseño del resto del sitio, con este texto adentro.
+            </p>
+            <div className="login-field">
+              <label>Asunto</label>
+              <input
+                className="field"
+                value={enviarEstadoModal.asunto}
+                onChange={(e) => setEnviarEstadoModal({ ...enviarEstadoModal, asunto: e.target.value })}
+                disabled={enviandoEstado}
+              />
+            </div>
+            <div className="login-field">
+              <label>Cuerpo</label>
+              <textarea
+                className="field"
+                rows={10}
+                style={{ fontFamily: "inherit", resize: "vertical" }}
+                value={enviarEstadoModal.cuerpo}
+                onChange={(e) => setEnviarEstadoModal({ ...enviarEstadoModal, cuerpo: e.target.value })}
+                disabled={enviandoEstado}
+              />
+            </div>
+            {errorEnviarEstado && <div className="login-error">{errorEnviarEstado}</div>}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setEnviarEstadoModal(null)} disabled={enviandoEstado}>
+                Cancelar
+              </button>
+              <button className="btn btn-primary" disabled={enviandoEstado} onClick={enviarEstadoCuenta}>
+                {enviandoEstado ? "Enviando…" : "Enviar correo"}
               </button>
             </div>
           </div>

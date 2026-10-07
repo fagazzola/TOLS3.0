@@ -68,16 +68,20 @@ function normalizarTorneoEst(t) {
     publicadoEn: String(t?.publicadoEn || "").trim(),
     jugadores,
     logKillersNoResueltos: Array.isArray(t?.logKillersNoResueltos) ? t.logKillersNoResueltos : [],
-    // 97ª entrega: corrección manual del administrador general sobre el total de Kills de cada jugador,
-    // una vez publicado el torneo — Federico reportó quejas de jugadores sobre ese número y pidió poder
-    // ajustarlo directamente (acción "editarKills" más abajo), acotado entre 0 y (jugadores del
-    // torneo - 1). Cuando un alias tiene entrada acá, pisa el tally calculado a partir de `eliminadoPor`/
-    // `logKillersNoResueltos` (ver `killsPorAliasTorneo` en Estadisticas.jsx) — el resto de los alias
-    // sigue mostrando el tally calculado sin cambios.
-    killsManual: Object.fromEntries(
-      Object.entries(t?.killsManual || {})
-        .map(([alias, n]) => [String(alias || "").trim(), Math.max(0, Math.round(Number(n) || 0))])
-        .filter(([alias]) => alias)
+    // 101ª entrega: reemplaza por completo `killsManual` (97ª/98ª entrega) — Federico señaló que corregir
+    // el NÚMERO total de Kills directamente estaba mal planteado: lo que hace falta es decir QUIÉN mató a
+    // QUIÉN, y que el total se derive de ahí, igual que el tally normal a partir de `eliminadoPor`.
+    // `killsAsignados` es un mapa víctima(alias) → killer(alias) — una asignación manual del administrador
+    // general, posterior a la publicación, que PISA el `eliminadoPor` original de esa víctima (si tenía
+    // uno) o simplemente se suma (si no tenía). Reasignar la misma víctima a otro killer reemplaza la
+    // entrada — nunca convive más de un killer por víctima. Cualquier corrección vieja guardada en
+    // `killsManual` (un número suelto, sin víctima asociada) no tiene cómo migrarse a este esquema nuevo
+    // y se descarta al normalizar — si Federico la necesita de nuevo, se vuelve a asignar con el killer y
+    // la víctima reales desde el botón "+ Agregar Killer".
+    killsAsignados: Object.fromEntries(
+      Object.entries(t?.killsAsignados || {})
+        .map(([killed, killer]) => [String(killed || "").trim(), String(killer || "").trim()])
+        .filter(([killed, killer]) => killed && killer)
     ),
   };
 }
@@ -203,16 +207,19 @@ export default async (req) => {
       return new Response(JSON.stringify(actual), { headers: HEADERS });
     }
 
-    // accion "editarKills" (97ª entrega): el administrador general corrige a mano el total de Kills de
-    // un jugador en un torneo YA PUBLICADO (ver comentario en normalizarTorneoEst). `kills` debe ser un
-    // entero entre 0 y (cantidad de jugadores del torneo - 1) — nunca puede haber más kills que
-    // eliminaciones posibles en la mesa. El chequeo de rol ("Administrador General") es responsabilidad
-    // del cliente (Estadisticas.jsx), mismo criterio que el resto del sitio — ver "Nota de permisos" en
-    // tablero.js.
-    if (body?.accion === "editarKills") {
+    // accion "asignarKiller" (101ª entrega): reemplaza "editarKills" (97ª/98ª) — en vez de corregir el
+    // NÚMERO total de Kills de un jugador a mano, el administrador general dice quién (`killer`) eliminó
+    // a quién (`killed`), en un torneo YA PUBLICADO. Si `killed` ya tenía un killer asignado (manual o el
+    // `eliminadoPor` original), esta asignación lo REEMPLAZA — nunca convive más de un killer por víctima,
+    // así que el total del killer viejo baja solo y el del nuevo sube, sin tocar nada más. Si `killed` no
+    // tenía ninguno, simplemente se agrega. El chequeo de rol ("Administrador General") es
+    // responsabilidad del cliente (Estadisticas.jsx), mismo criterio que el resto del sitio — ver "Nota
+    // de permisos" en tablero.js.
+    if (body?.accion === "asignarKiller") {
       const campKey = String(body.campeonato || "").trim();
       const fechaKey = String(body.fecha || "").trim();
-      const alias = String(body.alias || "").trim();
+      const killer = String(body.killer || "").trim();
+      const killed = String(body.killed || "").trim();
       const torneo = actual.torneos[campKey]?.[fechaKey];
       if (!torneo) {
         return new Response(JSON.stringify({ error: "No se encontró ese torneo." }), { status: 404, headers: HEADERS });
@@ -220,20 +227,37 @@ export default async (req) => {
       if (!torneo.publicado) {
         return new Response(JSON.stringify({ error: "El torneo todavía no está publicado." }), { status: 400, headers: HEADERS });
       }
-      const totalJugadores = Object.keys(torneo.jugadores || {}).length;
-      const existeAlias = Object.values(torneo.jugadores || {}).some((j) => j.alias === alias);
-      if (!alias || !existeAlias) {
-        return new Response(JSON.stringify({ error: "No se encontró ese jugador en el torneo." }), { status: 400, headers: HEADERS });
+      const jugadoresTorneo = Object.values(torneo.jugadores || {});
+      const existeKiller = jugadoresTorneo.some((j) => j.alias === killer);
+      const existeKilled = jugadoresTorneo.some((j) => j.alias === killed);
+      if (!killer || !existeKiller || !killed || !existeKilled) {
+        return new Response(JSON.stringify({ error: "No se encontró a ese killer o a esa víctima en el torneo." }), { status: 400, headers: HEADERS });
       }
+      if (killer === killed) {
+        return new Response(JSON.stringify({ error: "Un jugador no puede eliminarse a sí mismo." }), { status: 400, headers: HEADERS });
+      }
+      const totalJugadores = jugadoresTorneo.length;
       const maximo = Math.max(0, totalJugadores - 1);
-      const kills = Math.round(Number(body.kills));
-      if (!Number.isFinite(kills) || kills < 0 || kills > maximo) {
+      // tally efectivo DESPUÉS de la reasignación: se recorre todo el torneo usando, para cada víctima, la
+      // asignación manual vigente si la hay (con `killed` ya apuntando al `killer` nuevo) o si no el
+      // `eliminadoPor` original — exactamente la misma regla que usa `killsPorAliasTorneo` en
+      // Estadisticas.jsx, para que el límite se valide contra el mismo número que se le muestra a Federico.
+      const asignNueva = { ...(torneo.killsAsignados || {}), [killed]: killer };
+      const tally = {};
+      for (const j of jugadoresTorneo) {
+        const k = Object.prototype.hasOwnProperty.call(asignNueva, j.alias) ? asignNueva[j.alias] : j.eliminadoPor;
+        if (k) tally[k] = (tally[k] || 0) + 1;
+      }
+      (torneo.logKillersNoResueltos || []).forEach((l) => {
+        if (l.asignadoA) tally[l.asignadoA] = (tally[l.asignadoA] || 0) + 1;
+      });
+      if ((tally[killer] || 0) > maximo) {
         return new Response(
-          JSON.stringify({ error: `El número de kills debe estar entre 0 y ${maximo}.` }),
+          JSON.stringify({ error: `"${killer}" quedaría con ${tally[killer]} kills en este torneo — no puede superar ${maximo} (jugadores del torneo − 1).` }),
           { status: 400, headers: HEADERS }
         );
       }
-      torneo.killsManual = { ...(torneo.killsManual || {}), [alias]: kills };
+      torneo.killsAsignados = asignNueva;
       await store.setJSON("data", actual);
       await syncEstadisticas(actual.torneos, actual.apodos);
       return new Response(JSON.stringify(actual), { headers: HEADERS });

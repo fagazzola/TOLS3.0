@@ -1584,12 +1584,7 @@ export default function Cobranza({ session, perfiles }) {
       {vista === "finanzas" && (
         <div className="section">
           <div className="section-head">
-            <div className="section-title">Finanzas generales — {campeonatoSel}</div>
-          </div>
-          <div className="section-sub" style={{ marginTop: 0 }}>
-            Al {fechaHoyStr}. Mismo formato que la hoja "Finanzas" que Federico armó para llevar el control —
-            calculado siempre sobre los pagos y depósitos ya confirmados desde "Registrar pagos y depósitos" y
-            los montos que ya calcula Estadísticas por jugador y torneo.
+            <div className="section-title">Finanzas Generales (al {fechaHoyStr})</div>
           </div>
 
           <div className="finanzas-cols">
@@ -1650,7 +1645,7 @@ export default function Cobranza({ session, perfiles }) {
 
                 <FilaFin label="Centavos acumulados"><Monto valor={centavosAcumulados} centavos /></FilaFin>
 
-                <FilaSeccionFin label="Acum. Campeonato (al momento)" />
+                <FilaSeccionFin label="Reserva para el Campeonato" />
                 <FilaFin label="Total reservado" bold><Monto valor={acumCampeonatoAlMomento} forzarNegativo /></FilaFin>
                 {acumCampeonatoPorLugar.map((l, i) => (
                   <FilaFin key={i} label={l.reyKiller ? "Rey Killer" : l.label} sangria>
@@ -1661,28 +1656,12 @@ export default function Cobranza({ session, perfiles }) {
                   <FilaFin label="Sin lugares configurados" sangria>—</FilaFin>
                 )}
 
-                <FilaSeccionFin label="Ingresos − Egresos" />
+                <FilaSeccionFin label="Pasivo" />
                 <FilaFin label="Existente en la cuenta de banco"><Monto valor={balanceGeneral} /></FilaFin>
-                <FilaFin label="Reservar"><Monto valor={reservarAcum} forzarNegativo /></FilaFin>
+                <FilaFin label="Reservado"><Monto valor={reservarAcum} forzarNegativo /></FilaFin>
                 <FilaFin label="Gastos pendientes"><Monto valor={gastosPendientes} forzarNegativo /></FilaFin>
-                <FilaFin label="Diff" bold><Monto valor={diffCuenta} /></FilaFin>
+                <FilaFin label="Remanente real" bold><Monto valor={diffCuenta} /></FilaFin>
               </TablaFin>
-              <div className="section-sub" style={{ margin: "0 0 10px" }}>
-                Presupuesto configurado en el Tablero de Control (Tesorero y Hosting son fijos, la Pulsera puede
-                variar), no lo efectivamente depositado — se toma inicialmente de las inscripciones.
-              </div>
-              <div className="section-sub" style={{ margin: "0 0 10px" }}>
-                "Acum. Campeonato" es el monto ya RESERVADO por lugar (Provisión del 15% repartida según los %
-                del Tablero de Control), no un pago confirmado — todavía no hay ninguna forma de registrar desde
-                "Registrar pagos y depósitos" el pago real de este premio (de fin de campeonato). Si quieres
-                llevar esto en el sitio, lo podemos agregar como un motivo de Depósito nuevo en una próxima
-                entrega.
-              </div>
-              <div className="section-sub">
-                "Existente en la cuenta de banco" es el dinero real que ya entró y salió (Subtotal ingresos −
-                Subtotal egresos). "Diff" lo valida: le resta lo que todavía hay que reservar para el acumulado
-                y los gastos operativos presupuestados que todavía están pendientes de pagar.
-              </div>
             </div>
           </div>
         </div>

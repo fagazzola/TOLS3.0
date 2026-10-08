@@ -103,7 +103,10 @@ export function plantillaRegistroExitoso(nombre, numeroRegistro) {
 // protagonista: grande, centrado y en rojo, con los centavos siempre iguales al número de registro del
 // jugador (mismo campo que ya se usa como "id" en tols-jugadores y que ya se le explicó al jugador en el
 // correo de bienvenida) — así el Tesorero identifica de quién es cada depósito.
-export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegistro) {
+// 103ª entrega: `fechaLimite` (opcional) — a pedido de Federico, la fecha límite para pagar ahora la
+// pone el Tesorero a mano (recuadro en "Torneos publicados", con default "viernes xx de mmmm" de la
+// semana en curso) en vez de salir siempre fija como "el viernes de esta semana".
+export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegistro, fechaLimite) {
   const num = String(numeroRegistro).padStart(2, "0");
   const monto = Math.round(Math.abs(Number(montoDeuda) || 0)).toLocaleString("en-US");
   return `
@@ -130,7 +133,7 @@ export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegi
         de <strong>BBVA</strong> a nombre de <strong>Oscar del Valle</strong>.
       </p>
       <p style="margin:22px 0 4px; color:#b6c2cd; font-size:14px;">
-        Te recordamos que la fecha límite para pagar es el <strong>viernes de esta semana</strong>.
+        Te recordamos que la fecha límite para pagar es el <strong>${fechaLimite || "viernes de esta semana"}</strong>.
       </p>
       <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
         En caso de no recibir tu pago, estarás inhabilitado para jugar el siguiente torneo.

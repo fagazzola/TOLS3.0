@@ -138,15 +138,49 @@ function etiquetaCorta(entry) {
   if (!entry) return "";
   return entry.tipo === "Main" ? `${entry.numero} - Main` : `${entry.numero}`;
 }
+// 103ª entrega: "fecha límite" por default en "Torneos publicados" (antes "Resultados de Torneos") — a
+// pedido de Federico, el viernes de la semana EN CURSO (domingo..sábado), como texto ya armado para el
+// cuerpo del correo de "Saldo Torneo" (reemplaza el "viernes de esta semana" fijo que tenía la plantilla).
+const MESES_LARGOS = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+function viernesSemanaActualTexto() {
+  const hoy = new Date();
+  const viernes = new Date(hoy);
+  viernes.setDate(hoy.getDate() + (5 - hoy.getDay()));
+  return `viernes ${viernes.getDate()} de ${MESES_LARGOS[viernes.getMonth()]}`;
+}
+// 103ª entrega: mismo criterio de formato que <Monto/> (más arriba), pero como string plano — para armar
+// el texto copiable de "Corte de cobranza" (WhatsApp no tiene celdas de color, así que el texto usa un
+// emoji por fila en vez del fondo de la celda).
+function montoTxt(n, centavos = false) {
+  const v = Number(n) || 0;
+  const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
+  return v < 0 ? `(${plano})` : plano;
+}
+// 103ª entrega: "No. de Referencia" de "Corte de cobranza" — a pedido de Federico, en formato "xx.00"
+// (mismo número de registro que ya se usa en toda la app como `j.id`, solo que acá siempre con dos
+// decimales en ".00", para que la columna se vea alineada con el resto de las cifras de la tabla).
+function refFmt(id) {
+  return (Number(id) || 0).toFixed(2);
+}
 
 export default function Cobranza({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod4");
 
-  const [vista, setVista] = useState("resultado"); // "resultado" | "movimientos" | "estado" | "finanzas"
-  const [fechaSaldoSel, setFechaSaldoSel] = useState(""); // 74ª entrega: fecha del torneo elegido en "Resultados de Torneos"
+  const [vista, setVista] = useState("resultado"); // "resultado" | "corte" | "movimientos" | "estado" | "finanzas"
+  const [fechaSaldoSel, setFechaSaldoSel] = useState(""); // 74ª entrega: fecha del torneo elegido en "Torneos publicados" (antes "Resultados de Torneos")
   const [seleccionSaldo, setSeleccionSaldo] = useState(() => new Set());
   const [enviandoSaldo, setEnviandoSaldo] = useState(false);
   const [envioSaldoAviso, setEnvioSaldoAviso] = useState("");
+  // 103ª entrega: fecha límite editable que va en el cuerpo del correo de "Saldo Torneo" — por default el
+  // viernes de la semana en curso, el Tesorero la puede cambiar antes de enviar.
+  const [fechaLimiteSaldo, setFechaLimiteSaldo] = useState(() => viernesSemanaActualTexto());
+  // 103ª entrega: nuevo botón "Corte de cobranza" — combo propio (mismos torneos publicados) y aviso de
+  // "Copiado" transitorio al copiar la radiografía para WhatsApp.
+  const [fechaCorteSel, setFechaCorteSel] = useState("");
+  const [corteCopiado, setCorteCopiado] = useState(false);
   const [data, setData] = useState(null); // { jugadores, movimientos, resumen, adeudos, proximaFecha, enviosSaldo }
   const [tableroMapa, setTableroMapa] = useState({});
   const [torneosCal, setTorneosCal] = useState([]);
@@ -236,6 +270,8 @@ export default function Cobranza({ session, perfiles }) {
     setFechaSaldoSel("");
     setSeleccionSaldo(new Set());
     setEnvioSaldoAviso("");
+    setFechaCorteSel("");
+    setCorteCopiado(false);
   }, [campeonatoSel]);
 
   // 74ª entrega: numeración cronológica 1..n de los torneos Regular/Main de cada campeonato (ver
@@ -325,6 +361,86 @@ export default function Cobranza({ session, perfiles }) {
     if (!torneo || !jug) return 0;
     const jt = jugadorEnTorneo(torneo, jug);
     return jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+  }
+
+  // 103ª entrega: filas de "Torneos publicados" (jugadores con saldo negativo en el torneo elegido) —
+  // se saca del JSX (donde vivía como un `const filas = ...` dentro del IIFE de renderizado) a un
+  // `useMemo` propio, para poder mostrar "xx correos enviados de yy" en el renglón del combo sin
+  // duplicar este cálculo.
+  const filasSaldo = useMemo(() => {
+    if (!fechaSaldoSel) return [];
+    const torneo = estData?.torneos?.[campeonatoSel]?.[fechaSaldoSel];
+    return directorioActivo
+      .map((j) => {
+        const jt = jugadorEnTorneo(torneo, j);
+        const resultado = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+        return { jugador: j, alias: nombreCorto(j), resultado };
+      })
+      .filter((f) => f.resultado < 0)
+      .sort((a, b) => a.resultado - b.resultado);
+  }, [fechaSaldoSel, campeonatoSel, estData, directorioActivo]);
+  const totalCorreosSaldo = filasSaldo.length;
+  const enviadosSaldo = filasSaldo.filter((f) => data?.enviosSaldo?.[`${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`]).length;
+
+  // 103ª entrega: "Corte de cobranza" — radiografía de TODOS los jugadores que participaron en el torneo
+  // elegido (no solo los que deben, a diferencia de "Torneos publicados"). Resultado = Ganancia − Deuda
+  // "considerando los centavos de referencia" (ver plantillaSaldoTorneo()/Centavos acumulados, 78ª/103ª
+  // entregas): si el Tesorero YA registró el pago/depósito de este torneo para este jugador, se usa el
+  // monto REAL confirmado (que trae esos centavos de referencia) en vez del monto teórico de Estadísticas,
+  // para que el corte coincida centavo a centavo con lo efectivamente cobrado/depositado — eso es también
+  // lo que decide el color de la celda de Resultado (ver fondoResultadoCorte() más abajo). Ordenado por
+  // número de referencia (interpretación propia — el pedido de Federico quedó con la frase "ordenada por"
+  // incompleta; fácil de cambiar si quería otro orden).
+  const filasCorte = useMemo(() => {
+    if (!fechaCorteSel) return [];
+    const torneo = estData?.torneos?.[campeonatoSel]?.[fechaCorteSel];
+    return directorioActivo
+      .map((j) => {
+        const jt = jugadorEnTorneo(torneo, j);
+        if (!jt) return null;
+        const debeTotal = Number(jt.debeTotal) || 0;
+        const premioTotal = Number(jt.premioTotal) || 0;
+        const clave = `${campeonatoSel}|${fechaCorteSel}|${j.correo}`;
+        const regPago = data?.pagosTorneo?.[clave];
+        const regDeposito = data?.depositosTorneo?.[clave];
+        const deuda = regPago ? Number(regPago.monto) || 0 : debeTotal;
+        const ganancia = regDeposito ? Number(regDeposito.monto) || 0 : premioTotal;
+        return {
+          jugador: j,
+          deuda,
+          ganancia,
+          resultado: ganancia - deuda,
+          pagado: !!regPago,
+          depositado: !!regDeposito,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0));
+  }, [fechaCorteSel, campeonatoSel, estData, directorioActivo, data]);
+  // fondo de la celda de Resultado: deuda (resultado<0) → verde si ya se registró el Pago, rojo si no;
+  // ganancia (resultado>=0) → azul celeste si ya se registró el Depósito, blanco si no.
+  function fondoResultadoCorte(f) {
+    if (f.resultado < 0) return f.pagado ? "#e3f3e6" : "#fbe3e3";
+    return f.depositado ? "#d9ecfa" : "#ffffff";
+  }
+  function copiarCorteWhatsApp() {
+    const entry = torneosSaldoOpciones.find((t) => t.fecha === fechaCorteSel);
+    const etiquetaSel = etiquetaCorta(entry);
+    const lineas = [
+      `*Corte de Cobranza — Torneo ${etiquetaSel}* (${fechaFmt(fechaCorteSel)}) — ${campeonatoSel}`,
+      "",
+      ...filasCorte.map((f) => {
+        const emoji = f.resultado < 0 ? (f.pagado ? "🟢" : "🔴") : f.depositado ? "🔵" : "⚪";
+        return `${emoji} #${refFmt(f.jugador.id)} ${f.jugador.nombre} (${nombreCorto(f.jugador)}) — Deuda: ${montoTxt(-f.deuda)} | Ganancia: ${montoTxt(f.ganancia)} | Resultado: ${montoTxt(f.resultado, true)}`;
+      }),
+    ];
+    navigator.clipboard
+      .writeText(lineas.join("\n"))
+      .then(() => {
+        setCorteCopiado(true);
+        setTimeout(() => setCorteCopiado(false), 2500);
+      })
+      .catch(() => {});
   }
 
   // 76ª entrega: opciones del combo de "motivo" según el tipo y el jugador elegidos en `nuevoMov` — un
@@ -927,9 +1043,21 @@ export default function Cobranza({ session, perfiles }) {
 
       {error && <div className="login-error">{error}</div>}
 
-      <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 20 }}>
+      {/* 103ª entrega: el combo de campeonato sube un renglón arriba de los botones, a la extrema derecha. */}
+      <div className="filtro-estatus" style={{ display: "flex", marginTop: 20 }}>
+        <select className="field" style={{ maxWidth: 220, marginLeft: "auto" }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
+          {campeonatos.nombres.map((n) => (
+            <option key={n} value={n}>
+              {n}
+              {n === campeonatos.activo ? " (activo)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 10 }}>
         {[
-          ["resultado", "Resultados de Torneos"],
+          ["resultado", "Enviar correos con deudas"],
+          ["corte", "Corte de cobranza"],
           ["movimientos", "Registrar pagos y depósitos"],
           ["estado", "Estado de cuenta"],
           // 95ª entrega: "Finanzas generales" se reactivó a pedido de Federico (inhabilitada
@@ -946,38 +1074,61 @@ export default function Cobranza({ session, perfiles }) {
             {label}
           </button>
         ))}
-        <select className="field" style={{ maxWidth: 220, marginLeft: "auto" }} value={campeonatoSel} onChange={(e) => setCampeonatoSel(e.target.value)}>
-          {campeonatos.nombres.map((n) => (
-            <option key={n} value={n}>
-              {n}
-              {n === campeonatos.activo ? " (activo)" : ""}
-            </option>
-          ))}
-        </select>
       </div>
 
       {vista === "resultado" && (
         <div className="section">
           <div className="section-head">
-            <div className="section-title">Resultados de Torneos</div>
+            <div className="section-title">Torneos publicados</div>
           </div>
-          <select
-            className="field"
-            style={{ maxWidth: 280 }}
-            value={fechaSaldoSel}
-            onChange={(e) => {
-              setFechaSaldoSel(e.target.value);
-              setSeleccionSaldo(new Set());
-              setEnvioSaldoAviso("");
-            }}
-          >
-            <option value="">— elegir torneo —</option>
-            {torneosSaldoOpciones.map((t) => (
-              <option key={t.fecha} value={t.fecha}>
-                {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <select
+              className="field"
+              style={{ maxWidth: 280 }}
+              value={fechaSaldoSel}
+              onChange={(e) => {
+                setFechaSaldoSel(e.target.value);
+                setSeleccionSaldo(new Set());
+                setEnvioSaldoAviso("");
+                setFechaLimiteSaldo(viernesSemanaActualTexto());
+              }}
+            >
+              <option value="">— elegir torneo —</option>
+              {torneosSaldoOpciones.map((t) => (
+                <option key={t.fecha} value={t.fecha}>
+                  {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+                </option>
+              ))}
+            </select>
+
+            {/* 103ª entrega: aviso de cuántos correos de "Saldo Torneo" ya se enviaron para el torneo
+                elegido, con un triángulo de warning si todavía falta alguno. */}
+            {fechaSaldoSel && totalCorreosSaldo > 0 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
+                {enviadosSaldo < totalCorreosSaldo && (
+                  <span style={{ fontSize: 16 }} title="Todavía no se enviaron todos los correos">
+                    ⚠️
+                  </span>
+                )}
+                <span>{enviadosSaldo} correos enviados de {totalCorreosSaldo}</span>
+              </span>
+            )}
+
+            {/* 103ª entrega: fecha límite editable para el cuerpo del correo — default el viernes de la
+                semana en curso, a la derecha del mismo renglón. */}
+            {fechaSaldoSel && (
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 12.5, color: "#667", whiteSpace: "nowrap" }}>Fecha límite:</label>
+                <input
+                  className="field"
+                  style={{ maxWidth: 200 }}
+                  value={fechaLimiteSaldo}
+                  onChange={(e) => setFechaLimiteSaldo(e.target.value)}
+                  placeholder="viernes xx de mmmm"
+                />
+              </div>
+            )}
+          </div>
 
           {torneosSaldoOpciones.length === 0 && (
             <p className="section-sub">Todavía no hay torneos publicados en Estadísticas para el campeonato ({campeonatoSel}).</p>
@@ -988,20 +1139,8 @@ export default function Cobranza({ session, perfiles }) {
 
           {fechaSaldoSel && (() => {
             const entry = torneosSaldoOpciones.find((t) => t.fecha === fechaSaldoSel);
-            const torneo = estData?.torneos?.[campeonatoSel]?.[fechaSaldoSel];
             const etiquetaSel = etiquetaCorta(entry);
-
-            // 74ª entrega: "prácticamente la tabla de Clasificación General, solo con la columna
-            // Resultado" — mismo cálculo de resultado (premioTotal - debeTotal) que ya usa Estadísticas,
-            // pero acotado a un único torneo, filtrado a saldos negativos y ordenado de menor a mayor
-            // (el más endeudado primero) para que el Tesorero valide de arriba hacia abajo.
-            const filas = directorioActivo
-              .map((j) => ({ jugador: j, alias: nombreCorto(j), resultado: (() => {
-                const jt = jugadorEnTorneo(torneo, j);
-                return jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
-              })() }))
-              .filter((f) => f.resultado < 0)
-              .sort((a, b) => a.resultado - b.resultado);
+            const filas = filasSaldo;
 
             if (!filas.length) {
               return <p className="section-sub">Ningún jugador tiene saldo negativo en el torneo {etiquetaSel} ({fechaFmt(fechaSaldoSel)}).</p>;
@@ -1040,6 +1179,7 @@ export default function Cobranza({ session, perfiles }) {
                       torneoLabel: etiquetaSel,
                       monto: f.resultado,
                       numeroRegistro: f.jugador.id,
+                      fechaLimite: fechaLimiteSaldo,
                     }),
                   });
                   const json = await r.json();
@@ -1105,6 +1245,78 @@ export default function Cobranza({ session, perfiles }) {
               </>
             );
           })()}
+        </div>
+      )}
+
+      {vista === "corte" && (
+        <div className="section">
+          <div className="section-head">
+            <div className="section-title">Corte de cobranza</div>
+          </div>
+          <select
+            className="field"
+            style={{ maxWidth: 280 }}
+            value={fechaCorteSel}
+            onChange={(e) => {
+              setFechaCorteSel(e.target.value);
+              setCorteCopiado(false);
+            }}
+          >
+            <option value="">— elegir torneo —</option>
+            {torneosSaldoOpciones.map((t) => (
+              <option key={t.fecha} value={t.fecha}>
+                {etiquetaCorta(t)} ({fechaFmt(t.fecha)})
+              </option>
+            ))}
+          </select>
+
+          {torneosSaldoOpciones.length === 0 && (
+            <p className="section-sub">Todavía no hay torneos publicados en Estadísticas para el campeonato ({campeonatoSel}).</p>
+          )}
+          {!fechaCorteSel && torneosSaldoOpciones.length > 0 && (
+            <p className="section-sub">Elegí un torneo ya publicado para ver la radiografía de cobranza.</p>
+          )}
+
+          {fechaCorteSel && (
+            filasCorte.length === 0 ? (
+              <p className="section-sub">Ningún jugador del directorio activo participó en ese torneo.</p>
+            ) : (
+              <>
+                <div style={{ marginTop: 12, marginBottom: 10 }}>
+                  <button className="btn btn-secondary" onClick={copiarCorteWhatsApp}>
+                    📋 Copiar para WhatsApp
+                  </button>
+                  {corteCopiado && <span className="check-line check-ok" style={{ marginLeft: 10 }}>Copiado ✓</span>}
+                </div>
+                <div className="tbl" style={{ marginTop: 4 }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: "0.6fr 1.6fr 1.1fr 0.9fr 0.9fr 1fr" }}>
+                    <div>No. Ref.</div>
+                    <div>Nombre y Apellido</div>
+                    <div>Alias PokerStars</div>
+                    <div>Deuda</div>
+                    <div>Ganancia</div>
+                    <div>Resultado</div>
+                  </div>
+                  {filasCorte.map((f) => (
+                    <div className="trow" style={{ gridTemplateColumns: "0.6fr 1.6fr 1.1fr 0.9fr 0.9fr 1fr" }} key={f.jugador.correo}>
+                      <div className="num">{refFmt(f.jugador.id)}</div>
+                      <div>{f.jugador.nombre}</div>
+                      <div>{nombreCorto(f.jugador)}</div>
+                      <div className="num right"><Monto valor={f.deuda} forzarNegativo /></div>
+                      <div className="num right"><Monto valor={f.ganancia} /></div>
+                      <div className="num right" style={{ background: fondoResultadoCorte(f) }}>
+                        <Monto valor={f.resultado} centavos />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="section-sub" style={{ marginTop: 10 }}>
+                  Resultado: 🟢 verde = debe y ya pagó · 🔴 rojo = debe y todavía no · 🔵 azul = cobra y ya se le
+                  depositó · ⚪ blanco = cobra y todavía no se le depositó.
+                </p>
+              </>
+            )
+          )}
         </div>
       )}
 

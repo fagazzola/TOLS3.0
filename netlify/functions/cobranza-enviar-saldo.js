@@ -26,6 +26,10 @@ export default async (req) => {
   const torneoLabel = String(body?.torneoLabel || "").trim();
   const monto = Number(body?.monto);
   const numeroRegistro = body?.numeroRegistro;
+  // 103ª entrega: fecha límite editada por el Tesorero en "Torneos publicados" (default "viernes xx de
+  // mmmm" de la semana en curso) — opcional, plantillaSaldoTorneo() cae a su texto fijo de siempre si no
+  // llega nada.
+  const fechaLimite = String(body?.fechaLimite || "").trim();
 
   if (!correo || !campeonato || !fecha || !torneoLabel || !Number.isFinite(monto) || numeroRegistro === undefined || numeroRegistro === null) {
     return new Response(JSON.stringify({ error: "Faltan datos del jugador o del torneo para armar el correo." }), { status: 400, headers: HEADERS });
@@ -35,7 +39,7 @@ export default async (req) => {
     await enviarCorreo({
       to: correo,
       subject: `Saldo Torneo ${torneoLabel} - TOLS 3.0`,
-      html: plantillaSaldoTorneo(nombre, torneoLabel, monto, numeroRegistro),
+      html: plantillaSaldoTorneo(nombre, torneoLabel, monto, numeroRegistro, fechaLimite),
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message || "No se pudo enviar el correo." }), { status: 502, headers: HEADERS });

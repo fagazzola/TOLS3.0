@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { puedeEditar } from "../lib/permisos.js";
 import { mapaNumeracionTorneos } from "../lib/gamenight.js";
+// 104ª entrega: "Corte de cobranza" se copia como IMAGEN (no texto) para pegar directo en WhatsApp —
+// html2canvas renderiza el <table> real a un <canvas>, que se manda al portapapeles con la Clipboard API.
+import html2canvas from "html2canvas";
 
 const API = "/api/cobranza";
 const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
@@ -151,19 +154,20 @@ function viernesSemanaActualTexto() {
   viernes.setDate(hoy.getDate() + (5 - hoy.getDay()));
   return `viernes ${viernes.getDate()} de ${MESES_LARGOS[viernes.getMonth()]}`;
 }
-// 103ª entrega: mismo criterio de formato que <Monto/> (más arriba), pero como string plano — para armar
-// el texto copiable de "Corte de cobranza" (WhatsApp no tiene celdas de color, así que el texto usa un
-// emoji por fila en vez del fondo de la celda).
-function montoTxt(n, centavos = false) {
+// 103ª/104ª entrega: "No. de Referencia" de "Corte de cobranza" — mismo número de registro que ya se usa
+// en toda la app como `j.id`, con dos dígitos siempre ("00", "07", "12"...). La 103ª entrega lo había
+// puesto en formato decimal (".00"); Federico corrigió en la 104ª a este formato de dos dígitos.
+function refFmt(id) {
+  return String(Math.round(Number(id) || 0)).padStart(2, "0");
+}
+// 104ª entrega: texto plano de un monto (mismo criterio de signo/centavos que <Monto/>, pero SIN la clase
+// money-pos/money-neg) — la celda de Resultado de "Corte de cobranza" pinta su propio color de letra
+// (blanco sobre el fondo intenso), y <Monto/> pisaría ese color porque sus clases fijan el color del
+// <span> directamente. Usado solo ahí.
+function montoPlano(n, centavos = false) {
   const v = Number(n) || 0;
   const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
   return v < 0 ? `(${plano})` : plano;
-}
-// 103ª entrega: "No. de Referencia" de "Corte de cobranza" — a pedido de Federico, en formato "xx.00"
-// (mismo número de registro que ya se usa en toda la app como `j.id`, solo que acá siempre con dos
-// decimales en ".00", para que la columna se vea alineada con el resto de las cifras de la tabla).
-function refFmt(id) {
-  return (Number(id) || 0).toFixed(2);
 }
 
 export default function Cobranza({ session, perfiles }) {
@@ -177,10 +181,16 @@ export default function Cobranza({ session, perfiles }) {
   // 103ª entrega: fecha límite editable que va en el cuerpo del correo de "Saldo Torneo" — por default el
   // viernes de la semana en curso, el Tesorero la puede cambiar antes de enviar.
   const [fechaLimiteSaldo, setFechaLimiteSaldo] = useState(() => viernesSemanaActualTexto());
-  // 103ª entrega: nuevo botón "Corte de cobranza" — combo propio (mismos torneos publicados) y aviso de
-  // "Copiado" transitorio al copiar la radiografía para WhatsApp.
+  // 103ª entrega: nuevo botón "Corte de cobranza" — combo propio (mismos torneos publicados). 104ª
+  // entrega: el "copiado" pasó de texto a una IMAGEN de la tabla (html2canvas + Clipboard API) — `corteRef`
+  // apunta al <table> real que se renderiza a canvas; `corteGenerando`/`corteAviso` son el estado de ese
+  // proceso (puede tardar un segundo en armar la imagen, y puede terminar en "copiado" o, si el navegador
+  // no soporta pegar imágenes desde JS, en una descarga de respaldo).
   const [fechaCorteSel, setFechaCorteSel] = useState("");
   const [corteCopiado, setCorteCopiado] = useState(false);
+  const [corteGenerando, setCorteGenerando] = useState(false);
+  const [corteAviso, setCorteAviso] = useState("");
+  const corteRef = useRef(null);
   const [data, setData] = useState(null); // { jugadores, movimientos, resumen, adeudos, proximaFecha, enviosSaldo }
   const [tableroMapa, setTableroMapa] = useState({});
   const [torneosCal, setTorneosCal] = useState([]);
@@ -388,7 +398,7 @@ export default function Cobranza({ session, perfiles }) {
   // entregas): si el Tesorero YA registró el pago/depósito de este torneo para este jugador, se usa el
   // monto REAL confirmado (que trae esos centavos de referencia) en vez del monto teórico de Estadísticas,
   // para que el corte coincida centavo a centavo con lo efectivamente cobrado/depositado — eso es también
-  // lo que decide el color de la celda de Resultado (ver fondoResultadoCorte() más abajo). Ordenado por
+  // lo que decide el color de la celda de Resultado (ver estiloResultadoCorte() más abajo). Ordenado por
   // número de referencia (interpretación propia — el pedido de Federico quedó con la frase "ordenada por"
   // incompleta; fácil de cambiar si quería otro orden).
   const filasCorte = useMemo(() => {
@@ -417,30 +427,57 @@ export default function Cobranza({ session, perfiles }) {
       .filter(Boolean)
       .sort((a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0));
   }, [fechaCorteSel, campeonatoSel, estData, directorioActivo, data]);
-  // fondo de la celda de Resultado: deuda (resultado<0) → verde si ya se registró el Pago, rojo si no;
-  // ganancia (resultado>=0) → azul celeste si ya se registró el Depósito, blanco si no.
-  function fondoResultadoCorte(f) {
-    if (f.resultado < 0) return f.pagado ? "#e3f3e6" : "#fbe3e3";
-    return f.depositado ? "#d9ecfa" : "#ffffff";
+  // 104ª entrega: Federico pidió que el color de Resultado se vea "intenso" en TODA la celda (antes era
+  // un tinte pastel, "se veía como verde claro y rosa") — ahora el fondo es el color sólido y la letra se
+  // pone clara (blanca) para que siga siendo legible encima. Misma regla de siempre: deuda (resultado<0)
+  // → verde si ya se registró el Pago, rojo si no; ganancia (resultado>=0) → azul si ya se registró el
+  // Depósito, blanco (con letra oscura, no blanca sobre blanco) si no.
+  function estiloResultadoCorte(f) {
+    if (f.resultado < 0) return f.pagado ? { background: "#1e7d32", color: "#fff" } : { background: "#c62828", color: "#fff" };
+    return f.depositado ? { background: "#0277bd", color: "#fff" } : { background: "#ffffff", color: "#222" };
   }
-  function copiarCorteWhatsApp() {
-    const entry = torneosSaldoOpciones.find((t) => t.fecha === fechaCorteSel);
-    const etiquetaSel = etiquetaCorta(entry);
-    const lineas = [
-      `*Corte de Cobranza — Torneo ${etiquetaSel}* (${fechaFmt(fechaCorteSel)}) — ${campeonatoSel}`,
-      "",
-      ...filasCorte.map((f) => {
-        const emoji = f.resultado < 0 ? (f.pagado ? "🟢" : "🔴") : f.depositado ? "🔵" : "⚪";
-        return `${emoji} #${refFmt(f.jugador.id)} ${f.jugador.nombre} (${nombreCorto(f.jugador)}) — Deuda: ${montoTxt(-f.deuda)} | Ganancia: ${montoTxt(f.ganancia)} | Resultado: ${montoTxt(f.resultado, true)}`;
-      }),
-    ];
-    navigator.clipboard
-      .writeText(lineas.join("\n"))
-      .then(() => {
-        setCorteCopiado(true);
-        setTimeout(() => setCorteCopiado(false), 2500);
-      })
-      .catch(() => {});
+  // 104ª entrega: "Copiar para WhatsApp" pasó de texto a IMAGEN — Federico: "el copiado de la tabla tiene
+  // que ser formato imagen para subirlo al WhatsApp". html2canvas renderiza el <table> real (`corteRef`,
+  // con sus colores de celda ya puestos) a un <canvas>, que se convierte a PNG y se manda al portapapeles
+  // con la Clipboard API (`ClipboardItem`) — así se puede pegar directo en un chat de WhatsApp Web/
+  // escritorio con Ctrl+V, igual que una captura de pantalla. Si el navegador no soporta escribir imágenes
+  // al portapapeles desde JS (Firefox/Safari viejos), se descarga el PNG como respaldo para adjuntarlo a
+  // mano.
+  async function copiarCorteWhatsApp() {
+    if (!corteRef.current) return;
+    setCorteGenerando(true);
+    setCorteAviso("");
+    try {
+      const canvas = await html2canvas(corteRef.current, { backgroundColor: "#ffffff", scale: 2 });
+      canvas.toBlob(async (blob) => {
+        setCorteGenerando(false);
+        if (!blob) {
+          setCorteAviso("No se pudo generar la imagen.");
+          return;
+        }
+        const puedeClipboard = navigator.clipboard && typeof window.ClipboardItem === "function";
+        if (puedeClipboard) {
+          try {
+            await navigator.clipboard.write([new window.ClipboardItem({ "image/png": blob })]);
+            setCorteCopiado(true);
+            setTimeout(() => setCorteCopiado(false), 2500);
+            return;
+          } catch (e) {
+            // cae al respaldo de descarga más abajo
+          }
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `corte-cobranza-${fechaCorteSel}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setCorteAviso("Tu navegador no deja copiar la imagen directo — se descargó el PNG para que lo adjuntes a mano en WhatsApp.");
+      }, "image/png");
+    } catch (e) {
+      setCorteGenerando(false);
+      setCorteAviso("No se pudo generar la imagen de la tabla.");
+    }
   }
 
   // 76ª entrega: opciones del combo de "motivo" según el tipo y el jugador elegidos en `nuevoMov` — un
@@ -1102,13 +1139,14 @@ export default function Cobranza({ session, perfiles }) {
             </select>
 
             {/* 103ª entrega: aviso de cuántos correos de "Saldo Torneo" ya se enviaron para el torneo
-                elegido, con un triángulo de warning si todavía falta alguno. */}
+                elegido — triángulo de warning si todavía falta alguno. 104ª entrega: palomita verde en vez
+                del triángulo cuando ya se envió el 100%. */}
             {fechaSaldoSel && totalCorreosSaldo > 0 && (
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
-                {enviadosSaldo < totalCorreosSaldo && (
-                  <span style={{ fontSize: 16 }} title="Todavía no se enviaron todos los correos">
-                    ⚠️
-                  </span>
+                {enviadosSaldo < totalCorreosSaldo ? (
+                  <span style={{ fontSize: 16 }} title="Todavía no se enviaron todos los correos">⚠️</span>
+                ) : (
+                  <span style={{ fontSize: 16 }} title="Ya se enviaron todos los correos">✅</span>
                 )}
                 <span>{enviadosSaldo} correos enviados de {totalCorreosSaldo}</span>
               </span>
@@ -1282,37 +1320,52 @@ export default function Cobranza({ session, perfiles }) {
               <p className="section-sub">Ningún jugador del directorio activo participó en ese torneo.</p>
             ) : (
               <>
-                <div style={{ marginTop: 12, marginBottom: 10 }}>
-                  <button className="btn btn-secondary" onClick={copiarCorteWhatsApp}>
-                    📋 Copiar para WhatsApp
+                <div style={{ marginTop: 12, marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                  <button className="btn btn-secondary" disabled={corteGenerando} onClick={copiarCorteWhatsApp}>
+                    {corteGenerando ? "Generando imagen…" : "📋 Copiar imagen para WhatsApp"}
                   </button>
-                  {corteCopiado && <span className="check-line check-ok" style={{ marginLeft: 10 }}>Copiado ✓</span>}
+                  {corteCopiado && <span className="check-line check-ok">Copiado ✓</span>}
+                  {corteAviso && <span className="section-sub" style={{ margin: 0 }}>{corteAviso}</span>}
                 </div>
-                <div className="tbl" style={{ marginTop: 4 }}>
-                  <div className="trow thead" style={{ gridTemplateColumns: "0.6fr 1.6fr 1.1fr 0.9fr 0.9fr 1fr" }}>
-                    <div>No. Ref.</div>
-                    <div>Nombre y Apellido</div>
-                    <div>Alias PokerStars</div>
-                    <div>Deuda</div>
-                    <div>Ganancia</div>
-                    <div>Resultado</div>
-                  </div>
-                  {filasCorte.map((f) => (
-                    <div className="trow" style={{ gridTemplateColumns: "0.6fr 1.6fr 1.1fr 0.9fr 0.9fr 1fr" }} key={f.jugador.correo}>
-                      <div className="num">{refFmt(f.jugador.id)}</div>
-                      <div>{f.jugador.nombre}</div>
-                      <div>{nombreCorto(f.jugador)}</div>
-                      <div className="num right"><Monto valor={f.deuda} forzarNegativo /></div>
-                      <div className="num right"><Monto valor={f.ganancia} /></div>
-                      <div className="num right" style={{ background: fondoResultadoCorte(f) }}>
-                        <Monto valor={f.resultado} centavos />
-                      </div>
-                    </div>
-                  ))}
+                {/* 104ª entrega: tabla cuadriculada real (mismo patrón que "Clasificación general" de
+                    Estadísticas — <table>/<th>/<td> con border 1px en cada celda), no el grid de
+                    .tbl/.trow de siempre (que solo tiene línea entre renglones, sin cuadrícula vertical).
+                    `corteRef` es justo este <table> — lo que html2canvas convierte a imagen. */}
+                <div style={{ overflowX: "auto" }}>
+                  <table ref={corteRef} style={{ width: "100%", borderCollapse: "collapse", margin: "4px 0 12px", fontSize: 14, background: "#fff" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>No. Ref.</th>
+                        <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Nombre y Apellido</th>
+                        <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
+                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Deuda</th>
+                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Ganancia</th>
+                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Resultado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filasCorte.map((f) => (
+                        <tr key={f.jugador.correo}>
+                          <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{refFmt(f.jugador.id)}</td>
+                          <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{f.jugador.nombre}</td>
+                          <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{nombreCorto(f.jugador)}</td>
+                          <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>
+                            <Monto valor={f.deuda} forzarNegativo />
+                          </td>
+                          <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>
+                            <Monto valor={f.ganancia} />
+                          </td>
+                          <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", fontWeight: 700, ...estiloResultadoCorte(f) }}>
+                            {montoPlano(f.resultado, true)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
                 <p className="section-sub" style={{ marginTop: 10 }}>
-                  Resultado: 🟢 verde = debe y ya pagó · 🔴 rojo = debe y todavía no · 🔵 azul = cobra y ya se le
-                  depositó · ⚪ blanco = cobra y todavía no se le depositó.
+                  Resultado: verde = debe y ya pagó · rojo = debe y todavía no · azul = cobra y ya se le
+                  depositó · blanco = cobra y todavía no se le depositó.
                 </p>
               </>
             )

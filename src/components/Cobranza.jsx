@@ -169,6 +169,20 @@ function montoPlano(n, centavos = false) {
   const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
   return v < 0 ? `(${plano})` : plano;
 }
+// 105ª entrega: texto de la columna Resultado de "Corte de cobranza" — cuando el jugador debe (resultado
+// negativo), Federico pidió que los "centavos" que se muestran sean el No. de Referencia del jugador
+// (mismo criterio que ya usa `plantillaSaldoTorneo()` para el correo de "Saldo Torneo": "$ XXX.NN", donde
+// NN es su número de registro) en vez de los centavos reales de un pago ya confirmado — de "($ 650)" a
+// "($ 650.07)" si su referencia es "07". Si el resultado es positivo o cero (el jugador cobra), se sigue
+// mostrando el monto real de siempre (con sus propios centavos, si ya se le depositó).
+function textoResultadoCorte(f) {
+  const v = Number(f.resultado) || 0;
+  if (v < 0) {
+    const pesos = Math.round(Math.abs(v)).toLocaleString("en-US");
+    return `($ ${pesos}.${refFmt(f.jugador.id)})`;
+  }
+  return montoPlano(v, true);
+}
 
 export default function Cobranza({ session, perfiles }) {
   const editable = puedeEditar(perfiles, session, "mod4");
@@ -1356,7 +1370,7 @@ export default function Cobranza({ session, perfiles }) {
                             <Monto valor={f.ganancia} />
                           </td>
                           <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", fontWeight: 700, ...estiloResultadoCorte(f) }}>
-                            {montoPlano(f.resultado, true)}
+                            {textoResultadoCorte(f)}
                           </td>
                         </tr>
                       ))}

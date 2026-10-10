@@ -46,18 +46,20 @@ const PODIO_CLASIF = [
   { fondo: "#fbe9dc", borde: "#b5692f" }, // 3° — bronce
 ];
 
+// 106ª entrega: Federico pidió que TODAS las cifras de dinero del sitio siempre muestren 2 decimales
+// ("$ #,000.00" / "($ #,000.00)"), sin importar si el monto es entero o no.
 function money(n) {
-  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function moneyFirmado(n) {
-  const v = Math.round(Number(n || 0));
-  return (v < 0 ? "-" : "") + "$ " + Math.abs(v).toLocaleString("en-US");
+  const v = Number(n) || 0;
+  return (v < 0 ? "-" : "") + "$ " + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // 72ª entrega: formato contable pedido por Federico para montos en negativo — "($ #,##0)" en vez de
 // "-$ #,##0" — usado en Estadísticas para Debe/Saldo/Resultado, igual que en Calendario.jsx.
 function moneyContable(n) {
-  const v = Math.round(Number(n || 0));
-  const abs = Math.abs(v).toLocaleString("en-US");
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return v < 0 ? `($ ${abs})` : `$ ${abs}`;
 }
 function fechaFmt(iso) {
@@ -284,10 +286,15 @@ export default function Estadisticas({ session }) {
         // 72ª entrega: "Usuario Domi" es una cuenta de pruebas del sitio — a pedido de Federico se omite
         // del directorio que alimenta la "Clasificación general" (y de paso, de todo lo demás que ya usa
         // este `directorio`, ya que no tiene sentido mostrarlo en ningún lado de Estadísticas).
+        // 106ª entrega: se quitó el filtro "estatus === Activo" — Federico encontró que un jugador que
+        // pasaba a Inactivo desaparecía de "Clasificación general" junto con TODO su historial (puntos,
+        // killers, resultado de cuando sí estaba activo), lo que además podía descuadrar el matching de
+        // un Excel/chat de WhatsApp subido para un torneo viejo en el que ese jugador sí jugó. Ahora
+        // `directorio` incluye Activos e Inactivos por igual — la tabla de "Clasificación general" es la
+        // que decide cómo distinguirlos visualmente (gris, al final, ver `filasClasifOrdenadas` e ícono
+        // ⏸️ más abajo), sin tocar ningún otro cálculo.
         setDirectorio(
-          (jug?.jugadores || []).filter(
-            (j) => j.estatus === "Activo" && norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi"
-          )
+          (jug?.jugadores || []).filter((j) => norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi")
         );
         setTableroMapa(tablero || {});
         setEstData(est || { torneos: {}, apodos: {} });
@@ -453,8 +460,9 @@ export default function Estadisticas({ session }) {
       Lugar: j.lugar || "",
       ...(esMainActual ? { "Mejor mano": j.mejorMano ? "Sí" : "No" } : {}),
       Puntos: j.puntos ?? 0,
-      "Debe": -(j.debeTotal || 0),
-      "Premio": j.premioTotal || 0,
+      // 106ª entrega: homologado a "Deuda"/"Ganancia" (igual que Corte de cobranza).
+      "Deuda": -(j.debeTotal || 0),
+      "Ganancia": j.premioTotal || 0,
       Saldo: (j.premioTotal || 0) - (j.debeTotal || 0),
     }));
     const hoja = XLSX.utils.json_to_sheet(filas);
@@ -555,6 +563,12 @@ export default function Estadisticas({ session }) {
   const filasClasifOrdenadas = useMemo(() => {
     const arr = [...filasClasificacion];
     arr.sort((a, b) => {
+      // 106ª entrega: los jugadores Inactivos siempre quedan DESPUÉS de todos los Activos, cualquiera sea
+      // la columna por la que se esté ordenando — dentro de cada grupo (activos entre sí, inactivos entre
+      // sí) se sigue ordenando normal por el criterio elegido.
+      const aInactivo = a.jugador.estatus !== "Activo";
+      const bInactivo = b.jugador.estatus !== "Activo";
+      if (aInactivo !== bInactivo) return aInactivo ? 1 : -1;
       const va = ordenClasif.col === "total" ? a.total : ordenClasif.col === "practica" ? a.practica : a.valores[ordenClasif.col] || 0;
       const vb = ordenClasif.col === "total" ? b.total : ordenClasif.col === "practica" ? b.practica : b.valores[ordenClasif.col] || 0;
       return ordenClasif.dir === "asc" ? va - vb : vb - va;
@@ -978,7 +992,15 @@ export default function Estadisticas({ session }) {
                     recuadro... los renglones de 1°/2°/3° hazlos visiblemente distintos, como oro/plata/
                     bronce"). `PODIO[i]` es `undefined` del 4º lugar en adelante — sin cambio ahí. */}
                 {filasClasifOrdenadas.map((f, i) => {
-                  const podio = PODIO_CLASIF[i];
+                  // 106ª entrega: un jugador que pasó a "Inactivo" sigue apareciendo acá con su historial
+                  // completo (puntos/killers/resultado de cuando SÍ estaba activo no se tocan) — Federico:
+                  // "el hecho de estar inactivo no implica que no aparezca... no le debes quitar ni
+                  // puntos, ni killers, ni el resultado". `filasClasifOrdenadas` ya lo manda siempre al
+                  // final (cualquiera sea la columna de orden); acá solo se le pone la letra gris y un
+                  // ícono al lado del alias, y se le quita el podio oro/plata/bronce aunque por algún
+                  // empate raro le tocara una de las primeras 3 posiciones.
+                  const esInactivo = f.jugador.estatus !== "Activo";
+                  const podio = !esInactivo ? PODIO_CLASIF[i] : undefined;
                   return (
                     <tr key={f.jugador.correo || f.alias} style={podio ? { background: podio.fondo } : undefined}>
                       <td
@@ -987,13 +1009,14 @@ export default function Estadisticas({ session }) {
                           border: podio ? `2px solid ${podio.borde}` : "1px solid #eee",
                           textAlign: "center",
                           fontWeight: podio ? 700 : undefined,
-                          color: podio ? podio.borde : undefined,
+                          color: podio ? podio.borde : esInactivo ? "#999" : undefined,
                         }}
                       >
                         {i + 1}
                       </td>
-                      <td style={{ padding: "6px 8px", border: "1px solid #eee", fontWeight: podio ? 700 : undefined }}>
+                      <td style={{ padding: "6px 8px", border: "1px solid #eee", fontWeight: podio ? 700 : undefined, color: esInactivo ? "#999" : undefined }}>
                         {f.alias}
+                        {esInactivo && <span title="Jugador inactivo" style={{ marginLeft: 6 }}>⏸️</span>}
                       </td>
                       {columnasClasif.map((c) => {
                         const esMainCol = c.tipo === "Main";
@@ -1006,7 +1029,7 @@ export default function Estadisticas({ session }) {
                                 ? {
                                     padding: "6px 8px",
                                     textAlign: "center",
-                                    color: "#b8860b",
+                                    color: esInactivo ? "#999" : "#b8860b",
                                     fontWeight: 700,
                                     // 99ª entrega: solo el marco EXTERIOR de la columna — grueso a los
                                     // costados en toda fila, y grueso abajo únicamente en la última fila
@@ -1017,7 +1040,7 @@ export default function Estadisticas({ session }) {
                                     borderTop: "1px solid #eee",
                                     borderBottom: esUltimaFila ? "2px solid #b8860b" : "1px solid #eee",
                                   }
-                                : { padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }
+                                : { padding: "6px 8px", border: "1px solid #eee", textAlign: "center", color: esInactivo ? "#999" : undefined }
                             }
                           >
                             {fmtClasifValor(f.valores[c.fecha] || 0)}
@@ -1025,9 +1048,9 @@ export default function Estadisticas({ session }) {
                         );
                       })}
                       {vistaClasificacion === "puntos" && (
-                        <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center" }}>{f.practica}</td>
+                        <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", color: esInactivo ? "#999" : undefined }}>{f.practica}</td>
                       )}
-                      <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", fontWeight: "bold" }}>
+                      <td style={{ padding: "6px 8px", border: "1px solid #eee", textAlign: "center", fontWeight: "bold", color: esInactivo ? "#999" : undefined }}>
                         {fmtClasifValor(f.total)}
                       </td>
                     </tr>
@@ -1101,8 +1124,10 @@ export default function Estadisticas({ session }) {
                 <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Kills</th>
                 {esMainActual && <th style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Mejor mano</th>}
                 <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Puntos</th>
-                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Debe</th>
-                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Premio</th>
+                {/* 106ª entrega: homologado a "Deuda"/"Ganancia" (igual que Corte de cobranza); el valor
+                    sigue siendo debeTotal/premioTotal de siempre. */}
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Deuda</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Ganancia</th>
                 <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Saldo</th>
               </tr>
             </thead>
@@ -1310,8 +1335,9 @@ export default function Estadisticas({ session }) {
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Kills</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Puntos</th>
-                    <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Debe</th>
-                    <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Premio</th>
+                    {/* 106ª entrega: homologado a "Deuda"/"Ganancia" (igual que Corte de cobranza). */}
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Deuda</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Ganancia</th>
                     <th style={{ textAlign: "right", borderBottom: "1px solid #ccc", padding: "6px 8px" }}>Saldo</th>
                   </tr>
                 </thead>

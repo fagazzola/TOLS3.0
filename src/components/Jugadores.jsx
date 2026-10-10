@@ -7,6 +7,13 @@ const API_IMPORTAR = "/api/jugadores-importar-excel";
 // ver netlify/functions/jugadores.js). Vuelve a ser 6 columnas de contenido.
 const COLS = "56px 1.3fr 1fr 1.9fr 1fr 0.95fr";
 
+// 106ª entrega: fecha corta (DD/MM/YYYY) para mostrar `estatusDesde` junto a la etiqueta de Estatus.
+function fechaCorta(iso) {
+  const [y, m, d] = String(iso || "").split("-");
+  if (!y || !m || !d) return "";
+  return `${d}/${m}/${y}`;
+}
+
 // Pantalla de solo consulta del directorio de jugadores (los datos personales los llena cada jugador
 // al autorregistrarse, o llegan importados desde la hoja Jugadores del Excel). Únicamente se pueden
 // editar Padrino y Estatus desde aquí — el resto se muestra sin poder tocarse.
@@ -170,6 +177,10 @@ export default function Jugadores({ session, perfiles, onPerfilesChange }) {
                     ) : (
                       <>
                         <span className={"badge " + (j.estatus === "Activo" ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{j.estatus}</span>
+                        {/* 106ª entrega: desde cuándo está en ese estatus, a pedido de Federico. */}
+                        {j.estatusDesde && (
+                          <span style={{ fontSize: 11.5, color: "#889", marginLeft: 4 }}>desde {fechaCorta(j.estatusDesde)}</span>
+                        )}
                         {puedeEscribir && (
                           <button
                             className="btn-icon-eye"

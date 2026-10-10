@@ -25,6 +25,11 @@ function normalizarUno(j) {
     edad: Number(j?.edad) || 0,
     fechaRegistro: String(j?.fechaRegistro || "").trim(),
     estatus: String(j?.estatus || "Activo").trim(),
+    // 106ª entrega: Federico pidió llevar registro de CUÁNDO cambió el estatus de un jugador (clave
+    // para poder mostrar, en Clasificación General, desde cuándo está inactivo) — fecha ISO (YYYY-MM-DD)
+    // de la última vez que `estatus` cambió de valor; se fija sola en el PUT (ver más abajo), nunca se
+    // edita a mano. Queda fuera del sync a Excel por ahora (ver msgraph.js, columnas Host/Host Fecha).
+    estatusDesde: String(j?.estatusDesde || "").trim(),
     // 35ª entrega: mano inicial de Texas Hold'em favorita del jugador (ej. "AKs", "77"), elegida desde
     // "Mi Perfil" con el selector de rango de manos — puramente informativo/de perfil, no afecta ningún
     // cálculo del sitio. Se sincroniza a la columna "Mano Favorita" (K) de la hoja Jugadores del Excel.
@@ -191,7 +196,15 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "No se encontró ese jugador." }), { status: 404, headers: HEADERS });
     }
     if (padrino !== undefined) actual.jugadores[idx].padrino = String(padrino || "").trim();
-    if (estatus !== undefined) actual.jugadores[idx].estatus = String(estatus || "Activo").trim();
+    // 106ª entrega: cuando el estatus efectivamente cambia de valor, se registra la fecha (ISO,
+    // YYYY-MM-DD) en estatusDesde — a pedido de Federico, para poder saber desde cuándo está inactivo.
+    if (estatus !== undefined) {
+      const nuevoEstatus = String(estatus || "Activo").trim();
+      if (nuevoEstatus !== actual.jugadores[idx].estatus) {
+        actual.jugadores[idx].estatusDesde = new Date().toISOString().slice(0, 10);
+      }
+      actual.jugadores[idx].estatus = nuevoEstatus;
+    }
     await store.setJSON("data", actual);
     await syncJugadores(actual.jugadores);
     return new Response(JSON.stringify(actual), { headers: HEADERS });

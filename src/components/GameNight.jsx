@@ -63,8 +63,10 @@ const API_CAL = "/api/calendario";
 const API_CAMP = "/api/campeonatos";
 const API_JUG = "/api/jugadores";
 
+// 106ª entrega: Federico pidió que TODAS las cifras de dinero del sitio siempre muestren 2 decimales
+// ("$ #,000.00" / "($ #,000.00)"), sin importar si el monto es entero o no.
 function money(n) {
-  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // 64ª entrega: "Debe (-)" y "Saldo" en la tabla de Jugadores habilitados necesitan poder mostrarse en
@@ -72,8 +74,8 @@ function money(n) {
 // signo) — `money()` no le pone un "-" explícito antes del "$" cuando el número es negativo (queda
 // como "$ -500"), así que esta variante lo antepone ("-$ 500") para que se lea más claro en una tabla.
 function moneyFirmado(n) {
-  const v = Math.round(Number(n || 0));
-  return (v < 0 ? "-" : "") + "$ " + Math.abs(v).toLocaleString("en-US");
+  const v = Number(n) || 0;
+  return (v < 0 ? "-" : "") + "$ " + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function iso(d) {

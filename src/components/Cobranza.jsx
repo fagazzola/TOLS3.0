@@ -4,6 +4,9 @@ import { mapaNumeracionTorneos } from "../lib/gamenight.js";
 // 104ª entrega: "Corte de cobranza" se copia como IMAGEN (no texto) para pegar directo en WhatsApp —
 // html2canvas renderiza el <table> real a un <canvas>, que se manda al portapapeles con la Clipboard API.
 import html2canvas from "html2canvas";
+// 106ª entrega: botón de exportar a Excel en "Torneos publicados" y "Corte de cobranza", mismo patrón
+// que ya usa Estadisticas.jsx para el torneo abierto.
+import * as XLSX from "xlsx";
 
 const API = "/api/cobranza";
 const API_ENVIAR_SALDO = "/api/cobranza-enviar-saldo";
@@ -15,14 +18,16 @@ const API_CAMP = "/api/campeonatos";
 const API_JUG = "/api/jugadores";
 const API_EST = "/api/estadisticas";
 
+// 106ª entrega: Federico pidió que TODAS las cifras de dinero del sitio siempre muestren 2 decimales
+// ("$ #,000.00" / "($ #,000.00)"), sin importar si el monto es entero o no.
 function money(n) {
-  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // 74ª entrega: mismo formato contable que ya usan Calendario.jsx/Estadisticas.jsx para negativos —
 // "($ #,##0)" en vez de "-$ #,##0" — usado acá en la columna "Resultado" de "Resultados de Torneos".
 function moneyContable(n) {
-  const v = Math.round(Number(n || 0));
-  const abs = Math.abs(v).toLocaleString("en-US");
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return v < 0 ? `($ ${abs})` : `$ ${abs}`;
 }
 // 78ª entrega: a diferencia de money() (que redondea a pesos enteros, el criterio de todo el resto del
@@ -169,19 +174,13 @@ function montoPlano(n, centavos = false) {
   const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
   return v < 0 ? `(${plano})` : plano;
 }
-// 105ª entrega: texto de la columna Resultado de "Corte de cobranza" — cuando el jugador debe (resultado
-// negativo), Federico pidió que los "centavos" que se muestran sean el No. de Referencia del jugador
-// (mismo criterio que ya usa `plantillaSaldoTorneo()` para el correo de "Saldo Torneo": "$ XXX.NN", donde
-// NN es su número de registro) en vez de los centavos reales de un pago ya confirmado — de "($ 650)" a
-// "($ 650.07)" si su referencia es "07". Si el resultado es positivo o cero (el jugador cobra), se sigue
-// mostrando el monto real de siempre (con sus propios centavos, si ya se le depositó).
-function textoResultadoCorte(f) {
-  const v = Number(f.resultado) || 0;
-  if (v < 0) {
-    const pesos = Math.round(Math.abs(v)).toLocaleString("en-US");
-    return `($ ${pesos}.${refFmt(f.jugador.id)})`;
-  }
-  return montoPlano(v, true);
+// 106ª entrega: texto de la columna Saldo de "Corte de cobranza" — reemplaza el criterio de la 105ª
+// entrega (que ponía el No. de Referencia como "centavos" del Resultado cuando el jugador debía).
+// Federico aclaró que esa referencia NUNCA es parte de la deuda, así que esta columna ahora es un
+// espejo liso del Resultado del Torneo: Saldo = Ganancia + Deuda, sin ningún centavo de referencia
+// mezclado — ver filasCorte() más arriba.
+function textoSaldoCorte(f) {
+  return montoPlano(f.saldo);
 }
 
 export default function Cobranza({ session, perfiles }) {
@@ -201,6 +200,9 @@ export default function Cobranza({ session, perfiles }) {
   // proceso (puede tardar un segundo en armar la imagen, y puede terminar en "copiado" o, si el navegador
   // no soporta pegar imágenes desde JS, en una descarga de respaldo).
   const [fechaCorteSel, setFechaCorteSel] = useState("");
+  // 106ª entrega: orden de la tabla de "Corte de cobranza" — "ref" (No. de Referencia, de siempre) o
+  // "saldo", a elección del Tesorero con dos botones nuevos.
+  const [corteOrden, setCorteOrden] = useState("ref");
   const [corteCopiado, setCorteCopiado] = useState(false);
   const [corteGenerando, setCorteGenerando] = useState(false);
   const [corteAviso, setCorteAviso] = useState("");
@@ -305,10 +307,15 @@ export default function Cobranza({ session, perfiles }) {
   const numeracion = useMemo(() => mapaNumeracionTorneos(torneosCal), [torneosCal]);
 
   // 74ª entrega: directorio "completo" (con id/aliasPokerStars, no solo correo+nombre) para armar la
-  // tabla de "Resultados de Torneos" — mismo criterio que el `directorio` de Estadisticas.jsx: solo
-  // jugadores Activos, excluyendo "Usuario Domi" (cuenta de pruebas del sitio).
+  // tabla de "Resultados de Torneos"/"Corte de cobranza" — excluyendo solo "Usuario Domi" (cuenta de
+  // pruebas del sitio). 106ª entrega: el nombre quedó de la entrega original, pero DEJÓ de filtrar por
+  // "estatus === Activo" — Federico: un torneo ya publicado "debe permanecer inalterable en jugadores y
+  // sus montos, incluso durante el proceso de cobranza"; si alguien pasa a Inactivo después de haber
+  // jugado y pagado/cobrado en un torneo ya cerrado, esa deuda/cobro tiene que seguir viéndose en los
+  // reportes de ESE torneo (si no, "nos descuadra las finanzas") — mismo criterio aplicado en
+  // Estadisticas.jsx ("Clasificación general").
   const directorioActivo = useMemo(
-    () => jugadoresSitio.filter((j) => j.estatus === "Activo" && norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi"),
+    () => jugadoresSitio.filter((j) => norm(j.nombre) !== "usuario domi" && norm(nombreCorto(j)) !== "usuario domi"),
     [jugadoresSitio]
   );
 
@@ -406,15 +413,13 @@ export default function Cobranza({ session, perfiles }) {
   const totalCorreosSaldo = filasSaldo.length;
   const enviadosSaldo = filasSaldo.filter((f) => data?.enviosSaldo?.[`${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`]).length;
 
-  // 103ª entrega: "Corte de cobranza" — radiografía de TODOS los jugadores que participaron en el torneo
-  // elegido (no solo los que deben, a diferencia de "Torneos publicados"). Resultado = Ganancia − Deuda
-  // "considerando los centavos de referencia" (ver plantillaSaldoTorneo()/Centavos acumulados, 78ª/103ª
-  // entregas): si el Tesorero YA registró el pago/depósito de este torneo para este jugador, se usa el
-  // monto REAL confirmado (que trae esos centavos de referencia) en vez del monto teórico de Estadísticas,
-  // para que el corte coincida centavo a centavo con lo efectivamente cobrado/depositado — eso es también
-  // lo que decide el color de la celda de Resultado (ver estiloResultadoCorte() más abajo). Ordenado por
-  // número de referencia (interpretación propia — el pedido de Federico quedó con la frase "ordenada por"
-  // incompleta; fácil de cambiar si quería otro orden).
+  // 103ª/106ª entrega: "Corte de cobranza" — radiografía de TODOS los jugadores que participaron en el
+  // torneo elegido (no solo los que deben, a diferencia de "Torneos publicados"). 106ª entrega: Federico
+  // aclaró el criterio de fondo — el No. de Referencia es solo para identificar depósitos, nunca parte de
+  // la deuda real — y pidió que esta tabla sea "un espejo del Resultado del Torneo": Deuda = -debeTotal,
+  // Ganancia = premioTotal, Saldo = Ganancia + Deuda, exactamente igual que resultadoTorneo()/
+  // jugadorEnTorneo() en vez del monto real registrado (que traía los centavos de referencia). `pagado`/
+  // `depositado` se conservan solo para decidir el color de la celda de Saldo (ver estiloResultadoCorte()).
   const filasCorte = useMemo(() => {
     if (!fechaCorteSel) return [];
     const torneo = estData?.torneos?.[campeonatoSel]?.[fechaCorteSel];
@@ -427,28 +432,50 @@ export default function Cobranza({ session, perfiles }) {
         const clave = `${campeonatoSel}|${fechaCorteSel}|${j.correo}`;
         const regPago = data?.pagosTorneo?.[clave];
         const regDeposito = data?.depositosTorneo?.[clave];
-        const deuda = regPago ? Number(regPago.monto) || 0 : debeTotal;
-        const ganancia = regDeposito ? Number(regDeposito.monto) || 0 : premioTotal;
         return {
           jugador: j,
-          deuda,
-          ganancia,
-          resultado: ganancia - deuda,
+          deuda: -debeTotal,
+          ganancia: premioTotal,
+          saldo: premioTotal - debeTotal,
           pagado: !!regPago,
           depositado: !!regDeposito,
         };
       })
-      .filter(Boolean)
-      .sort((a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0));
+      .filter(Boolean);
   }, [fechaCorteSel, campeonatoSel, estData, directorioActivo, data]);
-  // 104ª entrega: Federico pidió que el color de Resultado se vea "intenso" en TODA la celda (antes era
+  // 106ª entrega: dos botones nuevos para ordenar la tabla, a pedido de Federico — por No. de Referencia
+  // (default, de siempre) o por Saldo.
+  const filasCorteOrdenadas = useMemo(() => {
+    const arr = [...filasCorte];
+    if (corteOrden === "saldo") arr.sort((a, b) => a.saldo - b.saldo);
+    else arr.sort((a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0));
+    return arr;
+  }, [filasCorte, corteOrden]);
+  // 104ª entrega: Federico pidió que el color de Saldo se vea "intenso" en TODA la celda (antes era
   // un tinte pastel, "se veía como verde claro y rosa") — ahora el fondo es el color sólido y la letra se
-  // pone clara (blanca) para que siga siendo legible encima. Misma regla de siempre: deuda (resultado<0)
-  // → verde si ya se registró el Pago, rojo si no; ganancia (resultado>=0) → azul si ya se registró el
+  // pone clara (blanca) para que siga siendo legible encima. Misma regla de siempre: deuda (saldo<0)
+  // → verde si ya se registró el Pago, rojo si no; ganancia (saldo>=0) → azul si ya se registró el
   // Depósito, blanco (con letra oscura, no blanca sobre blanco) si no.
   function estiloResultadoCorte(f) {
-    if (f.resultado < 0) return f.pagado ? { background: "#1e7d32", color: "#fff" } : { background: "#c62828", color: "#fff" };
+    if (f.saldo < 0) return f.pagado ? { background: "#1e7d32", color: "#fff" } : { background: "#c62828", color: "#fff" };
     return f.depositado ? { background: "#0277bd", color: "#fff" } : { background: "#ffffff", color: "#222" };
+  }
+  // 106ª entrega: exporta "Corte de cobranza" del torneo elegido a Excel, mismo patrón que
+  // Estadisticas.jsx -> exportarExcel().
+  function exportarCorteExcel() {
+    if (!fechaCorteSel || !filasCorteOrdenadas.length) return;
+    const filas = filasCorteOrdenadas.map((f) => ({
+      "No. Ref.": refFmt(f.jugador.id),
+      "Nombre y Apellido": f.jugador.nombre,
+      "Alias PokerStars": nombreCorto(f.jugador),
+      Deuda: f.deuda,
+      Ganancia: f.ganancia,
+      Saldo: f.saldo,
+    }));
+    const hoja = XLSX.utils.json_to_sheet(filas);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Corte de cobranza");
+    XLSX.writeFile(libro, `CorteCobranza_${fechaCorteSel}.xlsx`);
   }
   // 104ª entrega: "Copiar para WhatsApp" pasó de texto a IMAGEN — Federico: "el copiado de la tabla tiene
   // que ser formato imagen para subirlo al WhatsApp". html2canvas renderiza el <table> real (`corteRef`,
@@ -1105,7 +1132,10 @@ export default function Cobranza({ session, perfiles }) {
           ))}
         </select>
       </div>
-      <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 10 }}>
+      {/* 106ª entrega: flexWrap para que los 5 botones bajen de renglón en vez de desbordar o cortarse
+          en una laptop angosta (el body tiene overflow-x: hidden a propósito, así que lo que no entra se
+          recorta, no se puede "hacer scroll" para verlo). */}
+      <div className="filtro-estatus" style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
         {[
           ["resultado", "Enviar correos con deudas"],
           ["corte", "Corte de cobranza"],
@@ -1260,7 +1290,9 @@ export default function Cobranza({ session, perfiles }) {
                     </div>
                     <div>Lugar</div>
                     <div>Alias PokerStars</div>
-                    <div>Resultado</div>
+                    {/* 106ª entrega: homologado a "Saldo" (mismo nombre que usan Estadísticas/Corte de
+                        cobranza), el valor sigue siendo Ganancia + Deuda de siempre. */}
+                    <div>Saldo</div>
                     <div>Correo enviado</div>
                   </div>
                   {filas.map((f, i) => {
@@ -1282,13 +1314,27 @@ export default function Cobranza({ session, perfiles }) {
                   })}
                 </div>
 
-                {editable && (
-                  <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {editable && (
                     <button className="btn btn-primary" disabled={enviandoSaldo || seleccionSaldo.size === 0} onClick={enviarSeleccionados}>
                       {enviandoSaldo ? "Enviando…" : `Enviar correo de saldo (${seleccionSaldo.size})`}
                     </button>
-                  </div>
-                )}
+                  )}
+                  {/* 106ª entrega: exportar a Excel, mismo patrón que "Corte de cobranza". */}
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const hoja = XLSX.utils.json_to_sheet(
+                        filas.map((f) => ({ "Alias PokerStars": f.alias, Saldo: f.resultado }))
+                      );
+                      const libro = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(libro, hoja, "Torneos publicados");
+                      XLSX.writeFile(libro, `TorneosPublicados_${fechaSaldoSel}.xlsx`);
+                    }}
+                  >
+                    ⬇️ Exportar a Excel
+                  </button>
+                </div>
                 {envioSaldoAviso && (
                   <div className={envioSaldoAviso.includes("No se pudo") ? "login-error" : "check-line check-ok"} style={{ marginTop: 8 }}>
                     {envioSaldoAviso}
@@ -1334,9 +1380,24 @@ export default function Cobranza({ session, perfiles }) {
               <p className="section-sub">Ningún jugador del directorio activo participó en ese torneo.</p>
             ) : (
               <>
-                <div style={{ marginTop: 12, marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ marginTop: 12, marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <button className="btn btn-secondary" disabled={corteGenerando} onClick={copiarCorteWhatsApp}>
                     {corteGenerando ? "Generando imagen…" : "📋 Copiar imagen para WhatsApp"}
+                  </button>
+                  <button className="btn btn-secondary" onClick={exportarCorteExcel}>⬇️ Exportar a Excel</button>
+                  {/* 106ª entrega: ordenar la tabla por No. de Referencia o por Saldo, a pedido de Federico. */}
+                  <span style={{ fontSize: 12.5, color: "#667" }}>Ordenar por:</span>
+                  <button
+                    className={"btn btn-secondary" + (corteOrden === "ref" ? " active" : "")}
+                    onClick={() => setCorteOrden("ref")}
+                  >
+                    No. de Referencia
+                  </button>
+                  <button
+                    className={"btn btn-secondary" + (corteOrden === "saldo" ? " active" : "")}
+                    onClick={() => setCorteOrden("saldo")}
+                  >
+                    Saldo
                   </button>
                   {corteCopiado && <span className="check-line check-ok">Copiado ✓</span>}
                   {corteAviso && <span className="section-sub" style={{ margin: 0 }}>{corteAviso}</span>}
@@ -1344,7 +1405,9 @@ export default function Cobranza({ session, perfiles }) {
                 {/* 104ª entrega: tabla cuadriculada real (mismo patrón que "Clasificación general" de
                     Estadísticas — <table>/<th>/<td> con border 1px en cada celda), no el grid de
                     .tbl/.trow de siempre (que solo tiene línea entre renglones, sin cuadrícula vertical).
-                    `corteRef` es justo este <table> — lo que html2canvas convierte a imagen. */}
+                    `corteRef` es justo este <table> — lo que html2canvas convierte a imagen. 106ª entrega:
+                    "Resultado" homologado a "Saldo", y la tabla puede desbordar horizontalmente si la
+                    pantalla es angosta (overflowX: auto) en vez de forzar scroll lateral de toda la página. */}
                 <div style={{ overflowX: "auto" }}>
                   <table ref={corteRef} style={{ width: "100%", borderCollapse: "collapse", margin: "4px 0 12px", fontSize: 14, background: "#fff" }}>
                     <thead>
@@ -1354,23 +1417,23 @@ export default function Cobranza({ session, perfiles }) {
                         <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
                         <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Deuda</th>
                         <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Ganancia</th>
-                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Resultado</th>
+                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Saldo</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filasCorte.map((f) => (
+                      {filasCorteOrdenadas.map((f) => (
                         <tr key={f.jugador.correo}>
                           <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{refFmt(f.jugador.id)}</td>
                           <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{f.jugador.nombre}</td>
                           <td style={{ border: "1px solid #eee", padding: "6px 8px" }}>{nombreCorto(f.jugador)}</td>
                           <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>
-                            <Monto valor={f.deuda} forzarNegativo />
+                            <Monto valor={f.deuda} />
                           </td>
                           <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>
                             <Monto valor={f.ganancia} />
                           </td>
                           <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", fontWeight: 700, ...estiloResultadoCorte(f) }}>
-                            {textoResultadoCorte(f)}
+                            {textoSaldoCorte(f)}
                           </td>
                         </tr>
                       ))}
@@ -1378,7 +1441,7 @@ export default function Cobranza({ session, perfiles }) {
                   </table>
                 </div>
                 <p className="section-sub" style={{ marginTop: 10 }}>
-                  Resultado: verde = debe y ya pagó · rojo = debe y todavía no · azul = cobra y ya se le
+                  Saldo: verde = debe y ya pagó · rojo = debe y todavía no · azul = cobra y ya se le
                   depositó · blanco = cobra y todavía no se le depositó.
                 </p>
               </>

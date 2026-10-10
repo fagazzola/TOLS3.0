@@ -26,14 +26,16 @@ function horaCorta(isoStr) {
   return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
 }
 
+// 106ª entrega: Federico pidió que TODAS las cifras de dinero del sitio siempre muestren 2 decimales
+// ("$ #,000.00" / "($ #,000.00)"), sin importar si el monto es entero o no.
 function money(n) {
-  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // 72ª entrega: formato contable pedido por Federico para montos en negativo — "($ #,##0)" en vez de
 // "-$ #,##0", usado en el Calendario para el "Resultado" (económico) de cada fecha.
 function moneyContable(n) {
-  const v = Math.round(Number(n || 0));
-  const abs = Math.abs(v).toLocaleString("en-US");
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return v < 0 ? `($ ${abs})` : `$ ${abs}`;
 }
 

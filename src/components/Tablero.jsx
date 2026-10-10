@@ -34,8 +34,10 @@ const PLANTILLA = Object.values(seed)[0];
 // duplicarse cuando más abajo se asegura que los conceptos protegidos existan
 const RENOMBRAR_ID_COBRO = { "addon-1": "addon" };
 
+// 106ª entrega: Federico pidió que TODAS las cifras de dinero del sitio siempre muestren 2 decimales
+// ("$ #,000.00" / "($ #,000.00)"), sin importar si el monto es entero o no.
 function money(n) {
-  return "$ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+  return "$ " + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function pct(n) {
   return Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 }) + "%";

@@ -220,8 +220,14 @@ export default function Estadisticas({ session }) {
   // 72ª entrega (ajuste): Federico pidió que la tabla siempre se muestre completa (todos los torneos,
   // izquierda a derecha, aunque haya que hacer scroll horizontal) — se quitó el botón/estado de ocultar
   // torneos individuales que existía en la primera versión de este bloque.
+  // 107ª entrega: Federico REVIRTIÓ ese criterio — con las cifras de dinero ahora siempre a 2 decimales
+  // (106ª entrega), la vista "Por resultado" quedó ilegible si no se puede ensanchar más la pantalla, así
+  // que pidió volver a poder ocultar columnas de torneo una por una (dejando siempre Lugar/Alias/Total
+  // visibles) — ver `columnasOcultasClasif` más abajo. Vale para las 3 vistas (puntos/killers/resultado),
+  // porque las columnas ocultas son las mismas fechas de torneo sin importar qué vista se esté mirando.
   const [vistaClasificacion, setVistaClasificacion] = useState("puntos"); // "puntos" | "killers" | "resultado"
   const [ordenClasif, setOrdenClasif] = useState({ col: "total", dir: "desc" }); // default: Total descendente
+  const [columnasOcultasClasif, setColumnasOcultasClasif] = useState(() => new Set());
 
   // 90ª entrega: si la vista queda en "resultado" (Tesorero la elige y después usa "Ver como jugador" en
   // Mi Perfil, que cambia `session.rol` sin recargar el componente) se vuelve a "puntos" — nunca se deja
@@ -580,6 +586,22 @@ export default function Estadisticas({ session }) {
     setOrdenClasif((prev) => (prev.col === col ? { col, dir: prev.dir === "desc" ? "asc" : "desc" } : { col, dir: "desc" }));
   }
 
+  // 107ª entrega: ocultar/mostrar una columna de torneo en "Clasificación general" — Lugar/Alias/Total
+  // nunca se pueden ocultar (no pasan por acá). El ordenamiento sigue funcionando igual aunque la columna
+  // esté oculta (ordenarClasifPor no cambia).
+  function toggleColumnaClasif(fecha) {
+    setColumnasOcultasClasif((prev) => {
+      const next = new Set(prev);
+      if (next.has(fecha)) next.delete(fecha);
+      else next.add(fecha);
+      return next;
+    });
+  }
+  const columnasVisiblesClasif = useMemo(
+    () => columnasClasif.filter((c) => !columnasOcultasClasif.has(c.fecha)),
+    [columnasClasif, columnasOcultasClasif]
+  );
+
   function fmtClasifValor(v) {
     return vistaClasificacion === "resultado" ? moneyContable(v) : v;
   }
@@ -936,13 +958,41 @@ export default function Estadisticas({ session }) {
         {columnasClasif.length === 0 && torneosPracticaPublicados.length === 0 ? (
           <div className="section-sub" style={{ padding: 16 }}>Todavía no hay torneos registrados para el campeonato activo.</div>
         ) : (
+          <>
+            {/* 107ª entrega: columnas de torneo ocultas — chips para volver a mostrarlas una por una, o
+                todas de un golpe. Compartido entre las 3 vistas (puntos/killers/resultado). */}
+            {columnasOcultasClasif.size > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0 10px", alignItems: "center" }}>
+                <span style={{ fontSize: 12.5, color: "#667" }}>Columnas ocultas:</span>
+                {columnasClasif
+                  .filter((c) => columnasOcultasClasif.has(c.fecha))
+                  .map((c) => (
+                    <button
+                      key={c.fecha}
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: "3px 8px" }}
+                      title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
+                      onClick={() => toggleColumnaClasif(c.fecha)}
+                    >
+                      {c.numero} ↺
+                    </button>
+                  ))}
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: "3px 8px" }}
+                  onClick={() => setColumnasOcultasClasif(new Set())}
+                >
+                  Mostrar todas
+                </button>
+              </div>
+            )}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
                   <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
-                  {columnasClasif.map((c) => (
+                  {columnasVisiblesClasif.map((c) => (
                     <th
                       key={c.fecha}
                       title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
@@ -967,6 +1017,18 @@ export default function Estadisticas({ session }) {
                       onClick={() => ordenarClasifPor(c.fecha)}
                     >
                       {c.numero}{ordenClasif.col === c.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                      {/* 107ª entrega: ocultar esta columna — stopPropagation para no disparar el sort. */}
+                      <span
+                        role="button"
+                        title="Ocultar esta columna"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleColumnaClasif(c.fecha);
+                        }}
+                        style={{ marginLeft: 6, cursor: "pointer", opacity: 0.6 }}
+                      >
+                        ✕
+                      </span>
                     </th>
                   ))}
                   {vistaClasificacion === "puntos" && (
@@ -1018,7 +1080,7 @@ export default function Estadisticas({ session }) {
                         {f.alias}
                         {esInactivo && <span title="Jugador inactivo" style={{ marginLeft: 6 }}>⏸️</span>}
                       </td>
-                      {columnasClasif.map((c) => {
+                      {columnasVisiblesClasif.map((c) => {
                         const esMainCol = c.tipo === "Main";
                         const esUltimaFila = i === filasClasifOrdenadas.length - 1;
                         return (
@@ -1059,6 +1121,7 @@ export default function Estadisticas({ session }) {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

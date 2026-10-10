@@ -200,9 +200,13 @@ export default function Cobranza({ session, perfiles }) {
   // proceso (puede tardar un segundo en armar la imagen, y puede terminar en "copiado" o, si el navegador
   // no soporta pegar imágenes desde JS, en una descarga de respaldo).
   const [fechaCorteSel, setFechaCorteSel] = useState("");
-  // 106ª entrega: orden de la tabla de "Corte de cobranza" — "ref" (No. de Referencia, de siempre) o
-  // "saldo", a elección del Tesorero con dos botones nuevos.
+  // 106ª/107ª entrega: orden de la tabla de "Corte de cobranza" — "ref" (No. de Referencia, de siempre),
+  // "estatus" (agrupado por si debe/pagó/cobra, 107ª entrega, reemplaza al botón "Saldo" de la 106ª) o
+  // "saldo" (clickeando el propio encabezado de la columna Saldo, como en Clasificación General, con
+  // `corteSaldoDir` para asc/desc). En los tres casos, el No. de Referencia ascendente es el criterio de
+  // desempate.
   const [corteOrden, setCorteOrden] = useState("ref");
+  const [corteSaldoDir, setCorteSaldoDir] = useState("desc");
   const [corteCopiado, setCorteCopiado] = useState(false);
   const [corteGenerando, setCorteGenerando] = useState(false);
   const [corteAviso, setCorteAviso] = useState("");
@@ -443,14 +447,37 @@ export default function Cobranza({ session, perfiles }) {
       })
       .filter(Boolean);
   }, [fechaCorteSel, campeonatoSel, estData, directorioActivo, data]);
-  // 106ª entrega: dos botones nuevos para ordenar la tabla, a pedido de Federico — por No. de Referencia
-  // (default, de siempre) o por Saldo.
+  // 107ª entrega: rango de "Estatus" — rojo (debe, no pagó) primero, verde (debe, ya pagó) después, y
+  // ganancia (cobra, depositado o no) siempre al final. Usado solo por el orden "estatus".
+  function rangoEstatusCorte(f) {
+    if (f.saldo < 0) return f.pagado ? 1 : 0;
+    return 2;
+  }
+  // 106ª/107ª entrega: orden de la tabla — "ref" (de siempre), "estatus" (107ª entrega, ver
+  // rangoEstatusCorte) o "saldo" (clickeando el encabezado de la columna, con dirección en
+  // `corteSaldoDir`). El No. de Referencia ascendente es siempre el criterio de desempate.
   const filasCorteOrdenadas = useMemo(() => {
     const arr = [...filasCorte];
-    if (corteOrden === "saldo") arr.sort((a, b) => a.saldo - b.saldo);
-    else arr.sort((a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0));
+    const porRef = (a, b) => (Number(a.jugador.id) || 0) - (Number(b.jugador.id) || 0);
+    if (corteOrden === "saldo") {
+      arr.sort((a, b) => (corteSaldoDir === "asc" ? a.saldo - b.saldo : b.saldo - a.saldo) || porRef(a, b));
+    } else if (corteOrden === "estatus") {
+      arr.sort((a, b) => rangoEstatusCorte(a) - rangoEstatusCorte(b) || porRef(a, b));
+    } else {
+      arr.sort(porRef);
+    }
     return arr;
-  }, [filasCorte, corteOrden]);
+  }, [filasCorte, corteOrden, corteSaldoDir]);
+  // 107ª entrega: click en el encabezado "Saldo" — primer click deja el orden en "saldo" (descendente,
+  // mismo criterio de primer-click que ya usa Clasificación General); un click más, estando ya en
+  // "saldo", solo invierte la dirección.
+  function ordenarCortePorSaldo() {
+    if (corteOrden === "saldo") setCorteSaldoDir((d) => (d === "desc" ? "asc" : "desc"));
+    else {
+      setCorteOrden("saldo");
+      setCorteSaldoDir("desc");
+    }
+  }
   // 104ª entrega: Federico pidió que el color de Saldo se vea "intenso" en TODA la celda (antes era
   // un tinte pastel, "se veía como verde claro y rosa") — ahora el fondo es el color sólido y la letra se
   // pone clara (blanca) para que siga siendo legible encima. Misma regla de siempre: deuda (saldo<0)
@@ -1385,7 +1412,9 @@ export default function Cobranza({ session, perfiles }) {
                     {corteGenerando ? "Generando imagen…" : "📋 Copiar imagen para WhatsApp"}
                   </button>
                   <button className="btn btn-secondary" onClick={exportarCorteExcel}>⬇️ Exportar a Excel</button>
-                  {/* 106ª entrega: ordenar la tabla por No. de Referencia o por Saldo, a pedido de Federico. */}
+                  {/* 106ª/107ª entrega: ordenar la tabla por No. de Referencia o por Estatus (reemplaza al
+                      botón "Saldo" de la 106ª entrega — ordenar por Saldo ahora se hace clickeando el
+                      propio encabezado de esa columna, como en Clasificación General). */}
                   <span style={{ fontSize: 12.5, color: "#667" }}>Ordenar por:</span>
                   <button
                     className={"btn btn-secondary" + (corteOrden === "ref" ? " active" : "")}
@@ -1394,10 +1423,10 @@ export default function Cobranza({ session, perfiles }) {
                     No. de Referencia
                   </button>
                   <button
-                    className={"btn btn-secondary" + (corteOrden === "saldo" ? " active" : "")}
-                    onClick={() => setCorteOrden("saldo")}
+                    className={"btn btn-secondary" + (corteOrden === "estatus" ? " active" : "")}
+                    onClick={() => setCorteOrden("estatus")}
                   >
-                    Saldo
+                    Estatus
                   </button>
                   {corteCopiado && <span className="check-line check-ok">Copiado ✓</span>}
                   {corteAviso && <span className="section-sub" style={{ margin: 0 }}>{corteAviso}</span>}
@@ -1417,7 +1446,15 @@ export default function Cobranza({ session, perfiles }) {
                         <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
                         <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Deuda</th>
                         <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Ganancia</th>
-                        <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Saldo</th>
+                        {/* 107ª entrega: encabezado clickeable para ordenar por Saldo (asc/desc), igual que
+                            Clasificación General — el No. de Referencia sigue siendo el desempate, nunca se
+                            pierde el orden secundario. */}
+                        <th
+                          style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          onClick={ordenarCortePorSaldo}
+                        >
+                          Saldo{corteOrden === "saldo" ? (corteSaldoDir === "desc" ? " ▼" : " ▲") : ""}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

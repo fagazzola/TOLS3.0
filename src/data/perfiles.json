@@ -2,19 +2,19 @@
   "roles": [
     {
       "tipo": "Administrador General",
-      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "escritura", "mod4": "escritura", "mod5": "escritura", "mod6": "escritura" }
+      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "escritura", "mod4": "escritura", "mod5": "escritura", "mod6": "escritura", "mod7": "escritura" }
     },
     {
       "tipo": "Administrador",
-      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "ninguno", "mod4": "escritura", "mod5": "escritura", "mod6": "escritura" }
+      "permisos": { "mod1": "escritura", "mod2": "escritura", "mod3": "ninguno", "mod4": "escritura", "mod5": "escritura", "mod6": "escritura", "mod7": "escritura" }
     },
     {
       "tipo": "Tesorero",
-      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "escritura", "mod5": "lectura", "mod6": "lectura" }
+      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "escritura", "mod5": "lectura", "mod6": "lectura", "mod7": "escritura" }
     },
     {
       "tipo": "Jugador",
-      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "ninguno", "mod5": "lectura", "mod6": "ninguno" }
+      "permisos": { "mod1": "lectura", "mod2": "ninguno", "mod3": "ninguno", "mod4": "ninguno", "mod5": "lectura", "mod6": "ninguno", "mod7": "lectura" }
     }
   ],
   "usuarios": [

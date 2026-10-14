@@ -33,8 +33,14 @@ const API_PARAMETROS = "/api/parametros";
 // se marca `oculto: true` y se filtra más abajo, para cualquier rol, sin tocar su componente ni su
 // backend. El concepto de "Host" (que antes daba acceso especial a esta pestaña) también se eliminó
 // por completo — ver Jugadores.jsx y netlify/functions/jugadores.js.
-// "Estadísticas" es nueva, visible para CUALQUIER perfil con sesión (como Mi Perfil) — dentro de esa
-// pantalla, el botón para subir resultados se limita a Administrador General/Administrador.
+// "Estadísticas" ("Resultados" en el menú) — dentro de esa pantalla, el botón para subir resultados se
+// limita a Administrador General/Administrador/Tesorero (ver puedeSubirResultados() en
+// Estadisticas.jsx, 108ª entrega).
+// 109ª entrega: "Resultados" ahora sigue la matriz normal de permisos (mod7) — antes era
+// "siempreVisible" (visible para cualquier sesión, sin poder restringirse por rol). "Game Night"
+// (mod5) se quitó de esa misma matriz a pedido de Federico (seguía ahí, sin uso real, desde la 66ª
+// entrega) — ver src/lib/permisos.js. El rol "Jugador" sigue viendo "Resultados" por default (mod7:
+// "lectura" en la semilla de permisos), pero ahora Federico puede restringirla si quiere.
 // 98ª entrega: Federico pidió mover el botón "Jugadores" para que quede a la derecha de "Resultados" en
 // el menú superior — el orden de los botones sigue el orden de este array (ver `tabsConPermiso` más
 // abajo), así que alcanzó con reordenar la entrada, sin tocar ninguna otra propiedad.
@@ -46,7 +52,7 @@ const TABS = [
   // 73ª entrega: el botón/pestaña se renombró de "Estadísticas" a "Resultados" (pedido de Federico) — la
   // `key` interna se dejó igual ("estadisticas") a propósito, para no tocar `SOLO_JUGADOR_TABS` ni nada
   // que dependa de esa clave; el componente y el archivo siguen llamándose Estadisticas.jsx.
-  { key: "estadisticas", modKey: null, label: "Resultados", Component: Estadisticas, siempreVisible: true },
+  { key: "estadisticas", modKey: "mod7", label: "Resultados", Component: Estadisticas },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },

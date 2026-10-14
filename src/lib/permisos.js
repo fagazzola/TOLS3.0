@@ -1,9 +1,17 @@
+// 109ª entrega: Federico pidió quitar "Game Night" (mod5) de la matriz de permisos — "ya no lo usamos"
+// (está oculto del menú desde la 66ª entrega, sin borrarse) — y agregar "Resultados" (mod7, la pantalla
+// que internamente sigue llamándose Estadisticas.jsx desde la 73ª entrega) para poder asignarle permisos
+// por rol, algo que antes no existía (era "siempreVisible" para cualquier sesión — ver App.jsx). El
+// permiso mod5 que ya estuviera guardado en algún rol NO se borra (mismo criterio de siempre: esta lista
+// solo decide qué columnas se pueden EDITAR/VER acá en Perfiles — ver la "Lección aprendida sobre
+// cambiar el esquema de datos en Blobs" en el mapa del proyecto), simplemente deja de poder tocarse
+// desde esta pantalla.
 export const MODULOS = [
   { key: "mod2", label: "Tablero de Control" },
   { key: "mod1", label: "Calendario" },
   { key: "mod4", label: "Cobranza" },
   { key: "mod3", label: "Usuarios" },
-  { key: "mod5", label: "Game Night" },
+  { key: "mod7", label: "Resultados" },
   { key: "mod6", label: "Jugadores" },
 ];
 

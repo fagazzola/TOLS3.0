@@ -296,7 +296,9 @@ export default function Perfiles({ session, perfiles, onPerfilesChange }) {
               </div>
             ))}
           </div>
-          <div className="section-sub">Cobranza (mod4) y Game Night (mod5) usan estos mismos permisos.</div>
+          {/* 109ª entrega: "Game Night (mod5)" se quitó de esta nota — Federico pidió quitar ese módulo
+              de la matriz ("ya no lo usamos"); "Resultados (mod7)" se agregó, nuevo desde esta entrega. */}
+          <div className="section-sub">Cobranza (mod4) y Resultados (mod7) usan estos mismos permisos.</div>
         </div>
       )}
 

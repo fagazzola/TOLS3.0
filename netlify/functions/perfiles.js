@@ -4,7 +4,10 @@ import { syncPerfiles } from "./lib/msgraph.js";
 
 const HEADERS = { "content-type": "application/json; charset=utf-8" };
 const NIVELES = ["ninguno", "lectura", "escritura"];
-const MOD_KEYS = ["mod1", "mod2", "mod3", "mod4", "mod5", "mod6"];
+// 109ª entrega: se agrega "mod7" (Resultados) — mod5 (Game Night) se deja en esta lista a propósito,
+// aunque ya no aparezca en la matriz de permisos de Perfiles.jsx (src/lib/permisos.js), para no dejar de
+// normalizar/validar lo que cualquier rol ya tuviera guardado para ese módulo.
+const MOD_KEYS = ["mod1", "mod2", "mod3", "mod4", "mod5", "mod6", "mod7"];
 
 // completa/corrige el documento con la semilla como respaldo — mismo patrón defensivo que
 // campeonatos.js y tablero.js: si Blobs trae algo viejo o incompleto, se rellena en vez de tronar.

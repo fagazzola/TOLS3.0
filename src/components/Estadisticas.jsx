@@ -36,6 +36,16 @@ function puedeVerPorResultado(rol) {
 function esAdminGeneral(rol) {
   return rol === "Administrador General";
 }
+// 108ª entrega: Federico pidió que el Tesorero pueda subir resultados de torneos, igual que los
+// administradores — hasta ahora toda la sección "Subir resultados" (subir Excel PokerStars/Txt WhatsApp/
+// Excel Referencias, revisar el preview y publicar) estaba detrás de `esAdmin()` únicamente. Se agrega
+// este helper, con el mismo criterio que ya usa `puedeVerPorResultado()` (esAdmin(rol) || Tesorero), y se
+// usa SOLO para mostrar esa sección — "Agregar Killer" (exclusivo de Administrador General, 98ª entrega)
+// y "Exportar a Excel" del torneo abierto (exclusivo de administradores) no fueron parte de este pedido
+// y se dejaron como estaban.
+function puedeSubirResultados(rol) {
+  return esAdmin(rol) || rol === "Tesorero";
+}
 // 98ª entrega: colores de podio (oro/plata/bronce) para los renglones de 1°/2°/3° lugar de "Clasificación
 // general" — a propósito, un fondo tenue (no un color lleno, para no tapar los números) + un borde/texto
 // más saturado del mismo tono, distinto del dorado que ya usan las columnas de torneo Main (`#b8860b`)
@@ -203,6 +213,7 @@ function jugadorEnTorneo(torneo, jugadorDir) {
 export default function Estadisticas({ session }) {
   const admin = esAdmin(session?.rol);
   const adminGeneral = esAdminGeneral(session?.rol); // 98ª entrega: solo este rol puede editar Kills
+  const puedeSubir = puedeSubirResultados(session?.rol); // 108ª entrega: admin O Tesorero
 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -1299,7 +1310,7 @@ export default function Estadisticas({ session }) {
         </div>
       )}
 
-      {admin && (
+      {puedeSubir && (
         <div className="section">
           <div className="section-head">
             <div className="section-title">Subir resultados</div>
@@ -1450,7 +1461,11 @@ export default function Estadisticas({ session }) {
         </div>
       )}
 
-      {admin && apodosMapeo && (
+      {/* 108ª entrega: este modal es un paso DENTRO del flujo de "Subir resultados" (mapear columnas de
+          "Excel Referencias" cuando no se reconocen solas) — tiene que seguir el mismo permiso que esa
+          sección (`puedeSubir`), no quedarse en `admin` solo, o el Tesorero se quedaría a mitad de camino
+          sin poder completarlo. */}
+      {puedeSubir && apodosMapeo && (
         <div className="section">
           <div className="section-head">
             <div className="section-title">Mapear columnas — "{apodosNombreArchivo}"</div>
@@ -1494,7 +1509,8 @@ export default function Estadisticas({ session }) {
         </div>
       )}
 
-      {admin && editorApodos && (
+      {/* 108ª entrega: mismo criterio que el modal anterior — parte del flujo de "Subir resultados". */}
+      {puedeSubir && editorApodos && (
         <div className="section">
           <div className="section-head">
             <div className="section-title">Apodos de chat</div>

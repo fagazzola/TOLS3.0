@@ -174,13 +174,21 @@ function montoPlano(n, centavos = false) {
   const plano = centavos ? moneyConCentavos(Math.abs(v)) : money(Math.abs(v));
   return v < 0 ? `(${plano})` : plano;
 }
-// 106ª entrega: texto de la columna Saldo de "Corte de cobranza" — reemplaza el criterio de la 105ª
-// entrega (que ponía el No. de Referencia como "centavos" del Resultado cuando el jugador debía).
-// Federico aclaró que esa referencia NUNCA es parte de la deuda, así que esta columna ahora es un
-// espejo liso del Resultado del Torneo: Saldo = Ganancia + Deuda, sin ningún centavo de referencia
-// mezclado — ver filasCorte() más arriba.
+// 106ª/110ª entrega: texto de la columna Saldo de "Corte de cobranza". La 106ª entrega había quitado por
+// completo el centavo de referencia (Federico aclaró que esa referencia NUNCA es parte de la deuda real,
+// y el cálculo de Deuda/Ganancia/Saldo de filasCorte()/exportarCorteExcel()/el ordenamiento siguen siendo
+// el espejo liso del Resultado del Torneo, sin ningún centavo mezclado — eso NO cambia acá). La 110ª
+// entrega restaura, solo en este texto visible (el que se copia como imagen y se manda a los jugadores
+// para que depositen), el No. de Referencia como "centavos" — pero únicamente cuando el Saldo es negativo
+// (el jugador debe), que es el único caso en el que ese número le sirve al jugador para identificar su
+// depósito. Con Saldo positivo (cobra) se sigue mostrando el monto plano de siempre.
 function textoSaldoCorte(f) {
-  return montoPlano(f.saldo);
+  const v = Number(f.saldo) || 0;
+  if (v < 0) {
+    const pesos = Math.round(Math.abs(v)).toLocaleString("en-US");
+    return `($ ${pesos}.${refFmt(f.jugador.id)})`;
+  }
+  return montoPlano(v);
 }
 
 export default function Cobranza({ session, perfiles }) {
@@ -709,24 +717,59 @@ export default function Cobranza({ session, perfiles }) {
     return { filas, total };
   }, [confirmadosCampeonato, agruparPor]);
 
-  // 79ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/Motivo/
-  // Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre los mismos registros
-  // confirmados de `confirmadosCampeonato` (Pagos y Depósitos), en orden cronológico ascendente (el más
-  // viejo primero, para que el saldo corrido tenga sentido de arriba hacia abajo). El primer renglón
-  // siempre arranca en Saldo inicial = 0, como pidió Federico. El signo del Monto sigue el mismo criterio
-  // que "ponlos en verde... es ingreso para TOLS" / depósito = egreso: un Pago SUMA al saldo (ingreso
-  // para TOLS), un Depósito RESTA (egreso de TOLS) — aunque en `pagosTorneo`/`depositosTorneo`/
-  // `depositosGasto` ambos se guarden siempre como números positivos. Se ordena por la fecha que el
-  // Tesorero dejó asentada (`fecha`, opcional en un Pago) y, si no la hay, por la fecha del propio
-  // `registradoEn` (timestamp real del servidor) — nunca se deja un registro sin orden.
+  // 110ª entrega: filas "Adeudo" del Estado de cuenta — a pedido de Federico, cada torneo YA PUBLICADO
+  // del campeonato activo en el que participó el jugador elegido aporta una fila automática (Tipo =
+  // "Adeudo", Movimiento = "Torneo N") con su Saldo teórico de ese torneo (premioTotal - debeTotal, igual
+  // que resultadoTorneo()/filasCorte() más arriba) — positivo si quedó a favor del jugador, negativo si
+  // quedó en contra. `montoFirmado` se guarda TAL CUAL ese Saldo (sin invertir el signo): así, cuando más
+  // adelante el Tesorero confirma el Pago/Depósito real de ESE MISMO torneo (que ya aparece como su propia
+  // fila "Pago"/"Depósito" vía `confirmadosCampeonato`, con el signo opuesto de siempre: Pago=+, Depósito=
+  // -), las dos filas se cancelan solas en el saldo corrido sin tocar ninguna de las dos — un Saldo a favor
+  // (+) se cancela con el Depósito que le hace el Tesorero ("se resta") y un Saldo en contra (-) se cancela
+  // con el Pago que registra cuando el jugador paga ("se suma"), exactamente como lo describió Federico.
+  // Se arma solo para el jugador elegido en el combo (`correoEstado`), igual que `estadoCuentaJugador`.
+  const adeudosJugador = useMemo(() => {
+    if (!correoEstado) return [];
+    const jug = directorioActivo.find((j) => j.correo === correoEstado);
+    if (!jug) return [];
+    const filas = [];
+    for (const t of torneosSaldoOpciones) {
+      const torneo = estData?.torneos?.[campeonatoSel]?.[t.fecha];
+      const jt = jugadorEnTorneo(torneo, jug);
+      if (!jt) continue;
+      const saldo = (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0);
+      filas.push({
+        clave: `adeudo|${campeonatoSel}|${t.fecha}|${correoEstado}`,
+        tipo: "Adeudo",
+        motivo: `Torneo ${etiquetaCorta(t)}`,
+        correo: correoEstado,
+        fecha: t.fecha,
+        registradoEn: `${t.fecha}T00:00:00`,
+        monto: saldo,
+      });
+    }
+    return filas;
+  }, [correoEstado, directorioActivo, torneosSaldoOpciones, estData, campeonatoSel]);
+
+  // 79ª/110ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/Motivo/
+  // Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre los registros confirmados de
+  // `confirmadosCampeonato` (Pagos y Depósitos) MÁS las filas "Adeudo" de `adeudosJugador` (110ª entrega),
+  // en orden cronológico ascendente (el más viejo primero, para que el saldo corrido tenga sentido de
+  // arriba hacia abajo). El primer renglón siempre arranca en Saldo inicial = 0, como pidió Federico. El
+  // signo del Monto sigue el mismo criterio que "ponlos en verde... es ingreso para TOLS" / depósito =
+  // egreso: un Pago SUMA al saldo (ingreso para TOLS), un Depósito RESTA (egreso de TOLS) — aunque en
+  // `pagosTorneo`/`depositosTorneo`/`depositosGasto` ambos se guarden siempre como números positivos. Un
+  // Adeudo SUMA o RESTA el Saldo teórico del torneo tal cual (ver comentario de `adeudosJugador`). Se
+  // ordena por la fecha que el Tesorero dejó asentada (`fecha`, opcional en un Pago) o la del propio
+  // torneo (Adeudo) y, si no la hay, por la fecha del propio `registradoEn` — nunca se deja un registro
+  // sin orden.
   const estadoCuentaJugador = useMemo(() => {
     if (!correoEstado) return [];
-    const filas = confirmadosCampeonato
-      .filter((c) => c.correo === correoEstado)
+    const filas = [...confirmadosCampeonato.filter((c) => c.correo === correoEstado), ...adeudosJugador]
       .map((c) => ({
         ...c,
         fechaOrden: c.fecha || (c.registradoEn || "").slice(0, 10),
-        montoFirmado: c.tipo === "Pago" ? Number(c.monto) || 0 : -(Number(c.monto) || 0),
+        montoFirmado: c.tipo === "Pago" ? Number(c.monto) || 0 : c.tipo === "Adeudo" ? Number(c.monto) || 0 : -(Number(c.monto) || 0),
       }))
       .sort((a, b) => a.fechaOrden.localeCompare(b.fechaOrden) || (a.registradoEn || "").localeCompare(b.registradoEn || ""));
     let saldo = 0;
@@ -735,7 +778,7 @@ export default function Cobranza({ session, perfiles }) {
       saldo += f.montoFirmado;
       return { ...f, saldoInicial, saldoFinal: saldo };
     });
-  }, [confirmadosCampeonato, correoEstado]);
+  }, [confirmadosCampeonato, adeudosJugador, correoEstado]);
 
   // 76ª entrega: "monto esperado" del registro que se está editando — se recalcula igual que
   // `montoEsperadoMov` (nunca se confía en el valor guardado, por si Estadísticas/Tablero cambiaron
@@ -1942,7 +1985,13 @@ export default function Cobranza({ session, perfiles }) {
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.tipo}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px" }}>{f.motivo}</td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.saldoInicial} /></td>
-                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.montoFirmado} /></td>
+                      <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}>
+                        {/* 110ª entrega: el Adeudo ya viene expresado desde la perspectiva del jugador
+                            (Federico: "ya sea positivo [a favor] o negativo [en contra]"), a diferencia de
+                            Pago/Depósito que se calculan desde la perspectiva de TOLS y por eso se niegan
+                            al mostrarse (ver comentario arriba) — por eso NO se le invierte el signo acá. */}
+                        <Monto valor={f.tipo === "Adeudo" ? f.montoFirmado : -f.montoFirmado} />
+                      </td>
                       <td style={{ textAlign: "center", border: "1px solid #eee", padding: "6px 8px", whiteSpace: "nowrap" }}><Monto valor={-f.saldoFinal} /></td>
                     </tr>
                   ))}

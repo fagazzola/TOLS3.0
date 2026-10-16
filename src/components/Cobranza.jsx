@@ -258,6 +258,10 @@ export default function Cobranza({ session, perfiles }) {
   // 81ª entrega: agrupador de los totales de "Pagos y depósitos confirmados" — a pedido de Federico,
   // antes de la tabla de detalle, agrupables por Motivo o por Fecha.
   const [agruparPor, setAgruparPor] = useState("motivo"); // "motivo" | "fecha"
+  // 112ª entrega: paginación de la tabla de detalle de "Pagos y depósitos confirmados" — Federico pidió
+  // acortar la lista, que se hacía muy larga, a 10 registros por página con botones de avanzar/retroceder.
+  const [paginaMovConfirmados, setPaginaMovConfirmados] = useState(0);
+  const MOV_CONFIRMADOS_POR_PAGINA = 10;
 
   const [excepcionModal, setExcepcionModal] = useState(null); // { correo, nombre }
   const [motivoExcepcion, setMotivoExcepcion] = useState("");
@@ -310,6 +314,7 @@ export default function Cobranza({ session, perfiles }) {
     setEnvioSaldoAviso("");
     setFechaCorteSel("");
     setCorteCopiado(false);
+    setPaginaMovConfirmados(0);
   }, [campeonatoSel]);
 
   // 74ª entrega: numeración cronológica 1..n de los torneos Regular/Main de cada campeonato (ver
@@ -495,6 +500,267 @@ export default function Cobranza({ session, perfiles }) {
     if (f.saldo < 0) return f.pagado ? { background: "#1e7d32", color: "#fff" } : { background: "#c62828", color: "#fff" };
     return f.depositado ? { background: "#0277bd", color: "#fff" } : { background: "#ffffff", color: "#222" };
   }
+  // 112ª entrega: arma el aoa (array de arrays) de "Finanzas Generales" en el mismo formato de 2
+  // columnas que se despliega en el portal (Ingresos/Egresos a la izquierda, Gastos operativos/Reserva
+  // del Campeonato/Pasivo a la derecha) — a pedido de Federico. Separado de `exportarFinanzasExcel()`
+  // para poder reusarlo tal cual como la pestaña "Finanzas" del botón "Conciliación Finanzas" (ver
+  // `exportarConciliacionExcel()` más abajo), sin duplicar esta lista larga de filas. Los montos se
+  // guardan con su signo real (lo que la UI hace con `forzarNegativo` es solo de presentación — fuerza
+  // el paréntesis rojo al mostrarse, nunca cambia el valor guardado) para que la hoja tenga números
+  // usables, no solo texto con paréntesis.
+  function construirAoaFinanzas() {
+    const v = (n, neg = false) => (neg ? -Math.abs(Number(n) || 0) : Number(n) || 0);
+    const seccion = (label) => ({ Concepto: label.toUpperCase(), Monto: "" });
+    const fila = (label, monto, sangria = false) => ({ Concepto: sangria ? `    ${label}` : label, Monto: monto });
+
+    const izquierda = [
+      seccion("Ingresos"),
+      fila("Inscripciones reales", v(totalInscripcionesConfirmadas)),
+      fila("Ingresos confirmados — torneos regulares", v(totalPagosRegular)),
+      fila("Ingresos confirmados — torneos main", v(totalPagosMain)),
+      fila("Subtotal ingresos", v(subtotalIngresos)),
+      fila("Provisión para acum. Camp. (15%)", v(fondoAcumuladoReservado, true)),
+      seccion("Egresos"),
+      fila("Disponible (85%)", v(disponiblePagosTorneo)),
+      fila("Torneos regulares — 1er lugar", v(catPremiosRegular[1], true), true),
+      fila("Torneos regulares — 2do lugar", v(catPremiosRegular[2], true), true),
+      fila("Torneos regulares — 3er lugar", v(catPremiosRegular[3], true), true),
+    ];
+    if (catPremiosRegular.otros > 0) {
+      izquierda.push(fila("Torneos regulares — otros lugares pagados", v(catPremiosRegular.otros, true), true));
+    }
+    izquierda.push(
+      fila("Torneos main — 1er lugar", v(catPremiosMain[1], true), true),
+      fila("Torneos main — 2do lugar", v(catPremiosMain[2], true), true),
+      fila("Torneos main — 3er lugar", v(catPremiosMain[3], true), true)
+    );
+    if (catPremiosMain.otros > 0) {
+      izquierda.push(fila("Torneos main — otros lugares pagados", v(catPremiosMain.otros, true), true));
+    }
+    izquierda.push(
+      fila("Torneos main — burbuja", v(catPremiosMain.burbuja, true), true),
+      fila("Torneos main — mejor mano", v(catPremiosMain.mano, true), true),
+      fila("Subtotal egresos", v(subtotalEgresos, true)),
+      fila("Balance general", v(balanceGeneral))
+    );
+
+    const derecha = [seccion("Gastos operativos (de la inscripción)")];
+    if (gastosOperativos.length) {
+      gastosOperativos.forEach((g) => derecha.push(fila(g.concepto, v(g.total, true), true)));
+    } else {
+      derecha.push(fila("Sin conceptos configurados", "—", true));
+    }
+    derecha.push(fila("Subtotal gastos operativos", v(totalGastosOperativos, true)));
+    derecha.push(fila("Centavos acumulados", v(centavosAcumulados)));
+    derecha.push(seccion("Reserva para el Campeonato"));
+    derecha.push(fila("Total reservado", v(acumCampeonatoAlMomento, true)));
+    if (acumCampeonatoPorLugar.length) {
+      acumCampeonatoPorLugar.forEach((l) => derecha.push(fila(l.reyKiller ? "Rey Killer" : l.label, v(l.monto, true), true)));
+    } else {
+      derecha.push(fila("Sin lugares configurados", "—", true));
+    }
+    derecha.push(seccion("Pasivo"));
+    derecha.push(fila("Existente en la cuenta de banco", v(balanceGeneral)));
+    derecha.push(fila("Reservado", v(reservarAcum, true)));
+    derecha.push(fila("Gastos pendientes", v(gastosPendientes, true)));
+    derecha.push(fila("Remanente real", v(diffCuenta)));
+
+    const maxFilas = Math.max(izquierda.length, derecha.length);
+    const aoa = [[`Finanzas Generales (al ${fechaHoyStr})`], [], ["Concepto", "Monto", "", "Concepto", "Monto"]];
+    for (let i = 0; i < maxFilas; i++) {
+      const li = izquierda[i] || { Concepto: "", Monto: "" };
+      const ri = derecha[i] || { Concepto: "", Monto: "" };
+      aoa.push([li.Concepto, li.Monto, "", ri.Concepto, ri.Monto]);
+    }
+    return aoa;
+  }
+  // 112ª entrega: botón "Exportar a Excel" propio de "Finanzas Generales" — un solo archivo con la hoja
+  // de arriba.
+  function exportarFinanzasExcel() {
+    const libro = XLSX.utils.book_new();
+    const hoja = XLSX.utils.aoa_to_sheet(construirAoaFinanzas());
+    XLSX.utils.book_append_sheet(libro, hoja, "Finanzas Generales");
+    XLSX.writeFile(libro, `FinanzasGenerales_${campeonatoSel}_${fechaHoyStr.replace(/\//g, "-")}.xlsx`);
+  }
+
+  // 112ª entrega: botón "Conciliación Finanzas" (bloque superior) — a pedido de Federico, para poder
+  // exportar y validar TODAS las finanzas del campeonato en cualquier momento. Un solo .xlsx con 4
+  // pestañas:
+  //   1) "Resultados" — TODOS los torneos publicados del campeonato, en el mismo formato de "Corte de
+  //      cobranza" (No. Ref./Nombre/Alias/Deuda/Ganancia/Saldo) pero en una sola hoja, con una columna
+  //      "Torneo" agregada para identificar de cuál torneo es cada fila.
+  //   2) "Cobranza" — TODOS los Pagos/Depósitos confirmados del campeonato, en el mismo formato de
+  //      "Registrar pagos y depósitos" (Jugador/Tipo/Motivo/Esperado/Real/Registrado) — es
+  //      `confirmadosCampeonato` completo: como un Pago/Depósito de torneo solo puede confirmarse para un
+  //      torneo que ya está en `torneosSaldoOpciones` (publicado), esto ya es "la cobranza de los
+  //      torneos publicados" sin necesidad de un filtro aparte.
+  //   3) "Finanzas" — exactamente la misma hoja que arma `construirAoaFinanzas()` para el botón de
+  //      "Finanzas Generales" (mismo formato, ver más arriba).
+  //   4) "Conciliación" — Federico pidió reconstruir las finanzas generales A PARTIR de las pestañas 1 y
+  //      2, paso a paso, para poder auditarlo, y validar el resultado contra la pestaña "Finanzas". Por
+  //      eso esta pestaña NO reutiliza las variables ya calculadas del portal (`totalPagosRegular`,
+  //      `catPremiosRegular`, etc.) para la columna "Reconstruido" — las recalcula de cero, con su propia
+  //      lógica, leyendo solo los datos crudos de las filas de Resultados/Cobranza (igual que si alguien
+  //      armara esta cuenta a mano desde esas 2 pestañas). La columna "Finanzas (portal)" sí es el valor
+  //      que ya muestra el portal, y "Diferencia" es la resta de las dos — si todo el cálculo del sitio
+  //      está bien, cada diferencia debería dar $0.00; si alguna vez no da $0.00, esta pestaña dice
+  //      exactamente en qué línea aparece la discrepancia. Los 2 montos configurados a mano en el
+  //      Tablero de Control (Gastos operativos y su presupuesto) no dependen de Resultados/Cobranza —
+  //      se marcan como "(config., no depende de estas 2 pestañas)" en vez de intentar "reconstruirlos".
+  function exportarConciliacionExcel() {
+    // ---------- 1) "Resultados": una fila por jugador y por torneo publicado ----------
+    const resultadosRows = [];
+    for (const t of torneosSaldoOpciones) {
+      const torneo = estData?.torneos?.[campeonatoSel]?.[t.fecha];
+      for (const j of directorioActivo) {
+        const jt = jugadorEnTorneo(torneo, j);
+        if (!jt) continue;
+        const debeTotal = Number(jt.debeTotal) || 0;
+        const premioTotal = Number(jt.premioTotal) || 0;
+        resultadosRows.push({
+          torneoEtiqueta: etiquetaCorta(t),
+          tipoTorneo: t.tipo === "Main" ? "Main" : "Regular",
+          fecha: t.fecha,
+          correo: j.correo,
+          noRef: refFmt(j.id),
+          nombre: j.nombre,
+          alias: nombreCorto(j),
+          deuda: -debeTotal,
+          ganancia: premioTotal,
+          saldo: premioTotal - debeTotal,
+          lugar: Number(jt.lugar) || 0,
+          premioLugar: Number(jt.premioLugar) || 0,
+          premioBurbuja: Number(jt.premioBurbuja) || 0,
+          premioMano: Number(jt.premioMano) || 0,
+        });
+      }
+    }
+
+    // ---------- 2) "Cobranza": todos los Pagos/Depósitos confirmados del campeonato ----------
+    const cobranzaRows = confirmadosCampeonato;
+
+    // ---------- 4) Reconstrucción independiente, solo a partir de resultadosRows/cobranzaRows ----------
+    const porFechaTorneo = {};
+    for (const r of resultadosRows) if (!porFechaTorneo[r.fecha]) porFechaTorneo[r.fecha] = r.tipoTorneo;
+    const porJugadorTorneo = {};
+    for (const r of resultadosRows) porJugadorTorneo[`${r.fecha}|${r.correo}`] = r;
+
+    let reTotalInscripciones = 0;
+    let rePagosRegular = 0, rePagosMain = 0, reTotalPagosTorneo = 0, reCentavos = 0;
+    for (const c of cobranzaRows) {
+      if (c.motivoTipo === "inscripcion" && c.tipoAccion === "pago") {
+        reTotalInscripciones += Number(c.monto) || 0;
+      }
+      if (c.motivoTipo === "torneo" && c.tipoAccion === "pago") {
+        const monto = Number(c.monto) || 0;
+        const tipoTorneo = porFechaTorneo[c.motivoId] === "Main" ? "Main" : "Regular";
+        if (tipoTorneo === "Main") rePagosMain += monto; else rePagosRegular += monto;
+        reTotalPagosTorneo += monto;
+        const remanente = monto - (Number(c.montoEsperado) || 0);
+        if (remanente > 0) reCentavos += remanente;
+      }
+    }
+    const reFondoReservado = (reTotalPagosTorneo * pctAcumuladoActivo) / 100;
+    const reDisponible = reTotalPagosTorneo - reFondoReservado;
+    const reSubtotalIngresos = reTotalInscripciones + rePagosRegular + rePagosMain;
+
+    const reRegular = { 1: 0, 2: 0, 3: 0, otros: 0 };
+    const reMain = { 1: 0, 2: 0, 3: 0, otros: 0, burbuja: 0, mano: 0 };
+    for (const c of cobranzaRows) {
+      if (c.motivoTipo !== "torneo" || c.tipoAccion !== "deposito") continue;
+      const r = porJugadorTorneo[`${c.motivoId}|${c.correo}`];
+      if (!r) continue;
+      const bucket = r.tipoTorneo === "Main" ? reMain : reRegular;
+      if (r.lugar === 1) bucket[1] += r.premioLugar;
+      else if (r.lugar === 2) bucket[2] += r.premioLugar;
+      else if (r.lugar === 3) bucket[3] += r.premioLugar;
+      else bucket.otros += r.premioLugar;
+      if (r.tipoTorneo === "Main") {
+        reMain.burbuja += r.premioBurbuja;
+        reMain.mano += r.premioMano;
+      }
+    }
+    const reSubtotalEgresos = reRegular[1] + reRegular[2] + reRegular[3] + reRegular.otros + reMain[1] + reMain[2] + reMain[3] + reMain.otros + reMain.burbuja + reMain.mano;
+    const reBalanceGeneral = reSubtotalIngresos - reSubtotalEgresos;
+    const reAcumPorLugar = premiosCampeonatoConfig.map((l) => ({
+      label: l.reyKiller ? "Rey Killer" : l.label,
+      monto: (reFondoReservado * (Number(l.pct) || 0)) / 100,
+    }));
+    const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0);
+    const reReservar = -reFondoReservado;
+    const reGastosPend = -totalGastosOperativos; // config., ver nota más abajo
+    const reDiff = reBalanceGeneral + reReservar + reGastosPend;
+
+    // ---------- aoa de la pestaña "Conciliación" ----------
+    const redondear = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const filaConc = (concepto, reconstruido, finanzas, nota = "") => {
+      const r = redondear(reconstruido);
+      const f = redondear(finanzas);
+      return [concepto, r, f, redondear(r - f), nota];
+    };
+    const aoaConc = [
+      ["Conciliación — reconstruida a partir de las pestañas Resultados + Cobranza"],
+      [],
+      ["Concepto", "Reconstruido (Resultados+Cobranza)", "Finanzas (portal)", "Diferencia", "Nota"],
+      filaConc("Inscripciones reales", reTotalInscripciones, totalInscripcionesConfirmadas),
+      filaConc("Ingresos confirmados — torneos regulares", rePagosRegular, totalPagosRegular),
+      filaConc("Ingresos confirmados — torneos main", rePagosMain, totalPagosMain),
+      filaConc("Subtotal ingresos", reSubtotalIngresos, subtotalIngresos),
+      filaConc("Provisión para acum. Camp. (15%)", -reFondoReservado, -fondoAcumuladoReservado),
+      filaConc("Disponible (85%)", reDisponible, disponiblePagosTorneo),
+      filaConc("Torneos regulares — 1er lugar", -reRegular[1], -catPremiosRegular[1]),
+      filaConc("Torneos regulares — 2do lugar", -reRegular[2], -catPremiosRegular[2]),
+      filaConc("Torneos regulares — 3er lugar", -reRegular[3], -catPremiosRegular[3]),
+      filaConc("Torneos regulares — otros lugares pagados", -reRegular.otros, -catPremiosRegular.otros),
+      filaConc("Torneos main — 1er lugar", -reMain[1], -catPremiosMain[1]),
+      filaConc("Torneos main — 2do lugar", -reMain[2], -catPremiosMain[2]),
+      filaConc("Torneos main — 3er lugar", -reMain[3], -catPremiosMain[3]),
+      filaConc("Torneos main — otros lugares pagados", -reMain.otros, -catPremiosMain.otros),
+      filaConc("Torneos main — burbuja", -reMain.burbuja, -catPremiosMain.burbuja),
+      filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano),
+      filaConc("Subtotal egresos", -reSubtotalEgresos, -subtotalEgresos),
+      filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral),
+      filaConc(
+        "Subtotal gastos operativos",
+        -totalGastosOperativos,
+        -totalGastosOperativos,
+        "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
+      ),
+      filaConc("Centavos acumulados", reCentavos, centavosAcumulados),
+      filaConc("Total reservado (Acum. Campeonato)", -reAcumAlMomento, -acumCampeonatoAlMomento),
+      ...reAcumPorLugar.map((l, i) => filaConc(l.label, -l.monto, -(acumCampeonatoPorLugar[i]?.monto || 0))),
+      filaConc("Reservado", reReservar, reservarAcum),
+      filaConc("Gastos pendientes", reGastosPend, gastosPendientes, "(config. en Tablero de Control — no depende de Resultados/Cobranza)"),
+      filaConc("Remanente real", reDiff, diffCuenta),
+    ];
+
+    // ---------- aoa de la pestaña "Resultados" ----------
+    const aoaResultados = [
+      ["Torneo", "No. Ref.", "Nombre y Apellido", "Alias PokerStars", "Deuda", "Ganancia", "Saldo"],
+      ...resultadosRows.map((r) => [r.torneoEtiqueta, r.noRef, r.nombre, r.alias, r.deuda, r.ganancia, r.saldo]),
+    ];
+
+    // ---------- aoa de la pestaña "Cobranza" ----------
+    const aoaCobranza = [
+      ["Jugador", "Tipo", "Motivo", "Esperado", "Real", "Registrado"],
+      ...cobranzaRows.map((c) => [
+        aliasDeCorreo(c.correo),
+        c.tipo,
+        c.motivo,
+        Number(c.montoEsperado) || 0,
+        Number(c.monto) || 0,
+        c.fecha ? fechaFmt(c.fecha) : "",
+      ]),
+    ];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaResultados), "Resultados");
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaCobranza), "Cobranza");
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(construirAoaFinanzas()), "Finanzas");
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaConc), "Conciliación");
+    XLSX.writeFile(libro, `ConciliacionFinanzas_${campeonatoSel}_${fechaHoyStr.replace(/\//g, "-")}.xlsx`);
+  }
+
   // 106ª entrega: exporta "Corte de cobranza" del torneo elegido a Excel, mismo patrón que
   // Estadisticas.jsx -> exportarExcel().
   function exportarCorteExcel() {
@@ -690,6 +956,14 @@ export default function Cobranza({ session, perfiles }) {
     return filas.sort((a, b) => (b.registradoEn || "").localeCompare(a.registradoEn || ""));
   }, [data, campeonatoSel, numeracion]);
 
+  // 112ª entrega: si la lista de "Pagos y depósitos confirmados" se encoge (se edita/borra un registro, o
+  // se cambia de campeonato) y la página guardada queda fuera de rango, se recorta a la última página
+  // válida — evita mostrar "Página 6 de 2" o una tabla vacía.
+  useEffect(() => {
+    const totalPaginas = Math.max(1, Math.ceil(confirmadosCampeonato.length / MOV_CONFIRMADOS_POR_PAGINA));
+    setPaginaMovConfirmados((p) => Math.min(p, totalPaginas - 1));
+  }, [confirmadosCampeonato.length]);
+
   // 81ª entrega: totales de "Pagos y depósitos confirmados", a pedido de Federico — arriba de la tabla
   // de detalle, agrupables por Motivo o por Fecha (toggle `agruparPor`). Separados en Pagos/Depósitos
   // (igual que MontoPorTipo, nunca mezclados en una sola suma) más un total general, siempre desde la
@@ -717,20 +991,21 @@ export default function Cobranza({ session, perfiles }) {
     return { filas, total };
   }, [confirmadosCampeonato, agruparPor]);
 
-  // 110ª entrega (corregida): filas "Adeudo" del Estado de cuenta — a pedido de Federico, cada torneo YA
-  // PUBLICADO del campeonato activo en el que participó el jugador elegido aporta UNA sola fila (Tipo =
-  // "Adeudo", Movimiento = "Torneo N") con el Saldo PENDIENTE de ese torneo: mientras el Tesorero no haya
-  // confirmado el Pago (si el jugador debía) o el Depósito (si cobraba) de ESE torneo, muestra el Saldo
-  // teórico completo (premioTotal - debeTotal, igual que resultadoTorneo()/filasCorte() más arriba); en
-  // cuanto se confirma, esta misma fila se ajusta sola a $0 (sigue en la lista, para que el historial
-  // muestre que ese torneo ya quedó liquidado, pero deja de mover el saldo corrido). Por eso la fila
-  // "Pago"/"Depósito" de ESE MISMO torneo deja de listarse por separado en Estado de Cuenta (ver
-  // `estadoCuentaJugador` más abajo, que descarta `motivoTipo: "torneo"` de `confirmadosCampeonato` para
-  // esta tabla puntual) — así nunca hay dos filas por un mismo torneo que haya que cancelar entre sí, solo
-  // una que se actualiza. `montoFirmado` se guarda en negativo del Saldo pendiente (o 0 si ya se liquidó)
-  // para que la inversión de signo de siempre (ver `estadoCuentaJugador`) la muestre tal cual la describió
-  // Federico: "ya sea positivo (a favor del jugador) o negativo (en contra)". Se arma solo para el jugador
-  // elegido en el combo (`correoEstado`).
+  // 110ª/112ª entrega: filas "Adeudo" del Estado de cuenta — a pedido de Federico, cada torneo YA
+  // PUBLICADO del campeonato activo en el que participó el jugador elegido, y que TODAVÍA no tiene su
+  // Pago (si el jugador debía) o Depósito (si cobraba) confirmado, aporta una fila (Tipo = "Adeudo",
+  // Movimiento = "Torneo N") con el Saldo PENDIENTE de ese torneo (premioTotal - debeTotal, igual que
+  // resultadoTorneo()/filasCorte() más arriba). 112ª entrega: en cuanto el Tesorero confirma ese Pago/
+  // Depósito, la fila de Adeudo de ese torneo deja de generarse por completo (antes, en la 111ª entrega,
+  // se dejaba en $0 y además se escondía la fila real de "Pago"/"Depósito" — Federico avisó que así ya no
+  // se veían esos movimientos reales en Estado de Cuenta, que es justo lo que no quería). Ahora: mientras
+  // está pendiente, solo se ve el Adeudo; en cuanto se liquida, el Adeudo desaparece y en su lugar aparece
+  // la fila real de "Pago"/"Depósito" de ese torneo (siempre estuvo en `confirmadosCampeonato`, ver
+  // `estadoCuentaJugador` más abajo — ya no se excluye) — nunca las dos a la vez, nunca ninguna de las
+  // dos faltando. `montoFirmado` se guarda en negativo del Saldo pendiente para que la inversión de signo
+  // de siempre (ver `estadoCuentaJugador`) la muestre tal cual la describió Federico: "ya sea positivo (a
+  // favor del jugador) o negativo (en contra)". Se arma solo para el jugador elegido en el combo
+  // (`correoEstado`).
   const adeudosJugador = useMemo(() => {
     if (!correoEstado) return [];
     const jug = directorioActivo.find((j) => j.correo === correoEstado);
@@ -744,6 +1019,7 @@ export default function Cobranza({ session, perfiles }) {
       if (saldo === 0) continue;
       const clave = `${campeonatoSel}|${t.fecha}|${correoEstado}`;
       const liquidado = saldo < 0 ? !!data?.pagosTorneo?.[clave] : !!data?.depositosTorneo?.[clave];
+      if (liquidado) continue;
       filas.push({
         clave: `adeudo|${clave}`,
         tipo: "Adeudo",
@@ -751,31 +1027,28 @@ export default function Cobranza({ session, perfiles }) {
         correo: correoEstado,
         fecha: t.fecha,
         registradoEn: `${t.fecha}T00:00:00`,
-        montoFirmado: liquidado ? 0 : -saldo,
+        montoFirmado: -saldo,
       });
     }
     return filas;
   }, [correoEstado, directorioActivo, torneosSaldoOpciones, estData, campeonatoSel, data]);
 
-  // 79ª/110ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/Motivo/
-  // Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre los registros confirmados de
-  // `confirmadosCampeonato` (Pagos y Depósitos) MÁS las filas "Adeudo" de `adeudosJugador` (110ª entrega).
-  // 110ª entrega: los Pagos/Depósitos de un TORNEO (`motivoTipo: "torneo"`) se excluyen de esta lista —
-  // ese movimiento ya queda representado por su fila "Adeudo" (que se ajusta sola a $0 en cuanto se
-  // confirma, ver comentario de `adeudosJugador`) — para no listar dos veces el mismo torneo. Los Pagos de
-  // Inscripción y los Depósitos de Gasto del campeonato (`motivoTipo: "inscripcion"`/`"gasto"`) siguen
-  // igual que siempre, sin cambio. Todo se ordena cronológicamente ascendente (el más viejo primero, para
-  // que el saldo corrido tenga sentido de arriba hacia abajo); el primer renglón arranca en Saldo inicial =
-  // 0. El signo del Monto sigue el mismo criterio de siempre: un Pago SUMA al saldo (ingreso para TOLS), un
-  // Depósito RESTA (egreso de TOLS); un Adeudo pendiente también RESTA (ver `adeudosJugador`) y uno ya
-  // liquidado no mueve nada (queda en 0). Se ordena por la fecha que el Tesorero dejó asentada (`fecha`,
-  // opcional en un Pago) o la del propio torneo (Adeudo) y, si no la hay, por `registradoEn`.
+  // 79ª/110ª/112ª entrega: "Estado de cuenta" — a pedido de Federico, tabla de saldo corrido (Fecha/Tipo/
+  // Motivo/Saldo inicial/Monto/Saldo final) para el jugador elegido, armada sobre TODOS los registros
+  // confirmados de `confirmadosCampeonato` (Pagos y Depósitos, incluidos los de torneo — 112ª entrega: ya
+  // no se excluyen, ver comentario de `adeudosJugador`) MÁS las filas "Adeudo" de `adeudosJugador` (solo
+  // de torneos todavía sin liquidar, nunca coinciden con una fila real del mismo torneo). Los Pagos de
+  // Inscripción y los Depósitos de Gasto del campeonato siguen igual que siempre, sin cambio. Todo se
+  // ordena cronológicamente ascendente (el más viejo primero, para que el saldo corrido tenga sentido de
+  // arriba hacia abajo); el primer renglón arranca en Saldo inicial = 0. El signo del Monto sigue el mismo
+  // criterio de siempre: un Pago SUMA al saldo (ingreso para TOLS), un Depósito RESTA (egreso de TOLS); un
+  // Adeudo pendiente también RESTA (ver `adeudosJugador`) — así el saldo corrido no da un salto al
+  // liquidarse: el Adeudo pendiente y el Pago/Depósito real que lo liquida contribuyen la misma magnitud al
+  // saldo corrido, solo que en momentos distintos. Se ordena por la fecha que el Tesorero dejó asentada
+  // (`fecha`, opcional en un Pago) o la del propio torneo (Adeudo) y, si no la hay, por `registradoEn`.
   const estadoCuentaJugador = useMemo(() => {
     if (!correoEstado) return [];
-    const filas = [
-      ...confirmadosCampeonato.filter((c) => c.correo === correoEstado && c.motivoTipo !== "torneo"),
-      ...adeudosJugador,
-    ]
+    const filas = [...confirmadosCampeonato.filter((c) => c.correo === correoEstado), ...adeudosJugador]
       .map((c) => ({
         ...c,
         fechaOrden: c.fecha || (c.registradoEn || "").slice(0, 10),
@@ -1235,6 +1508,13 @@ export default function Cobranza({ session, perfiles }) {
             {label}
           </button>
         ))}
+        {/* 112ª entrega: "Conciliación Finanzas" — a pedido de Federico, para poder exportar y validar
+            TODAS las finanzas del campeonato en cualquier momento. No es una vista más (no cambia
+            `vista`), dispara directo la descarga del .xlsx de 4 pestañas (ver
+            `exportarConciliacionExcel()`). */}
+        <button className="btn btn-secondary btn-filtro" onClick={exportarConciliacionExcel}>
+          ⬇️ Conciliación Finanzas
+        </button>
       </div>
 
       {vista === "resultado" && (
@@ -1464,23 +1744,13 @@ export default function Cobranza({ session, perfiles }) {
                   <button className="btn btn-secondary" disabled={corteGenerando} onClick={copiarCorteWhatsApp}>
                     {corteGenerando ? "Generando imagen…" : "📋 Copiar imagen para WhatsApp"}
                   </button>
-                  <button className="btn btn-secondary" onClick={exportarCorteExcel}>⬇️ Exportar a Excel</button>
-                  {/* 106ª/107ª entrega: ordenar la tabla por No. de Referencia o por Estatus (reemplaza al
-                      botón "Saldo" de la 106ª entrega — ordenar por Saldo ahora se hace clickeando el
-                      propio encabezado de esa columna, como en Clasificación General). */}
-                  <span style={{ fontSize: 12.5, color: "#667" }}>Ordenar por:</span>
-                  <button
-                    className={"btn btn-secondary" + (corteOrden === "ref" ? " active" : "")}
-                    onClick={() => setCorteOrden("ref")}
-                  >
-                    No. de Referencia
-                  </button>
-                  <button
-                    className={"btn btn-secondary" + (corteOrden === "estatus" ? " active" : "")}
-                    onClick={() => setCorteOrden("estatus")}
-                  >
-                    Estatus
-                  </button>
+                  {/* 112ª entrega: Federico pidió quitar los botones "Ordenar por: No. de
+                      Referencia/Estatus" (y el texto "Ordenar por:") de este bloque — el orden por Saldo
+                      sigue disponible clickeando el propio encabezado de esa columna (107ª entrega, no se
+                      tocó); `corteOrden`/`setCorteOrden` siguen existiendo para ese modo y para el default
+                      "ref" con el que arranca la tabla. También pidió renombrar este botón, sin tocar su
+                      función (`exportarCorteExcel`, sin cambios). */}
+                  <button className="btn btn-secondary" onClick={exportarCorteExcel}>⬇️ Exportar el torneo desplegado</button>
                   {corteCopiado && <span className="check-line check-ok">Copiado ✓</span>}
                   {corteAviso && <span className="section-sub" style={{ margin: 0 }}>{corteAviso}</span>}
                 </div>
@@ -1530,10 +1800,6 @@ export default function Cobranza({ session, perfiles }) {
                     </tbody>
                   </table>
                 </div>
-                <p className="section-sub" style={{ marginTop: 10 }}>
-                  Saldo: verde = debe y ya pagó · rojo = debe y todavía no · azul = cobra y ya se le
-                  depositó · blanco = cobra y todavía no se le depositó.
-                </p>
               </>
             )
           )}
@@ -1819,7 +2085,15 @@ export default function Cobranza({ session, perfiles }) {
             <div className="trow thead" style={{ gridTemplateColumns: "1.3fr 0.6fr 1fr 1.1fr 1.1fr 0.9fr 40px" }}>
               <div>Jugador</div><div>Tipo</div><div>Motivo</div><div>Esperado</div><div>Real</div><div>Registrado</div><div />
             </div>
-            {confirmadosCampeonato.map((c) =>
+            {/* 112ª entrega: página "segura" — si la lista se encoge (otro campeonato, un registro
+                editado/borrado) y la página guardada quedó fuera de rango, se recorta a la última válida
+                en vez de mostrar una página vacía. */}
+            {(() => {
+              const totalPaginasMov = Math.max(1, Math.ceil(confirmadosCampeonato.length / MOV_CONFIRMADOS_POR_PAGINA));
+              const paginaSegura = Math.min(paginaMovConfirmados, totalPaginasMov - 1);
+              return confirmadosCampeonato
+                .slice(paginaSegura * MOV_CONFIRMADOS_POR_PAGINA, paginaSegura * MOV_CONFIRMADOS_POR_PAGINA + MOV_CONFIRMADOS_POR_PAGINA)
+                .map((c) =>
               editandoPago?.clave === c.clave ? (
                 <div
                   key={c.clave}
@@ -1903,11 +2177,36 @@ export default function Cobranza({ session, perfiles }) {
                   </div>
                 </div>
               )
-            )}
+              );
+            })()}
             {confirmadosCampeonato.length === 0 && (
               <div className="section-sub" style={{ padding: 16 }}>Todavía no hay pagos ni depósitos confirmados para este campeonato.</div>
             )}
           </div>
+          {/* 112ª entrega: controles de paginación — a pedido de Federico, 10 registros por página con
+              avanzar/retroceder, para que esta lista no se haga tan larga hacia abajo. */}
+          {confirmadosCampeonato.length > MOV_CONFIRMADOS_POR_PAGINA && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginTop: 10 }}>
+              <button
+                className="btn btn-secondary"
+                disabled={paginaMovConfirmados === 0}
+                onClick={() => setPaginaMovConfirmados((p) => Math.max(0, p - 1))}
+              >
+                ◀ Anterior
+              </button>
+              <span className="section-sub" style={{ margin: 0 }}>
+                Página {paginaMovConfirmados + 1} de {Math.ceil(confirmadosCampeonato.length / MOV_CONFIRMADOS_POR_PAGINA)}
+                {" "}({confirmadosCampeonato.length} registros)
+              </span>
+              <button
+                className="btn btn-secondary"
+                disabled={(paginaMovConfirmados + 1) * MOV_CONFIRMADOS_POR_PAGINA >= confirmadosCampeonato.length}
+                onClick={() => setPaginaMovConfirmados((p) => p + 1)}
+              >
+                Siguiente ▶
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -2017,6 +2316,8 @@ export default function Cobranza({ session, perfiles }) {
         <div className="section">
           <div className="section-head">
             <div className="section-title">Finanzas Generales (al {fechaHoyStr})</div>
+            {/* 112ª entrega: botón "Exportar a Excel" — mismo formato de 2 columnas que se ve abajo. */}
+            <button className="btn btn-secondary" onClick={exportarFinanzasExcel}>⬇️ Exportar a Excel</button>
           </div>
 
           <div className="finanzas-cols">

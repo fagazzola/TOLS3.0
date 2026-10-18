@@ -608,6 +608,32 @@ export default function Cobranza({ session, perfiles }) {
   //      Tablero de Control (Gastos operativos y su presupuesto) no dependen de Resultados/Cobranza —
   //      se marcan como "(config., no depende de estas 2 pestañas)" en vez de intentar "reconstruirlos".
   function exportarConciliacionExcel() {
+    // 113ª entrega: formato de dinero para todas las celdas numéricas de este Excel — Federico pidió
+    // "$ #,##0.00" en positivo y "($ #,##0.00)" en negativo (sin signo "-", entre paréntesis).
+    const MONEY_FMT = '"$ "#,##0.00;("$ "#,##0.00)';
+    function formatearColumnasDinero(ws, columnas, filaInicio = 1) {
+      if (!ws["!ref"]) return;
+      const rango = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = filaInicio; R <= rango.e.r; R++) {
+        for (const C of columnas) {
+          const celda = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+          if (celda && celda.t === "n") celda.z = MONEY_FMT;
+        }
+      }
+    }
+    // Soporte: en esa hoja prácticamente todo número es un monto en pesos, así que se formatea TODA
+    // celda numérica de la hoja, sin restringir a columnas fijas (los bloques tienen distinto ancho).
+    function formatearTodoDinero(ws, filaInicio = 0) {
+      if (!ws["!ref"]) return;
+      const rango = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = filaInicio; R <= rango.e.r; R++) {
+        for (let C = rango.s.c; C <= rango.e.c; C++) {
+          const celda = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+          if (celda && celda.t === "n") celda.z = MONEY_FMT;
+        }
+      }
+    }
+
     // ---------- 1) "Resultados": una fila por jugador y por torneo publicado ----------
     const resultadosRows = [];
     for (const t of torneosSaldoOpciones) {
@@ -625,10 +651,10 @@ export default function Cobranza({ session, perfiles }) {
           noRef: refFmt(j.id),
           nombre: j.nombre,
           alias: nombreCorto(j),
+          lugar: Number(jt.lugar) || 0,
           deuda: -debeTotal,
           ganancia: premioTotal,
           saldo: premioTotal - debeTotal,
-          lugar: Number(jt.lugar) || 0,
           premioLugar: Number(jt.premioLugar) || 0,
           premioBurbuja: Number(jt.premioBurbuja) || 0,
           premioMano: Number(jt.premioMano) || 0,
@@ -638,26 +664,46 @@ export default function Cobranza({ session, perfiles }) {
 
     // ---------- 2) "Cobranza": todos los Pagos/Depósitos confirmados del campeonato ----------
     const cobranzaRows = confirmadosCampeonato;
+    // 113ª entrega: Federico pidió que en esta pestaña el monto se vea en positivo si es Depósito y en
+    // negativo si es Pago (antes ambos salían siempre positivos, como se guardan en Blobs) — aplica a
+    // Esperado y a Real por igual.
+    const montoConSigno = (c, campo) => {
+      const n = Number(c[campo]) || 0;
+      return c.tipo === "Pago" ? -n : n;
+    };
 
-    // ---------- 4) Reconstrucción independiente, solo a partir de resultadosRows/cobranzaRows ----------
+    // ---------- Reconstrucción independiente (pestaña "Conciliación" + hoja "Soporte"), solo a partir
+    // de resultadosRows/cobranzaRows — ver comentario de arriba de la función. ----------
     const porFechaTorneo = {};
     for (const r of resultadosRows) if (!porFechaTorneo[r.fecha]) porFechaTorneo[r.fecha] = r.tipoTorneo;
     const porJugadorTorneo = {};
     for (const r of resultadosRows) porJugadorTorneo[`${r.fecha}|${r.correo}`] = r;
 
+    const detInscripciones = [];
+    const detPagosRegular = [];
+    const detPagosMain = [];
+    const detCentavos = [];
     let reTotalInscripciones = 0;
     let rePagosRegular = 0, rePagosMain = 0, reTotalPagosTorneo = 0, reCentavos = 0;
     for (const c of cobranzaRows) {
       if (c.motivoTipo === "inscripcion" && c.tipoAccion === "pago") {
-        reTotalInscripciones += Number(c.monto) || 0;
+        const monto = Number(c.monto) || 0;
+        reTotalInscripciones += monto;
+        detInscripciones.push([aliasDeCorreo(c.correo), monto]);
       }
       if (c.motivoTipo === "torneo" && c.tipoAccion === "pago") {
         const monto = Number(c.monto) || 0;
-        const tipoTorneo = porFechaTorneo[c.motivoId] === "Main" ? "Main" : "Regular";
-        if (tipoTorneo === "Main") rePagosMain += monto; else rePagosRegular += monto;
+        const torneoInfo = porFechaTorneo[c.motivoId];
+        const tipoTorneo = torneoInfo === "Main" ? "Main" : "Regular";
+        const etiqueta = porJugadorTorneo[`${c.motivoId}|${c.correo}`]?.torneoEtiqueta || c.motivo;
+        if (tipoTorneo === "Main") { rePagosMain += monto; detPagosMain.push([aliasDeCorreo(c.correo), etiqueta, monto]); }
+        else { rePagosRegular += monto; detPagosRegular.push([aliasDeCorreo(c.correo), etiqueta, monto]); }
         reTotalPagosTorneo += monto;
         const remanente = monto - (Number(c.montoEsperado) || 0);
-        if (remanente > 0) reCentavos += remanente;
+        if (remanente > 0) {
+          reCentavos += remanente;
+          detCentavos.push([aliasDeCorreo(c.correo), etiqueta, Number(c.montoEsperado) || 0, monto, remanente]);
+        }
       }
     }
     const reFondoReservado = (reTotalPagosTorneo * pctAcumuladoActivo) / 100;
@@ -666,98 +712,258 @@ export default function Cobranza({ session, perfiles }) {
 
     const reRegular = { 1: 0, 2: 0, 3: 0, otros: 0 };
     const reMain = { 1: 0, 2: 0, 3: 0, otros: 0, burbuja: 0, mano: 0 };
+    const detRegular = { 1: [], 2: [], 3: [], otros: [] };
+    const detMain = { 1: [], 2: [], 3: [], otros: [], burbuja: [], mano: [] };
     for (const c of cobranzaRows) {
       if (c.motivoTipo !== "torneo" || c.tipoAccion !== "deposito") continue;
       const r = porJugadorTorneo[`${c.motivoId}|${c.correo}`];
       if (!r) continue;
       const bucket = r.tipoTorneo === "Main" ? reMain : reRegular;
-      if (r.lugar === 1) bucket[1] += r.premioLugar;
-      else if (r.lugar === 2) bucket[2] += r.premioLugar;
-      else if (r.lugar === 3) bucket[3] += r.premioLugar;
-      else bucket.otros += r.premioLugar;
+      const detBucket = r.tipoTorneo === "Main" ? detMain : detRegular;
+      const alias = aliasDeCorreo(c.correo);
+      if (r.lugar === 1) { bucket[1] += r.premioLugar; detBucket[1].push([alias, r.torneoEtiqueta, r.premioLugar]); }
+      else if (r.lugar === 2) { bucket[2] += r.premioLugar; detBucket[2].push([alias, r.torneoEtiqueta, r.premioLugar]); }
+      else if (r.lugar === 3) { bucket[3] += r.premioLugar; detBucket[3].push([alias, r.torneoEtiqueta, r.premioLugar]); }
+      else { bucket.otros += r.premioLugar; detBucket.otros.push([alias, r.torneoEtiqueta, r.premioLugar]); }
       if (r.tipoTorneo === "Main") {
-        reMain.burbuja += r.premioBurbuja;
-        reMain.mano += r.premioMano;
+        if (r.premioBurbuja) { reMain.burbuja += r.premioBurbuja; detMain.burbuja.push([alias, r.torneoEtiqueta, r.premioBurbuja]); }
+        if (r.premioMano) { reMain.mano += r.premioMano; detMain.mano.push([alias, r.torneoEtiqueta, r.premioMano]); }
       }
     }
     const reSubtotalEgresos = reRegular[1] + reRegular[2] + reRegular[3] + reRegular.otros + reMain[1] + reMain[2] + reMain[3] + reMain.otros + reMain.burbuja + reMain.mano;
     const reBalanceGeneral = reSubtotalIngresos - reSubtotalEgresos;
     const reAcumPorLugar = premiosCampeonatoConfig.map((l) => ({
       label: l.reyKiller ? "Rey Killer" : l.label,
+      pct: Number(l.pct) || 0,
       monto: (reFondoReservado * (Number(l.pct) || 0)) / 100,
     }));
     const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0);
     const reReservar = -reFondoReservado;
-    const reGastosPend = -totalGastosOperativos; // config., ver nota más abajo
+    const reGastosPend = -totalGastosOperativos; // config., ver bloque "Gastos operativos" en Soporte
     const reDiff = reBalanceGeneral + reReservar + reGastosPend;
 
-    // ---------- aoa de la pestaña "Conciliación" ----------
+    // ---------- Hoja "Soporte": un bloque por cada cifra, con el detalle que la compone ----------
+    const soporteAoa = [
+      ["Hoja de Soporte — detalle de cómo se compone cada cifra de \"Conciliación\""],
+      ["Los montos de esta hoja están en positivo cuando representan dinero que se paga o se recibe; en \"Conciliación\" algunas de estas mismas cifras se muestran en negativo (egresos) — ver la nota de cada bloque."],
+      [],
+    ];
+    // bloque(titulo, notas[], headers, filas, totalLabel, totalValor, colTotal) -> fila (1-indexed) del título, para la liga
+    function bloque(titulo, notas, headers, filas, totalLabel, totalValor, colTotal = headers.length - 1) {
+      const anchor = soporteAoa.length + 1;
+      soporteAoa.push([titulo]);
+      notas.forEach((n) => soporteAoa.push([n]));
+      soporteAoa.push(headers);
+      if (filas.length) filas.forEach((f) => soporteAoa.push(f));
+      else soporteAoa.push(["(sin registros)"]);
+      const filaTotal = new Array(headers.length).fill("");
+      filaTotal[0] = totalLabel;
+      filaTotal[colTotal] = totalValor;
+      soporteAoa.push(filaTotal);
+      soporteAoa.push([]);
+      return anchor;
+    }
+
+    const aInscripciones = bloque(
+      "Inscripciones reales",
+      ["Suma de todos los Pagos confirmados con Motivo = Inscripción, de la pestaña Cobranza."],
+      ["Jugador", "Monto"], detInscripciones, "TOTAL", reTotalInscripciones
+    );
+    const aPagosRegular = bloque(
+      "Ingresos confirmados — torneos regulares",
+      ["Suma de los Pagos confirmados de torneo cuyo torneo (pestaña Resultados) es Regular."],
+      ["Jugador", "Torneo", "Monto"], detPagosRegular, "TOTAL", rePagosRegular
+    );
+    const aPagosMain = bloque(
+      "Ingresos confirmados — torneos main",
+      ["Suma de los Pagos confirmados de torneo cuyo torneo (pestaña Resultados) es Main."],
+      ["Jugador", "Torneo", "Monto"], detPagosMain, "TOTAL", rePagosMain
+    );
+    const aSubtotalIngresos = bloque(
+      "Subtotal ingresos",
+      ["= Inscripciones reales + Ingresos torneos regulares + Ingresos torneos main."],
+      ["Concepto", "Monto"],
+      [["Inscripciones reales", reTotalInscripciones], ["Ingresos — torneos regulares", rePagosRegular], ["Ingresos — torneos main", rePagosMain]],
+      "TOTAL", reSubtotalIngresos
+    );
+    const aProvision = bloque(
+      "Provisión para acum. Camp. (15%)",
+      [
+        "= Total de Pagos confirmados de torneo (regulares + main, SIN la inscripción) × % configurado en Tablero de Control.",
+        `En Conciliación se muestra en negativo (−${money(reFondoReservado)}) porque ahí se trata como un egreso.`,
+      ],
+      ["Concepto", "Monto"],
+      [["Total pagos de torneo (regular + main)", reTotalPagosTorneo], ["% configurado (Tablero de Control)", `${pctAcumuladoActivo}%`]],
+      "Provisión (15%)", reFondoReservado
+    );
+    const aDisponible = bloque(
+      "Disponible (85%)",
+      ["= Total de Pagos de torneo (regular + main) − Provisión (15%)."],
+      ["Concepto", "Monto"],
+      [["Total pagos de torneo (regular + main)", reTotalPagosTorneo], ["Provisión (15%)", -reFondoReservado]],
+      "Disponible (85%)", reDisponible
+    );
+    const aReg1 = bloque("Torneos regulares — 1er lugar", ["Premio de 1er lugar de cada jugador en cada torneo Regular, solo de los Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detRegular[1], "TOTAL", reRegular[1]);
+    const aReg2 = bloque("Torneos regulares — 2do lugar", ["Premio de 2do lugar de cada jugador en cada torneo Regular, solo de los Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detRegular[2], "TOTAL", reRegular[2]);
+    const aReg3 = bloque("Torneos regulares — 3er lugar", ["Premio de 3er lugar de cada jugador en cada torneo Regular, solo de los Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detRegular[3], "TOTAL", reRegular[3]);
+    const aRegOtros = bloque("Torneos regulares — otros lugares pagados", ["Premio de cualquier otro lugar pagado (4º en adelante) en torneos Regular, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detRegular.otros, "TOTAL", reRegular.otros);
+    const aMain1 = bloque("Torneos main — 1er lugar", ["Premio de 1er lugar de cada jugador en cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain[1], "TOTAL", reMain[1]);
+    const aMain2 = bloque("Torneos main — 2do lugar", ["Premio de 2do lugar de cada jugador en cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain[2], "TOTAL", reMain[2]);
+    const aMain3 = bloque("Torneos main — 3er lugar", ["Premio de 3er lugar de cada jugador en cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain[3], "TOTAL", reMain[3]);
+    const aMainOtros = bloque("Torneos main — otros lugares pagados", ["Premio de cualquier otro lugar pagado (4º en adelante) en torneos Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.otros, "TOTAL", reMain.otros);
+    const aMainBurbuja = bloque("Torneos main — burbuja", ["Premio de burbuja de cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.burbuja, "TOTAL", reMain.burbuja);
+    const aMainMano = bloque("Torneos main — mejor mano", ["Premio de mejor mano de cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.mano, "TOTAL", reMain.mano);
+    const aSubtotalEgresos = bloque(
+      "Subtotal egresos",
+      ["Suma de las 10 categorías de premios (regular + main) de arriba — en Conciliación se muestra en negativo."],
+      ["Concepto", "Monto"],
+      [
+        ["Torneos regulares — 1er lugar", reRegular[1]], ["Torneos regulares — 2do lugar", reRegular[2]],
+        ["Torneos regulares — 3er lugar", reRegular[3]], ["Torneos regulares — otros lugares", reRegular.otros],
+        ["Torneos main — 1er lugar", reMain[1]], ["Torneos main — 2do lugar", reMain[2]],
+        ["Torneos main — 3er lugar", reMain[3]], ["Torneos main — otros lugares", reMain.otros],
+        ["Torneos main — burbuja", reMain.burbuja], ["Torneos main — mejor mano", reMain.mano],
+      ],
+      "TOTAL", reSubtotalEgresos
+    );
+    const aBalance = bloque(
+      "Balance general / Existente en la cuenta de banco",
+      ["= Subtotal ingresos − Subtotal egresos."],
+      ["Concepto", "Monto"],
+      [["Subtotal ingresos", reSubtotalIngresos], ["Subtotal egresos", -reSubtotalEgresos]],
+      "Balance general", reBalanceGeneral
+    );
+    const aCentavos = bloque(
+      "Centavos acumulados",
+      ["Por cada Pago de torneo confirmado: Monto real − Monto esperado, solo cuando el resultado es positivo (el jugador pagó de más, usando su No. de Referencia como centavos)."],
+      ["Jugador", "Torneo", "Esperado", "Real", "Remanente"], detCentavos, "TOTAL", reCentavos, 4
+    );
+    const aGastosOperativos = bloque(
+      "Gastos operativos / Gastos pendientes (config., no depende de Resultados/Cobranza)",
+      ["Presupuesto fijo configurado en Tablero de Control (Tesorero/Hosting/Pulsera, etc.) — no se calcula a partir de Pagos/Depósitos confirmados."],
+      ["Concepto", "Monto"],
+      gastosOperativos.length ? gastosOperativos.map((g) => [g.concepto, g.total]) : [["Sin conceptos configurados", 0]],
+      "TOTAL (Gastos pendientes = este total en negativo)", totalGastosOperativos
+    );
+    const aAcumLugar = bloque(
+      "Total reservado (Acum. Campeonato) y Reservado por lugar",
+      [
+        "Cada lugar = Provisión (15%) × % configurado en Tablero de Control para ese lugar (incluye Rey Killer).",
+        "\"Reservado\" (sección Pasivo) es la Provisión (15%) completa, en negativo — mismo monto que el bloque \"Provisión para acum. Camp.\" de arriba.",
+      ],
+      ["Lugar", "% configurado", "Monto"],
+      reAcumPorLugar.map((l) => [l.label, `${l.pct}%`, l.monto]),
+      "TOTAL", reAcumAlMomento
+    );
+    const aRemanente = bloque(
+      "Remanente real",
+      ["= Balance general + Reservado (−Provisión 15%) + Gastos pendientes (config., en negativo)."],
+      ["Concepto", "Monto"],
+      [["Balance general", reBalanceGeneral], ["Reservado", reReservar], ["Gastos pendientes", reGastosPend]],
+      "Remanente real", reDiff
+    );
+
+    // ---------- aoa de la pestaña "Conciliación" (con liga a "Soporte" en la columna Nota) ----------
     const redondear = (n) => Math.round((Number(n) || 0) * 100) / 100;
-    const filaConc = (concepto, reconstruido, finanzas, nota = "") => {
+    const ligasConciliacion = []; // { fila (0-indexed dentro de aoaConc), anchor }
+    function filaConc(concepto, reconstruido, finanzas, anchorSoporte, notaExtra = "") {
       const r = redondear(reconstruido);
       const f = redondear(finanzas);
-      return [concepto, r, f, redondear(r - f), nota];
-    };
+      const fila = [concepto, r, f, redondear(r - f), notaExtra];
+      if (anchorSoporte) ligasConciliacion.push({ fila: aoaConc.length, anchor: anchorSoporte });
+      return fila;
+    }
     const aoaConc = [
       ["Conciliación — reconstruida a partir de las pestañas Resultados + Cobranza"],
+      ["La columna \"Nota\" tiene una liga a la hoja \"Soporte\" con el detalle de cada cifra reconstruida."],
       [],
       ["Concepto", "Reconstruido (Resultados+Cobranza)", "Finanzas (portal)", "Diferencia", "Nota"],
-      filaConc("Inscripciones reales", reTotalInscripciones, totalInscripcionesConfirmadas),
-      filaConc("Ingresos confirmados — torneos regulares", rePagosRegular, totalPagosRegular),
-      filaConc("Ingresos confirmados — torneos main", rePagosMain, totalPagosMain),
-      filaConc("Subtotal ingresos", reSubtotalIngresos, subtotalIngresos),
-      filaConc("Provisión para acum. Camp. (15%)", -reFondoReservado, -fondoAcumuladoReservado),
-      filaConc("Disponible (85%)", reDisponible, disponiblePagosTorneo),
-      filaConc("Torneos regulares — 1er lugar", -reRegular[1], -catPremiosRegular[1]),
-      filaConc("Torneos regulares — 2do lugar", -reRegular[2], -catPremiosRegular[2]),
-      filaConc("Torneos regulares — 3er lugar", -reRegular[3], -catPremiosRegular[3]),
-      filaConc("Torneos regulares — otros lugares pagados", -reRegular.otros, -catPremiosRegular.otros),
-      filaConc("Torneos main — 1er lugar", -reMain[1], -catPremiosMain[1]),
-      filaConc("Torneos main — 2do lugar", -reMain[2], -catPremiosMain[2]),
-      filaConc("Torneos main — 3er lugar", -reMain[3], -catPremiosMain[3]),
-      filaConc("Torneos main — otros lugares pagados", -reMain.otros, -catPremiosMain.otros),
-      filaConc("Torneos main — burbuja", -reMain.burbuja, -catPremiosMain.burbuja),
-      filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano),
-      filaConc("Subtotal egresos", -reSubtotalEgresos, -subtotalEgresos),
-      filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral),
-      filaConc(
-        "Subtotal gastos operativos",
-        -totalGastosOperativos,
-        -totalGastosOperativos,
-        "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
-      ),
-      filaConc("Centavos acumulados", reCentavos, centavosAcumulados),
-      filaConc("Total reservado (Acum. Campeonato)", -reAcumAlMomento, -acumCampeonatoAlMomento),
-      ...reAcumPorLugar.map((l, i) => filaConc(l.label, -l.monto, -(acumCampeonatoPorLugar[i]?.monto || 0))),
-      filaConc("Reservado", reReservar, reservarAcum),
-      filaConc("Gastos pendientes", reGastosPend, gastosPendientes, "(config. en Tablero de Control — no depende de Resultados/Cobranza)"),
-      filaConc("Remanente real", reDiff, diffCuenta),
     ];
+    aoaConc.push(filaConc("Inscripciones reales", reTotalInscripciones, totalInscripcionesConfirmadas, aInscripciones));
+    aoaConc.push(filaConc("Ingresos confirmados — torneos regulares", rePagosRegular, totalPagosRegular, aPagosRegular));
+    aoaConc.push(filaConc("Ingresos confirmados — torneos main", rePagosMain, totalPagosMain, aPagosMain));
+    aoaConc.push(filaConc("Subtotal ingresos", reSubtotalIngresos, subtotalIngresos, aSubtotalIngresos));
+    aoaConc.push(filaConc("Provisión para acum. Camp. (15%)", -reFondoReservado, -fondoAcumuladoReservado, aProvision));
+    aoaConc.push(filaConc("Disponible (85%)", reDisponible, disponiblePagosTorneo, aDisponible));
+    aoaConc.push(filaConc("Torneos regulares — 1er lugar", -reRegular[1], -catPremiosRegular[1], aReg1));
+    aoaConc.push(filaConc("Torneos regulares — 2do lugar", -reRegular[2], -catPremiosRegular[2], aReg2));
+    aoaConc.push(filaConc("Torneos regulares — 3er lugar", -reRegular[3], -catPremiosRegular[3], aReg3));
+    aoaConc.push(filaConc("Torneos regulares — otros lugares pagados", -reRegular.otros, -catPremiosRegular.otros, aRegOtros));
+    aoaConc.push(filaConc("Torneos main — 1er lugar", -reMain[1], -catPremiosMain[1], aMain1));
+    aoaConc.push(filaConc("Torneos main — 2do lugar", -reMain[2], -catPremiosMain[2], aMain2));
+    aoaConc.push(filaConc("Torneos main — 3er lugar", -reMain[3], -catPremiosMain[3], aMain3));
+    aoaConc.push(filaConc("Torneos main — otros lugares pagados", -reMain.otros, -catPremiosMain.otros, aMainOtros));
+    aoaConc.push(filaConc("Torneos main — burbuja", -reMain.burbuja, -catPremiosMain.burbuja, aMainBurbuja));
+    aoaConc.push(filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano, aMainMano));
+    aoaConc.push(filaConc("Subtotal egresos", -reSubtotalEgresos, -subtotalEgresos, aSubtotalEgresos));
+    aoaConc.push(filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral, aBalance));
+    aoaConc.push(filaConc(
+      "Subtotal gastos operativos", -totalGastosOperativos, -totalGastosOperativos, aGastosOperativos,
+      "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
+    ));
+    aoaConc.push(filaConc("Centavos acumulados", reCentavos, centavosAcumulados, aCentavos));
+    aoaConc.push(filaConc("Total reservado (Acum. Campeonato)", -reAcumAlMomento, -acumCampeonatoAlMomento, aAcumLugar));
+    reAcumPorLugar.forEach((l, i) => aoaConc.push(filaConc(l.label, -l.monto, -(acumCampeonatoPorLugar[i]?.monto || 0), aAcumLugar)));
+    aoaConc.push(filaConc("Reservado", reReservar, reservarAcum, aProvision));
+    aoaConc.push(filaConc(
+      "Gastos pendientes", reGastosPend, gastosPendientes, aGastosOperativos,
+      "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
+    ));
+    aoaConc.push(filaConc("Remanente real", reDiff, diffCuenta, aRemanente));
 
-    // ---------- aoa de la pestaña "Resultados" ----------
+    // ---------- aoa de la pestaña "Resultados" (con columna Lugar agregada) ----------
     const aoaResultados = [
-      ["Torneo", "No. Ref.", "Nombre y Apellido", "Alias PokerStars", "Deuda", "Ganancia", "Saldo"],
-      ...resultadosRows.map((r) => [r.torneoEtiqueta, r.noRef, r.nombre, r.alias, r.deuda, r.ganancia, r.saldo]),
+      ["Torneo", "No. Ref.", "Nombre y Apellido", "Alias PokerStars", "Lugar", "Deuda", "Ganancia", "Saldo"],
+      ...resultadosRows.map((r) => [r.torneoEtiqueta, r.noRef, r.nombre, r.alias, r.lugar || "", r.deuda, r.ganancia, r.saldo]),
     ];
 
-    // ---------- aoa de la pestaña "Cobranza" ----------
+    // ---------- aoa de la pestaña "Cobranza" (Depósito en positivo, Pago en negativo) ----------
     const aoaCobranza = [
       ["Jugador", "Tipo", "Motivo", "Esperado", "Real", "Registrado"],
       ...cobranzaRows.map((c) => [
         aliasDeCorreo(c.correo),
         c.tipo,
         c.motivo,
-        Number(c.montoEsperado) || 0,
-        Number(c.monto) || 0,
+        montoConSigno(c, "montoEsperado"),
+        montoConSigno(c, "monto"),
         c.fecha ? fechaFmt(c.fecha) : "",
       ]),
     ];
 
+    // ---------- armado del libro + formato de dinero ----------
     const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaResultados), "Resultados");
-    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaCobranza), "Cobranza");
-    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(construirAoaFinanzas()), "Finanzas");
-    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(aoaConc), "Conciliación");
+    const hojaResultados = XLSX.utils.aoa_to_sheet(aoaResultados);
+    formatearColumnasDinero(hojaResultados, [5, 6, 7]); // Deuda, Ganancia, Saldo (Lugar NO es dinero)
+    XLSX.utils.book_append_sheet(libro, hojaResultados, "Resultados");
+
+    const hojaCobranza = XLSX.utils.aoa_to_sheet(aoaCobranza);
+    formatearColumnasDinero(hojaCobranza, [3, 4]); // Esperado, Real
+    XLSX.utils.book_append_sheet(libro, hojaCobranza, "Cobranza");
+
+    const hojaFinanzas = XLSX.utils.aoa_to_sheet(construirAoaFinanzas());
+    formatearColumnasDinero(hojaFinanzas, [1, 4], 3); // columna Monto de cada bloque (izq./der.)
+    XLSX.utils.book_append_sheet(libro, hojaFinanzas, "Finanzas");
+
+    const hojaConc = XLSX.utils.aoa_to_sheet(aoaConc);
+    formatearColumnasDinero(hojaConc, [1, 2, 3], 4);
+    // 113ª entrega: liga de la columna Nota a la hoja "Soporte" — fórmula interna de Excel (como un
+    // hipervínculo a otra pestaña del mismo archivo), apuntando a la fila donde empieza cada bloque.
+    ligasConciliacion.forEach(({ fila, anchor }) => {
+      const addr = XLSX.utils.encode_cell({ r: fila, c: 4 });
+      const existente = hojaConc[addr];
+      const texto = (existente && existente.v) || "Ver detalle en Soporte";
+      hojaConc[addr] = {
+        t: "s",
+        v: texto === "Ver detalle en Soporte" ? texto : `${texto} — ver detalle en Soporte`,
+        l: { Target: `#Soporte!A${anchor}`, Tooltip: "Ver el detalle de esta cifra en la hoja Soporte" },
+      };
+    });
+    XLSX.utils.book_append_sheet(libro, hojaConc, "Conciliación");
+
+    const hojaSoporte = XLSX.utils.aoa_to_sheet(soporteAoa);
+    formatearTodoDinero(hojaSoporte, 3);
+    XLSX.utils.book_append_sheet(libro, hojaSoporte, "Soporte");
+
     XLSX.writeFile(libro, `ConciliacionFinanzas_${campeonatoSel}_${fechaHoyStr.replace(/\//g, "-")}.xlsx`);
   }
 

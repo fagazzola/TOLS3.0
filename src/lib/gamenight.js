@@ -153,11 +153,20 @@ export function calcularPot(jugadoresTorneo, tableroMapa, campeonato, tipo) {
 }
 
 // reparte la bolsa (menos el % que se va al fondo acumulado del campeonato) entre los lugares que
-// pagan, según los porcentajes definidos en Premios por Torneo del Tablero de Control
-export function calcularPremiosPorLugar(pot, tableroMapa, campeonato) {
+// pagan, según los porcentajes definidos en Premios por Torneo del Tablero de Control.
+//
+// 114ª entrega: Federico aclaró que, del 85% repartible (el 15% restante va al Acum. Campeonato), hay
+// que separar PRIMERO los premios en efectivo de burbuja y mejor mano (montos fijos del torneo, no un
+// % de la bolsa) — SOLO si de verdad se van a pagar en este torneo (hay un jugador en la burbuja /
+// alguien con mejor mano marcada) — y repartir entre los lugares que pagan únicamente lo que queda
+// después de esos dos egresos. Antes `premiosPorLugar` se calculaba sobre el 85% completo y
+// burbuja/mejor mano se sumaban aparte en `estadoTorneo()`/`estadoTorneoDesdeLugares()` — eso pagaba de
+// más: el pot repartible terminaba siendo mayor al 85% real cuando había burbuja y/o mejor mano.
+// `egresoFijo` ya viene pre-calculado por el llamador (0 si no aplica ninguno de los dos este torneo).
+export function calcularPremiosPorLugar(pot, tableroMapa, campeonato, egresoFijo = 0) {
   const premios = tableroMapa?.[campeonato]?.premios?.porTorneo;
   if (!premios || !Array.isArray(premios.lugares)) return {};
-  const potRepartible = pot * (1 - (Number(premios.pctAcumulado) || 0) / 100);
+  const potRepartible = Math.max(0, pot * (1 - (Number(premios.pctAcumulado) || 0) / 100) - (Number(egresoFijo) || 0));
   const out = {};
   premios.lugares.forEach((l, i) => {
     out[i + 1] = (potRepartible * (Number(l.pct) || 0)) / 100;
@@ -232,9 +241,12 @@ export function estadoTorneo({ jugadoresState, tableroMapa, campeonato, tipo, or
     campeonato,
     tipo
   );
-  const premiosPorLugar = calcularPremiosPorLugar(pot, tableroMapa, campeonato);
   const montoBurbuja = pagoPorConcepto(tableroMapa, campeonato, "Sale en la burbuja", tipo);
   const montoMejorMano = pagoPorConcepto(tableroMapa, campeonato, "Mejor Mano", tipo);
+  // solo se separan del 85% repartible si de verdad se van a pagar en este torneo
+  const hayMejorMano = Object.values(jugadoresState).some((j) => j.mejorMano);
+  const egresoFijo = (burbujaCorreo ? montoBurbuja : 0) + (hayMejorMano ? montoMejorMano : 0);
+  const premiosPorLugar = calcularPremiosPorLugar(pot, tableroMapa, campeonato, egresoFijo);
 
   const porJugador = {};
   for (const correo of Object.keys(jugadoresState)) {
@@ -311,9 +323,12 @@ export function estadoTorneoDesdeLugares({ jugadoresState, tableroMapa, campeona
     campeonato,
     tipo
   );
-  const premiosPorLugar = calcularPremiosPorLugar(pot, tableroMapa, campeonato);
   const montoBurbuja = pagoPorConcepto(tableroMapa, campeonato, "Sale en la burbuja", tipo);
   const montoMejorMano = pagoPorConcepto(tableroMapa, campeonato, "Mejor Mano", tipo);
+  // solo se separan del 85% repartible si de verdad se van a pagar en este torneo
+  const hayMejorMano = claves.some((c) => jugadoresState[c]?.mejorMano);
+  const egresoFijo = (burbujaClave ? montoBurbuja : 0) + (hayMejorMano ? montoMejorMano : 0);
+  const premiosPorLugar = calcularPremiosPorLugar(pot, tableroMapa, campeonato, egresoFijo);
 
   const porJugador = {};
   for (const clave of claves) {

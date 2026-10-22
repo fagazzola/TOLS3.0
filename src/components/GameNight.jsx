@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { puedeEditar } from "../lib/permisos.js";
-import { estadoTorneo, tipoDeFecha, PRACTICA_CAMPEONATO, recomprasMaxEfectivo, torneoBloqueante } from "../lib/gamenight.js";
+import { estadoTorneo, PRACTICA_CAMPEONATO, recomprasMaxEfectivo, torneoBloqueante } from "../lib/gamenight.js";
 
 // 63ª entrega: Federico puede pedirle a PokerStars, después de cada torneo, un Excel de resultados
 // ("Tournament_<id>.xlsx") con una fila por jugador. Trae dos filas de encabezado (una arriba con
@@ -218,7 +218,11 @@ export default function GameNight({ session, perfiles, esHost }) {
   }, [campeonatoSel, fechasDelCampeonato.map((t) => t.fecha).join(",")]);
 
   const torneoCal = fechasDelCampeonato.find((t) => t.fecha === fechaSel) || null;
-  const tipo = tipoDeFecha(torneosCal, fechaSel);
+  // 116ª entrega (bugfix, por consistencia — ver el mismo fix en Estadisticas.jsx): `tipoDeFecha()`
+  // busca por fecha SOLA en todo `torneosCal` (todos los campeonatos/prácticas), así que si otra fecha
+  // igual existiera en otro campeonato podía devolver un tipo equivocado. Como `torneoCal` ya está
+  // acotado a este campeonato (viene de `fechasDelCampeonato`), se usa directamente su `.main`.
+  const tipo = torneoCal?.main ? "Main" : "Regular";
   // 64ª entrega: Federico pidió que la columna "Mejor mano" de la tabla del Host solo aparezca cuando
   // la Game Night es un Main Event — en un Regular no hace falta ni mostrarla.
   const esMain = tipo === "Main";

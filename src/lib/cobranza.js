@@ -43,8 +43,20 @@ export function tarifa(tableroMapa, campeonato, id, tipo) {
 
 // Regular/Main de una fecha puntual, buscando en el Calendario (mismo criterio que el resto del
 // sitio: la marca "main" del torneo, no el nombre del campeonato).
-export function tipoDeFecha(calendarioTorneos, fecha) {
-  const t = (calendarioTorneos || []).find((x) => x.fecha === fecha);
+//
+// 116ª entrega (bugfix): `calendarioTorneos` es el Calendario COMPLETO — todos los campeonatos y las
+// prácticas juntos, cada uno con su propia fecha. Buscar solo por `fecha` es ambiguo en cuanto dos
+// torneos de campeonatos distintos (o una práctica) comparten la misma fecha: devolvía el `.main` del
+// primero que encontraba en el arreglo, no necesariamente el del torneo que se estaba preguntando — así
+// se originó el bug de "no toma los costos de Main" reportado por Federico (una práctica con la misma
+// fecha, que nunca es Main, se colaba antes en la búsqueda). Por eso ahora se pide `campeonato` también
+// y se exige que coincida con `temporada` (las prácticas siempre tienen `temporada: ""`, así que nunca
+// matchean un campeonato real) — se deja `campeonato` opcional, sin filtrar por campeonato, SOLO como
+// resguardo por si algún llamador viejo no lo pasa todavía, pero todos los llamadores actuales ya lo
+// pasan (ver `conMontos()` más abajo).
+export function tipoDeFecha(calendarioTorneos, fecha, campeonato) {
+  const candidatos = (calendarioTorneos || []).filter((x) => x.fecha === fecha);
+  const t = campeonato ? candidatos.find((x) => x.temporada === campeonato) : candidatos[0];
   return t?.main ? "Main" : "Regular";
 }
 
@@ -61,7 +73,7 @@ export function montosMovimiento(m, tableroMapa, tipo) {
 // enriquece cada movimiento con tipo (Regular/Main) y los montos calculados — lo que consume la UI
 export function conMontos(movimientos, tableroMapa, calendarioTorneos) {
   return (movimientos || []).map((m) => {
-    const tipo = tipoDeFecha(calendarioTorneos, m.fecha);
+    const tipo = tipoDeFecha(calendarioTorneos, m.fecha, m.campeonato);
     return { ...m, tipo, ...montosMovimiento(m, tableroMapa, tipo) };
   });
 }

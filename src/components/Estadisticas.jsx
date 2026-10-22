@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { estadoTorneoDesdeLugares, tipoDeFecha, PRACTICA_CAMPEONATO, mapaNumeracionTorneos, etiquetaNumerada } from "../lib/gamenight.js";
+import { estadoTorneoDesdeLugares, PRACTICA_CAMPEONATO, mapaNumeracionTorneos, etiquetaNumerada } from "../lib/gamenight.js";
 import { extraerKillersDeChat } from "../lib/killersChat.js";
 
 // 66ª entrega: pantalla nueva "Estadísticas" — reemplaza el seguimiento en vivo de Game Night (que
@@ -261,6 +261,12 @@ export default function Estadisticas({ session }) {
   // Arranca en el killerAlias que ya resolvió extraerKillersDeChat() cuando lo hay (el remitente del
   // mensaje) y el administrador puede corregirlo o dejarlo "Sin asignar" si prefiere no contarlo.
   const [dudososAsignacion, setDudososAsignacion] = useState({});
+  // 115ª entrega: "Mejor mano" de un Main event ya no se infiere de nada — el administrador la elige a
+  // mano, en el preview, antes de publicar. Clave = jugador elegido (mismo formato de clave que
+  // preview.porJugador: correo si matcheó contra el directorio, Alias si no); "" = sin asignar (la
+  // mejor mano puede quedar desierta — a diferencia de la burbuja, que siempre existe si el torneo paga
+  // premios y hay más jugadores que lugares pagados).
+  const [mejorManoClave, setMejorManoClave] = useState("");
   const excelRef = useRef(null);
   const chatRef = useRef(null);
   const apodosExcelRef = useRef(null);
@@ -495,9 +501,15 @@ export default function Estadisticas({ session }) {
     const practicas = torneosCal
       .filter((t) => t.practica && t.fecha)
       .map((t) => ({ campeonato: PRACTICA_CAMPEONATO, fecha: t.fecha, tipo: "Regular" }));
+    // 116ª entrega (bugfix): antes se usaba `tipoDeFecha(torneosCal, t.fecha)`, que busca por fecha SOLA
+    // en TODO `torneosCal` (todas las fechas de todos los campeonatos, prácticas incluidas) y devuelve el
+    // primer registro que matchea esa fecha — si cualquier otro torneo (de otro campeonato, una práctica,
+    // o un Regular/Main el mismo día) comparte esa fecha y aparece antes en el arreglo, devolvía SU
+    // `.main` en vez del de `t`. Con `t` ya en la mano (viene del `.filter()` de arriba, ya acotado a este
+    // campeonato) no hace falta volver a buscarlo por fecha: se usa directamente `t.main`, sin ambigüedad.
     const delCampeonato = torneosCal
       .filter((t) => !t.practica && t.temporada === activo && t.fecha)
-      .map((t) => ({ campeonato: activo, fecha: t.fecha, tipo: tipoDeFecha(torneosCal, t.fecha) }));
+      .map((t) => ({ campeonato: activo, fecha: t.fecha, tipo: t.main ? "Main" : "Regular" }));
     // orden del combo invertido a pedido de Federico: antes bajaba de la fecha más reciente a la más
     // antigua, ahora sube de la más antigua a la más reciente.
     return [...delCampeonato, ...practicas].sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -624,6 +636,7 @@ export default function Estadisticas({ session }) {
     setChatTexto("");
     setChatNombreArchivo("");
     setPreview(null);
+    setMejorManoClave("");
     if (excelRef.current) excelRef.current.value = "";
     if (chatRef.current) chatRef.current.value = "";
   }
@@ -719,17 +732,36 @@ export default function Estadisticas({ session }) {
     });
   }, [preview]);
 
+  // 115ª entrega: conserva la elección de "Mejor mano" del administrador mientras siga siendo válida
+  // (el torneo sigue siendo el mismo, el jugador elegido sigue en el preview) — se borra si cambia de
+  // torneo/archivo (preview nuevo) o si el jugador elegido ya no está en la lista.
+  useEffect(() => {
+    if (!preview) {
+      setMejorManoClave("");
+      return;
+    }
+    setMejorManoClave((prev) => (prev && preview.porJugador[prev] ? prev : ""));
+  }, [preview]);
+
   const previewCalculado = useMemo(() => {
     if (!preview || !torneoAdminInfo) return null;
     const tipoParaCalculo = torneoAdminInfo.campeonato === PRACTICA_CAMPEONATO ? "Regular" : torneoAdminInfo.tipo;
+    // 115ª entrega: "Mejor mano" se decide a mano en el preview (combo más abajo, solo para Main) — se
+    // aplica acá, justo antes de calcular premios, en vez de venir ya resuelta en preview.porJugador.
+    const esMainPreview = tipoParaCalculo === "Main";
+    const jugadoresConMano = esMainPreview
+      ? Object.fromEntries(
+          Object.entries(preview.porJugador).map(([clave, j]) => [clave, { ...j, mejorMano: clave === mejorManoClave }])
+        )
+      : preview.porJugador;
     return estadoTorneoDesdeLugares({
-      jugadoresState: preview.porJugador,
+      jugadoresState: jugadoresConMano,
       tableroMapa,
       campeonato: torneoAdminInfo.campeonato,
       tipo: tipoParaCalculo,
       fecha: torneoAdminInfo.fecha,
     });
-  }, [preview, tableroMapa, torneoAdminInfo]);
+  }, [preview, tableroMapa, torneoAdminInfo, mejorManoClave]);
 
   const filasPreview = useMemo(() => {
     if (!previewCalculado) return [];
@@ -1418,7 +1450,9 @@ export default function Estadisticas({ session }) {
                 <tbody>
                   {filasPreview.map((j) => (
                     <tr key={j.correo || j.alias}>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>{j.alias || j.nombre}{j.esCampeon ? " (Campeón)" : ""}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee" }}>
+                        {j.alias || j.nombre}{j.esCampeon ? " (Campeón)" : ""}{j.esBurbuja ? " (Burbuja)" : ""}{j.mejorMano ? " (Mejor mano)" : ""}
+                      </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.buyIn ? 1 : 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.rebuys || 0}</td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #eee", textAlign: "right" }}>{j.addon ? 1 : 0}</td>
@@ -1452,6 +1486,24 @@ export default function Estadisticas({ session }) {
                   </tfoot>
                 )}
               </table>
+
+              {/* 115ª entrega: la burbuja se sigue determinando sola (el primer lugar que no alcanzó
+                  premio — ya se ve arriba con el tag "(Burbuja)"); la mejor mano, en cambio, la elige a
+                  mano el administrador, acá, antes de publicar — a diferencia de la burbuja, puede
+                  quedar sin asignar si en el torneo no se determinó o no aplica. Solo se muestra en
+                  Main events (en Regular/práctica no hay premio de mejor mano). */}
+              {torneoAdminInfo?.tipo === "Main" && (
+                <div className="login-field" style={{ maxWidth: 360, margin: "0 0 12px" }}>
+                  <label>Mejor mano</label>
+                  <select className="field" value={mejorManoClave} onChange={(e) => setMejorManoClave(e.target.value)}>
+                    <option value="">Sin asignar</option>
+                    {filasPreview.map((j) => {
+                      const clave = j.correo || j.alias;
+                      return clave ? <option key={clave} value={clave}>{j.alias || j.nombre}</option> : null;
+                    })}
+                  </select>
+                </div>
+              )}
 
               <button type="button" className="btn btn-primary" disabled={publicando} onClick={publicar}>
                 {publicando ? "Publicando…" : "Publicar"}

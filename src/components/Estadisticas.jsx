@@ -234,11 +234,21 @@ export default function Estadisticas({ session }) {
   // 107ª entrega: Federico REVIRTIÓ ese criterio — con las cifras de dinero ahora siempre a 2 decimales
   // (106ª entrega), la vista "Por resultado" quedó ilegible si no se puede ensanchar más la pantalla, así
   // que pidió volver a poder ocultar columnas de torneo una por una (dejando siempre Lugar/Alias/Total
-  // visibles) — ver `columnasOcultasClasif` más abajo. Vale para las 3 vistas (puntos/killers/resultado),
-  // porque las columnas ocultas son las mismas fechas de torneo sin importar qué vista se esté mirando.
+  // visibles) — `columnasOcultasClasif`, ocultaba una columna a la vez, sin ningún agrupamiento.
+  // 117ª entrega: Federico pidió un rediseño de fondo — agrupar los torneos de 4 en 4 ("tercios": T1-T4,
+  // T5-T8, T9-T12, ...), mostrar un total parcial por tercio (P1, P2, P3, ...) y un botón por tercio para
+  // desplegar/ocultar sus 4 torneos individuales, en vez de tener que ocultar columna por columna. Esto
+  // reemplaza por completo el mecanismo de `columnasOcultasClasif` de la 107ª entrega (ya no hace falta
+  // ocultar una columna a la vez — agrupar por tercio y poder colapsarlo resuelve el mismo problema de
+  // espacio de forma más ordenada) — ver `tercios`/`tercioOverride` más abajo.
   const [vistaClasificacion, setVistaClasificacion] = useState("puntos"); // "puntos" | "killers" | "resultado"
   const [ordenClasif, setOrdenClasif] = useState({ col: "total", dir: "desc" }); // default: Total descendente
-  const [columnasOcultasClasif, setColumnasOcultasClasif] = useState(() => new Set());
+  // 117ª entrega: estado/forzado manual de expandir-u-ocultar por tercio — un Map de
+  // "{campeonato}|{índice de tercio}" -> true/false. Mientras una clave no esté en el mapa, se usa el
+  // default calculado en `tercioExpandidoDefault()` (ver más abajo, depende de cuántos torneos de ese
+  // tercio ya están publicados); en cuanto el administrador le da clic al botoncito de un P, su elección
+  // queda guardada acá y gana sobre el default mientras no cambie de campeonato o vuelva a tocarlo.
+  const [tercioOverride, setTercioOverride] = useState(() => new Map());
 
   // 90ª entrega: si la vista queda en "resultado" (Tesorero la elige y después usa "Ver como jugador" en
   // Mi Perfil, que cambia `session.rol` sin recargar el componente) se vuelve a "puntos" — nunca se deja
@@ -565,6 +575,67 @@ export default function Estadisticas({ session }) {
       .filter((t) => t?.publicado);
   }, [torneosCal, estData]);
 
+  // 117ª entrega: agrupar `columnasClasif` de 4 en 4 ("tercios" — T1-T4, T5-T8, T9-T12, ...) para poder
+  // mostrar un total parcial (P1, P2, P3, ...) y colapsar cada grupo a solo su parcial. Un tercio sin
+  // NINGÚN torneo publicado todavía no se muestra en absoluto (ni su P ni sus T) — "siempre y cuando
+  // tenga torneo publicado", como pidió Federico. `completo` (los 4 cupos existen Y los 4 están
+  // publicados) es lo que decide el default de colapsado/expandido más abajo.
+  const TORNEOS_POR_TERCIO = 4;
+  const tercios = useMemo(() => {
+    const grupos = [];
+    columnasClasif.forEach((c) => {
+      const idx = Math.floor((Number(c.numero) - 1) / TORNEOS_POR_TERCIO);
+      if (!grupos[idx]) grupos[idx] = { indice: idx, cols: [] };
+      grupos[idx].cols.push(c);
+    });
+    return grupos
+      .filter(Boolean)
+      .map((g) => {
+        const publicados = g.cols.filter((c) => Boolean(c.torneo?.publicado)).length;
+        return { ...g, publicados, completo: g.cols.length === TORNEOS_POR_TERCIO && publicados === TORNEOS_POR_TERCIO };
+      })
+      .filter((g) => g.publicados > 0);
+  }, [columnasClasif]);
+
+  // 117ª entrega: expandido/colapsado por tercio — default: colapsado (solo el P) si el tercio ya está
+  // COMPLETO (sus 4 torneos existen y los 4 están publicados); expandido (se ven los T individuales,
+  // publicados o no — los que falten quedan en cero) si está "en curso" (le faltan torneos por jugar o
+  // por publicar todavía). Ejemplo de Federico: campeonato con 6 torneos jugados → tercio 1 (T1-T4,
+  // completo) colapsado mostrando solo P1; tercio 2 (T5-T8, solo T5/T6 existen y están publicados, no
+  // está completo) expandido mostrando T5, T6 y el P2 parcial; tercio 3 (0 publicados) ni aparece. El
+  // administrador puede forzar lo contrario con el botoncito del encabezado — esa elección manual
+  // (`tercioOverride`) gana sobre este default mientras no cambie de campeonato.
+  function tercioKey(indice) {
+    return `${campeonatoActivoNombre}|${indice}`;
+  }
+  function tercioExpandido(t) {
+    const k = tercioKey(t.indice);
+    return tercioOverride.has(k) ? tercioOverride.get(k) : !t.completo;
+  }
+  function toggleTercio(t) {
+    const actual = tercioExpandido(t);
+    setTercioOverride((prev) => {
+      const next = new Map(prev);
+      next.set(tercioKey(t.indice), !actual);
+      return next;
+    });
+  }
+
+  // 117ª entrega: lista plana de "celdas" a renderizar, en orden — un descriptor `torneo` por cada T
+  // visible (solo si su tercio está expandido) seguido siempre de un descriptor `parcial` por tercio
+  // (el P, visible siempre, colapsado o no). Usada tanto por el encabezado como por cada fila, para que
+  // las columnas de la tabla y las celdas del cuerpo nunca queden desalineadas.
+  const celdasTercios = useMemo(() => {
+    const out = [];
+    tercios.forEach((t) => {
+      const expandido = tercioExpandido(t);
+      if (expandido) t.cols.forEach((c) => out.push({ tipo: "torneo", col: c }));
+      out.push({ tipo: "parcial", tercio: t, expandido });
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tercios, tercioOverride, campeonatoActivoNombre]);
+
   const filasClasificacion = useMemo(() => {
     return directorio.map((j) => {
       const alias = nombreCorto(j);
@@ -580,14 +651,24 @@ export default function Estadisticas({ session }) {
         }
         valores[c.fecha] = v;
       });
+      // 117ª entrega: parcial por tercio (P) — suma de los valores de los torneos de ESE tercio
+      // (publicados o no — los no publicados ya quedaron en 0 arriba).
+      const parciales = {};
+      tercios.forEach((t) => {
+        parciales[t.indice] = t.cols.reduce((s, c) => s + (valores[c.fecha] || 0), 0);
+      });
       const practica =
         vistaClasificacion === "puntos"
           ? torneosPracticaPublicados.reduce((s, t) => s + (Number(jugadorEnTorneo(t, j)?.puntos) || 0), 0)
           : 0;
-      const total = Object.values(valores).reduce((s, v) => s + v, 0) + practica;
-      return { jugador: j, alias, valores, practica, total };
+      // 117ª entrega: "El total es la suma de todos los P" (pedido textual de Federico) — Práctica queda
+      // como una columna aparte, ya no se suma al Total en la vista "Por puntos" (antes sí se sumaba).
+      // En las vistas "Por killers"/"Por resultado" no cambia nada en la práctica: ahí `practica` ya
+      // valía siempre 0, y la suma de los P ya coincidía exactamente con la suma de todas las columnas.
+      const total = tercios.reduce((s, t) => s + (parciales[t.indice] || 0), 0);
+      return { jugador: j, alias, valores, parciales, practica, total };
     });
-  }, [directorio, columnasClasif, torneosPracticaPublicados, vistaClasificacion]);
+  }, [directorio, columnasClasif, tercios, torneosPracticaPublicados, vistaClasificacion]);
 
   const filasClasifOrdenadas = useMemo(() => {
     const arr = [...filasClasificacion];
@@ -598,8 +679,16 @@ export default function Estadisticas({ session }) {
       const aInactivo = a.jugador.estatus !== "Activo";
       const bInactivo = b.jugador.estatus !== "Activo";
       if (aInactivo !== bInactivo) return aInactivo ? 1 : -1;
-      const va = ordenClasif.col === "total" ? a.total : ordenClasif.col === "practica" ? a.practica : a.valores[ordenClasif.col] || 0;
-      const vb = ordenClasif.col === "total" ? b.total : ordenClasif.col === "practica" ? b.practica : b.valores[ordenClasif.col] || 0;
+      const valorDe = (f) => {
+        if (ordenClasif.col === "total") return f.total;
+        if (ordenClasif.col === "practica") return f.practica;
+        if (typeof ordenClasif.col === "string" && ordenClasif.col.startsWith("tercio-")) {
+          return f.parciales[Number(ordenClasif.col.slice("tercio-".length))] || 0;
+        }
+        return f.valores[ordenClasif.col] || 0;
+      };
+      const va = valorDe(a);
+      const vb = valorDe(b);
       return ordenClasif.dir === "asc" ? va - vb : vb - va;
     });
     return arr;
@@ -608,22 +697,6 @@ export default function Estadisticas({ session }) {
   function ordenarClasifPor(col) {
     setOrdenClasif((prev) => (prev.col === col ? { col, dir: prev.dir === "desc" ? "asc" : "desc" } : { col, dir: "desc" }));
   }
-
-  // 107ª entrega: ocultar/mostrar una columna de torneo en "Clasificación general" — Lugar/Alias/Total
-  // nunca se pueden ocultar (no pasan por acá). El ordenamiento sigue funcionando igual aunque la columna
-  // esté oculta (ordenarClasifPor no cambia).
-  function toggleColumnaClasif(fecha) {
-    setColumnasOcultasClasif((prev) => {
-      const next = new Set(prev);
-      if (next.has(fecha)) next.delete(fecha);
-      else next.add(fecha);
-      return next;
-    });
-  }
-  const columnasVisiblesClasif = useMemo(
-    () => columnasClasif.filter((c) => !columnasOcultasClasif.has(c.fecha)),
-    [columnasClasif, columnasOcultasClasif]
-  );
 
   function fmtClasifValor(v) {
     return vistaClasificacion === "resultado" ? moneyContable(v) : v;
@@ -992,88 +1065,76 @@ export default function Estadisticas({ session }) {
             </button>
           ))}
         </div>
-        {/* 72ª entrega (ajuste pedido por Federico): tabla completa, con TODAS las columnas de torneos de
-            izquierda a derecha (publicados o no, en cero los que faltan) y la de Total siempre visible —
-            si no entra en el ancho de pantalla, se hace scroll horizontal en vez de ocultar columnas.
-            Diseño de cuadrícula (bordes en todas las celdas), números centrados, "Lugar" como primera
-            columna fija (posición 1..n según el orden actual, nunca se mueve ni se puede ordenar por
-            ella) y los torneos Main resaltados en otro color para diferenciarlos de los Regular. */}
+        {/* 117ª entrega: tabla agrupada por tercios de 4 torneos (T1-T4, T5-T8, T9-T12, ...), con un
+            total parcial por tercio (P1, P2, P3, ...) que se puede colapsar/expandir con el botoncito
+            del propio encabezado — ver `tercios`/`celdasTercios` más arriba. Un tercio sin ningún torneo
+            publicado todavía no aparece en absoluto. Diseño de cuadrícula de siempre (bordes en todas las
+            celdas), números centrados, "Lugar" como primera columna fija, y los torneos Main resaltados
+            en otro color para diferenciarlos de los Regular — nada de esto cambió. */}
         {columnasClasif.length === 0 && torneosPracticaPublicados.length === 0 ? (
           <div className="section-sub" style={{ padding: 16 }}>Todavía no hay torneos registrados para el campeonato activo.</div>
         ) : (
-          <>
-            {/* 107ª entrega: columnas de torneo ocultas — chips para volver a mostrarlas una por una, o
-                todas de un golpe. Compartido entre las 3 vistas (puntos/killers/resultado). */}
-            {columnasOcultasClasif.size > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0 10px", alignItems: "center" }}>
-                <span style={{ fontSize: 12.5, color: "#667" }}>Columnas ocultas:</span>
-                {columnasClasif
-                  .filter((c) => columnasOcultasClasif.has(c.fecha))
-                  .map((c) => (
-                    <button
-                      key={c.fecha}
-                      className="btn btn-secondary"
-                      style={{ fontSize: 12, padding: "3px 8px" }}
-                      title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
-                      onClick={() => toggleColumnaClasif(c.fecha)}
-                    >
-                      {c.numero} ↺
-                    </button>
-                  ))}
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 12, padding: "3px 8px" }}
-                  onClick={() => setColumnasOcultasClasif(new Set())}
-                >
-                  Mostrar todas
-                </button>
-              </div>
-            )}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", margin: "12px 0", fontSize: 14 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px" }}>Lugar</th>
                   <th style={{ textAlign: "left", border: "1px solid #ccc", padding: "6px 8px" }}>Alias PokerStars</th>
-                  {columnasVisiblesClasif.map((c) => (
-                    <th
-                      key={c.fecha}
-                      title={`${c.tipo} · ${fechaFmt(c.fecha)}`}
-                      style={{
-                        textAlign: "center",
-                        // 98ª/99ª entrega: el color/negrita de siempre en el encabezado de un torneo Main se
-                        // completa con UN SOLO recuadro externo alrededor de toda la columna (encabezado +
-                        // cuerpo) — Federico aclaró en la 99ª entrega que el pedido original ("pon todas esas
-                        // columnas con un recuadro alrededor") era ese marco exterior, no un recuadro por
-                        // celda (lo que la 98ª entrega había hecho, con `border` grueso en cada celda, dando
-                        // una grilla de cajitas en vez de un solo rectángulo). El encabezado lleva los 4 lados
-                        // gruesos (tapa superior del marco); el cuerpo solo lleva los lados IZQUIERDO/DERECHO
-                        // gruesos en cada fila (más ABAJO gruesa en la última fila, ver el `<tbody>`) — así el
-                        // marco queda continuo de arriba a abajo, con las líneas finas normales entre filas.
-                        border: c.tipo === "Main" ? "2px solid #b8860b" : "1px solid #ccc",
-                        padding: "6px 8px",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                        color: c.tipo === "Main" ? "#b8860b" : undefined,
-                        fontWeight: c.tipo === "Main" ? 700 : undefined,
-                      }}
-                      onClick={() => ordenarClasifPor(c.fecha)}
-                    >
-                      {c.numero}{ordenClasif.col === c.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
-                      {/* 107ª entrega: ocultar esta columna — stopPropagation para no disparar el sort. */}
-                      <span
-                        role="button"
-                        title="Ocultar esta columna"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleColumnaClasif(c.fecha);
+                  {celdasTercios.map((cel) =>
+                    cel.tipo === "torneo" ? (
+                      <th
+                        key={cel.col.fecha}
+                        title={`${cel.col.tipo} · ${fechaFmt(cel.col.fecha)}`}
+                        style={{
+                          textAlign: "center",
+                          // 98ª/99ª entrega: el color/negrita de siempre en el encabezado de un torneo Main
+                          // se completa con UN SOLO recuadro externo alrededor de toda la columna
+                          // (encabezado + cuerpo) — marco continuo de arriba a abajo, sin cambios acá.
+                          border: cel.col.tipo === "Main" ? "2px solid #b8860b" : "1px solid #ccc",
+                          padding: "6px 8px",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                          color: cel.col.tipo === "Main" ? "#b8860b" : undefined,
+                          fontWeight: cel.col.tipo === "Main" ? 700 : undefined,
                         }}
-                        style={{ marginLeft: 6, cursor: "pointer", opacity: 0.6 }}
+                        onClick={() => ordenarClasifPor(cel.col.fecha)}
                       >
-                        ✕
-                      </span>
-                    </th>
-                  ))}
+                        {cel.col.numero}
+                        {ordenClasif.col === cel.col.fecha ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                      </th>
+                    ) : (
+                      // 117ª entrega: encabezado del parcial (P) de un tercio — el botoncito ▸/▾ despliega
+                      // u oculta los T de ese tercio (stopPropagation para no disparar el sort al clickearlo
+                      // por separado); clickear el resto del encabezado ordena por ese parcial.
+                      <th
+                        key={`P-${cel.tercio.indice}`}
+                        title={cel.expandido ? "Ocultar los torneos de este tercio" : "Mostrar los torneos de este tercio"}
+                        style={{
+                          textAlign: "center",
+                          border: "1px solid #ccc",
+                          padding: "6px 8px",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                          background: "#f3f3f3",
+                        }}
+                        onClick={() => ordenarClasifPor(`tercio-${cel.tercio.indice}`)}
+                      >
+                        <span
+                          role="button"
+                          title={cel.expandido ? "Ocultar torneos" : "Mostrar torneos"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleTercio(cel.tercio);
+                          }}
+                          style={{ marginRight: 4, cursor: "pointer" }}
+                        >
+                          {cel.expandido ? "▾" : "▸"}
+                        </span>
+                        P{cel.tercio.indice + 1}
+                        {ordenClasif.col === `tercio-${cel.tercio.indice}` ? (ordenClasif.dir === "desc" ? " ▼" : " ▲") : ""}
+                      </th>
+                    )
+                  )}
                   {vistaClasificacion === "puntos" && (
                     <th
                       style={{ textAlign: "center", border: "1px solid #ccc", padding: "6px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
@@ -1123,7 +1184,25 @@ export default function Estadisticas({ session }) {
                         {f.alias}
                         {esInactivo && <span title="Jugador inactivo" style={{ marginLeft: 6 }}>⏸️</span>}
                       </td>
-                      {columnasVisiblesClasif.map((c) => {
+                      {celdasTercios.map((cel) => {
+                        if (cel.tipo === "parcial") {
+                          return (
+                            <td
+                              key={`P-${cel.tercio.indice}`}
+                              style={{
+                                padding: "6px 8px",
+                                border: "1px solid #eee",
+                                textAlign: "center",
+                                fontWeight: 700,
+                                background: "#f8f8f8",
+                                color: esInactivo ? "#999" : undefined,
+                              }}
+                            >
+                              {fmtClasifValor(f.parciales[cel.tercio.indice] || 0)}
+                            </td>
+                          );
+                        }
+                        const c = cel.col;
                         const esMainCol = c.tipo === "Main";
                         const esUltimaFila = i === filasClasifOrdenadas.length - 1;
                         return (
@@ -1164,7 +1243,6 @@ export default function Estadisticas({ session }) {
               </tbody>
             </table>
           </div>
-          </>
         )}
       </div>
 

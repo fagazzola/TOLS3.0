@@ -110,29 +110,74 @@ async function getAccessToken() {
 // OneDrive, con el nombre "aaaa-mm-dd TOLS3.0-Base-de-Datos_bkp.xlsx" (fecha de hoy + el nombre del
 // archivo real + "_bkp", conservando la extensión). Usa la acción "copy" de Graph API (asíncrona del lado
 // de Microsoft: alcanza con que la acepte con 202, no hace falta esperar a que termine de copiarse para
-// seguir con la exportación) — `conflictBehavior: "rename"` evita que una segunda exportación el mismo
-// día falle por el nombre ya ocupado (OneDrive agrega "(1)" solo). Se exporta por separado de
-// exportarTodoDesdeBlobs() para que un fallo acá (ej. OneDrive sin espacio, token vencido) quede
-// reportado aparte y NUNCA bloquee el resto de la exportación — un respaldo que falla no debería impedir
-// que el Excel se actualice igual.
+// seguir con la exportación). Se exporta por separado de exportarTodoDesdeBlobs() para que un fallo acá
+// (ej. OneDrive sin espacio, token vencido) quede reportado aparte y NUNCA bloquee el resto de la
+// exportación — un respaldo que falla no debería impedir que el Excel se actualice igual.
+//
+// 118ª entrega (bugfix): Federico reportó, en todas las corridas, el mismo error de este respaldo —
+// "Graph API 400 invalidRequest: Invalid request" — aunque la exportación real seguía bien (los 10
+// módulos salían ✓ OK). La llamada original tenía DOS problemas de fondo, ninguno relacionado con
+// permisos ni con el archivo en sí:
+//   1) `parentReference.path` no es la forma que Microsoft Graph documenta para la acción "copy" de un
+//      driveItem — esa acción espera `parentReference.driveId` + `parentReference.id` (el id real de la
+//      carpeta destino), no una ruta de texto. Un `path` suelto puede funcionar contra algunas cuentas de
+//      SharePoint/Work pero no está garantizado, y en la práctica Graph lo rechazaba acá con 400.
+//   2) `@microsoft.graph.conflictBehavior` en el CUERPO del POST no es válido para "copy" — ese parámetro
+//      va en la URL como query string para otras acciones (subir/renombrar), y la propia documentación de
+//      Microsoft aclara que ni siquiera está soportado en OneDrive Personal (la cuenta de Federico, no
+//      una de trabajo/escuela) para la acción de copia. Mandarlo en el body es, por sí solo, motivo de
+//      rechazo total de la petición ("Invalid request", sin más detalle — Graph no siempre dice CUÁL
+//      propiedad no reconoce).
+// Fix: se resuelve primero el `driveId`/`id` real de la carpeta destino con un GET (`obtenerCarpetaExcel`,
+// debajo) y se manda la copia con esos dos campos, sin ningún `conflictBehavior`. Como ese parámetro no
+// se puede usar en esta cuenta, un backup ya existente con el mismo nombre (dos exportaciones el mismo
+// día) ahora puede chocar con 409 "nameAlreadyExists" — se detecta ese caso puntual y se reintenta una
+// sola vez con la hora (HH-mm) agregada al nombre, en vez de fallar el respaldo entero por una colisión
+// de nombre evitable.
+async function obtenerCarpetaExcel(token, carpeta) {
+  const url = carpeta
+    ? `${GRAPH_BASE}/me/drive/root:/${encodePath(carpeta)}`
+    : `${GRAPH_BASE}/me/drive/root`;
+  const r = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`No se pudo ubicar la carpeta del Excel para el respaldo (Graph API ${r.status}): ${text}`);
+  }
+  const json = await r.json();
+  return { driveId: json.parentReference?.driveId || json.id, id: json.id };
+}
+
+async function copiarExcelComo(token, carpetaRef, nombreBackup) {
+  const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}:/copy`;
+  return fetch(url, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ parentReference: carpetaRef, name: nombreBackup }),
+  });
+}
+
 export async function respaldarExcelActual() {
   const token = await getAccessToken();
   const partes = EXCEL_PATH.split("/");
   const archivo = partes[partes.length - 1];
   const carpeta = partes.slice(0, -1).join("/");
   const stem = archivo.replace(/\.xlsx$/i, "");
-  const fecha = new Date().toISOString().slice(0, 10);
-  const nombreBackup = `${fecha} ${stem}_bkp.xlsx`;
-  const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}:/copy`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      parentReference: { path: `/drive/root:/${encodePath(carpeta)}` },
-      name: nombreBackup,
-      "@microsoft.graph.conflictBehavior": "rename",
-    }),
-  });
+  const ahora = new Date();
+  const fecha = ahora.toISOString().slice(0, 10);
+  let nombreBackup = `${fecha} ${stem}_bkp.xlsx`;
+
+  const carpetaRef = await obtenerCarpetaExcel(token, carpeta);
+  let r = await copiarExcelComo(token, carpetaRef, nombreBackup);
+
+  // sin conflictBehavior (no soportado en esta cuenta, ver nota arriba), un backup ya hecho hoy choca con
+  // 409 nameAlreadyExists — un solo reintento, con la hora en el nombre, alcanza para que una segunda
+  // exportación el mismo día no se quede sin respaldo.
+  if (r.status === 409) {
+    const hora = ahora.toTimeString().slice(0, 5).replace(":", "-");
+    nombreBackup = `${fecha} ${hora} ${stem}_bkp.xlsx`;
+    r = await copiarExcelComo(token, carpetaRef, nombreBackup);
+  }
+
   if (!r.ok && r.status !== 202) {
     const text = await r.text().catch(() => "");
     throw new Error(`No se pudo crear la copia de respaldo (Graph API ${r.status}): ${text}`);

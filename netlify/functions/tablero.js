@@ -33,6 +33,10 @@ function normalizarUno(datos, plantilla) {
   // manualmente a un jugador (que no hizo check-in) le genere una amonestación — parámetro que pidió
   // Federico que viviera en el Tablero de Control, no fijo en el código
   if (typeof d.toleranciaCheckinMin !== "number") d.toleranciaCheckinMin = typeof base.toleranciaCheckinMin === "number" ? base.toleranciaCheckinMin : 10;
+  // 118ª entrega: castigo por no declarar un Re-buy o Add-on realmente hecho — editable por campeonato
+  // desde el Tablero de Control, default $100. Usado como default (editable caso por caso) por el motivo
+  // "Castigo x no declarar compra" en Cobranza > Registrar pagos y depósitos.
+  if (typeof d.castigoNoDeclarar !== "number") d.castigoNoDeclarar = typeof base.castigoNoDeclarar === "number" ? base.castigoNoDeclarar : 100;
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : base.gastosCampeonato;
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : base.cobrosPorTorneo;
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : base.pagosPorTorneo;
@@ -135,6 +139,9 @@ function validarUno(data) {
   }
   if (typeof data.toleranciaCheckinMin !== "number" || data.toleranciaCheckinMin < 0) {
     return "Falta el tiempo de tolerancia de check-in (minutos) para Game Night.";
+  }
+  if (typeof data.castigoNoDeclarar !== "number" || data.castigoNoDeclarar < 0) {
+    return "Falta el castigo por no declarar Re-buys o Add-on.";
   }
 
   if (!Array.isArray(data.gastosCampeonato) || data.gastosCampeonato.length > 10) {

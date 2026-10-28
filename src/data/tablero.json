@@ -148,7 +148,8 @@
         "main": 500
       }
     ],
-    "toleranciaCheckinMin": 10
+    "toleranciaCheckinMin": 10,
+    "castigoNoDeclarar": 100
   },
   "2026-Clausura": {
     "premios": {
@@ -299,6 +300,7 @@
         "main": 500
       }
     ],
-    "toleranciaCheckinMin": 10
+    "toleranciaCheckinMin": 10,
+    "castigoNoDeclarar": 100
   }
 }

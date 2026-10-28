@@ -82,6 +82,10 @@ function plantillaEnBlanco() {
     recomprasMax: 0,
     cuotaInscripcion: 0,
     toleranciaCheckinMin: 10,
+    // 118ª entrega: castigo por no declarar un Re-buy o Add-on realmente hecho — editable por campeonato,
+    // default $100 a pedido de Federico. Usado como default (editable) por el motivo "Castigo x no
+    // declarar compra" en Cobranza > Registrar pagos y depósitos.
+    castigoNoDeclarar: 100,
     gastosCampeonato: [],
     cobrosPorTorneo: [
       { id: "buyin", nombre: "Buy-in", regular: 0, main: 0, protegido: true },
@@ -106,6 +110,7 @@ function normalizar(datos, plantilla) {
   if (typeof d.recomprasMax !== "number") d.recomprasMax = base.recomprasMax;
   if (typeof d.cuotaInscripcion !== "number") d.cuotaInscripcion = base.cuotaInscripcion;
   if (typeof d.toleranciaCheckinMin !== "number") d.toleranciaCheckinMin = base.toleranciaCheckinMin;
+  if (typeof d.castigoNoDeclarar !== "number") d.castigoNoDeclarar = base.castigoNoDeclarar;
   d.gastosCampeonato = Array.isArray(d.gastosCampeonato) ? d.gastosCampeonato : structuredClone(base.gastosCampeonato);
   d.cobrosPorTorneo = Array.isArray(d.cobrosPorTorneo) ? d.cobrosPorTorneo : structuredClone(base.cobrosPorTorneo);
   d.pagosPorTorneo = Array.isArray(d.pagosPorTorneo) ? d.pagosPorTorneo : structuredClone(base.pagosPorTorneo);
@@ -890,7 +895,13 @@ export default function Tablero({ session, perfiles }) {
                     <div className="trow" style={{ gridTemplateColumns: "1fr 100px 1fr" }} key={r.modulo}>
                       <div>{r.modulo}</div>
                       <div>{r.ok ? "✓ OK" : "✕ Falló"}</div>
-                      <div className="section-note">{r.ok ? "" : r.error}</div>
+                      {/* 118ª entrega: a pedido de Federico ("¿cómo sé que fue correcta?") — además del
+                          ✓/✕ por módulo, se muestra cuántos registros tenía ese módulo al exportar (no es
+                          un conteo exacto de filas de Excel, es una cifra para cotejar a ojo contra lo que
+                          se espera: cuántos campeonatos/torneos/jugadores/registros había en el sitio). */}
+                      <div className="section-note">
+                        {r.ok ? (typeof r.filas === "number" ? `${r.filas} registro(s)` : "") : r.error}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1265,23 +1276,25 @@ export default function Tablero({ session, perfiles }) {
               onChange={(e) => set((d) => { d.cuotaInscripcion = Number(e.target.value); })} />
             {!editable && <div className="section-note">{money(draft.cuotaInscripcion)}</div>}
           </div>
-          <div className="login-field" style={{ maxWidth: 220 }}>
-            <label>Recompras (Re-buys) máximas por jugador</label>
-            <input type="number" min="0" className="field" disabled={!editable} value={draft.recomprasMax}
-              onChange={(e) => set((d) => { d.recomprasMax = Number(e.target.value); })} />
-          </div>
+          {/* 118ª entrega: "Recompras (Re-buys) máximas por jugador" y "Tolerancia de check-in (minutos) —
+              Game Night" se quitaron de esta pantalla a pedido de Federico. El campo y su default siguen
+              vivos en el modelo de datos (recomprasMax/toleranciaCheckinMin, ver plantillaEnBlanco()/
+              normalizar() arriba) y Game Night (oculto desde la 66ª entrega, código intacto) sigue
+              leyéndolos igual — este cambio es puramente de interfaz, nadie puede editarlos desde aquí,
+              pero conservan el último valor guardado (o el default de la plantilla en un campeonato nuevo). */}
           <div className="login-field" style={{ maxWidth: 260 }}>
-            <label>Tolerancia de check-in (minutos) — Game Night</label>
-            <input type="number" min="0" className="field" disabled={!editable} value={draft.toleranciaCheckinMin}
-              onChange={(e) => set((d) => { d.toleranciaCheckinMin = Number(e.target.value); })} />
+            <label>Castigo x no declarar Re-buys o Add-on</label>
+            <input type="number" min="0" className="field" disabled={!editable} value={draft.castigoNoDeclarar}
+              onChange={(e) => set((d) => { d.castigoNoDeclarar = Number(e.target.value); })} />
+            {!editable && <div className="section-note">{money(draft.castigoNoDeclarar)}</div>}
           </div>
         </div>
         <div className="section-sub">
-          La cuota de inscripción y las recompras máximas se definen una sola vez por campeonato. La cuota de
-          inscripción se le cobra a cada jugador (una vez, no es un gasto del acumulado); las recompras máximas
-          no son un costo, solo un límite. La tolerancia de check-in es el tiempo, en minutos desde que el Host
-          inicia el torneo en Game Night, dentro del cual el Host todavía puede activar manualmente a un
-          jugador que no hizo su check-in sin que se le genere una amonestación.
+          La cuota de inscripción se define una sola vez por campeonato y se le cobra a cada jugador (una vez,
+          no es un gasto del acumulado). El castigo por no declarar Re-buys o Add-on es el monto que se le
+          cobra al jugador cuando se detecta que no declaró una recompra o un add-on realmente hecho — se
+          registra desde Cobranza, en "Registrar pagos y depósitos", con el motivo "Castigo x no declarar
+          compra" (118ª entrega), que trae este valor como default pero permite editarlo caso por caso.
         </div>
 
         <div className="subhead">Gastos del campeonato — se extraen del acumulado y se descuentan del monto a repartir</div>

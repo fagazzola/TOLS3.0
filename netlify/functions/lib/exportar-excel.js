@@ -33,12 +33,21 @@ async function leerStore(nombre) {
   return (await store.get("data", { type: "json", consistency: "strong" }).catch(() => null)) || {};
 }
 
+// 118ª entrega: cada `run()` ahora devuelve, además de sincronizar, un número de "filas" propio del
+// módulo — a pedido de Federico ("¿cómo sé que fue correcta?"): un ✓ OK por sí solo no le daba nada
+// concreto para comparar contra lo que él sabe que debería haber en el sitio. No es un conteo exacto de
+// filas de Excel en todos los casos (algunos módulos escriben varias hojas), es una cifra de bulto —
+// cuántos campeonatos/torneos/jugadores/registros tenía ESTE módulo en Blobs al momento de exportar —
+// para que el reporte final sea algo que se pueda cotejar a ojo ("¿tenía ~40 pagos confirmados? sí,
+// cuadra") en vez de solo un "OK" que hay que creerle a ciegas.
 const MODULOS = [
   {
     nombre: "Campeonatos",
     async run() {
       const raw = await leerStore("tols-campeonatos");
-      await nucleoSyncCampeonatos(normalizarCampeonatos(raw));
+      const normalizado = normalizarCampeonatos(raw);
+      await nucleoSyncCampeonatos(normalizado);
+      return normalizado.nombres.length;
     },
   },
   {
@@ -46,6 +55,7 @@ const MODULOS = [
     async run() {
       const mapa = await leerStore("tols-tablero");
       await nucleoSyncTablero(mapa);
+      return Object.keys(mapa || {}).length;
     },
   },
   {
@@ -53,13 +63,16 @@ const MODULOS = [
     async run() {
       const data = await leerStore("tols-calendario");
       await nucleoSyncCalendario(data);
+      return Array.isArray(data.torneos) ? data.torneos.length : 0;
     },
   },
   {
     nombre: "Jugadores",
     async run() {
       const data = await leerStore("tols-jugadores");
-      await nucleoSyncJugadores(Array.isArray(data.jugadores) ? data.jugadores : []);
+      const lista = Array.isArray(data.jugadores) ? data.jugadores : [];
+      await nucleoSyncJugadores(lista);
+      return lista.length;
     },
   },
   {
@@ -68,7 +81,9 @@ const MODULOS = [
       const raw = await leerStore("tols-cobranza");
       const normalizado = normalizarCobranza(raw);
       const completa = await respuestaCompleta(normalizado);
-      await nucleoSyncCobranza(filasParaExcel(completa));
+      const filas = filasParaExcel(completa);
+      await nucleoSyncCobranza(filas);
+      return filas.confirmadosRows.length;
     },
   },
   {
@@ -76,13 +91,18 @@ const MODULOS = [
     async run() {
       const mapa = await leerStore("tols-gamenight");
       await nucleoSyncGameNight(mapa);
+      let n = 0;
+      for (const fechas of Object.values(mapa || {})) n += Object.keys(fechas || {}).length;
+      return n;
     },
   },
   {
     nombre: "Cobranza · Cierres",
     async run() {
       const data = await leerStore("tols-cierres");
-      await nucleoSyncCierres(Array.isArray(data.registros) ? data.registros : []);
+      const registros = Array.isArray(data.registros) ? data.registros : [];
+      await nucleoSyncCierres(registros);
+      return registros.length;
     },
   },
   {
@@ -90,6 +110,7 @@ const MODULOS = [
     async run() {
       const data = await leerStore("tols-parametros");
       await nucleoSyncParametros(data);
+      return undefined; // config único, sin un "número de filas" propio que mostrar
     },
   },
   {
@@ -97,13 +118,16 @@ const MODULOS = [
     async run() {
       const data = await leerStore("tols-estadisticas");
       await nucleoSyncEstadisticas(data.torneos || {}, data.apodos || {});
+      return Object.keys(data.torneos || {}).length;
     },
   },
   {
     nombre: "Perfiles",
     async run() {
       const raw = await leerStore("tols-perfiles");
-      await nucleoSyncPerfiles(normalizarPerfiles(raw));
+      const normalizado = normalizarPerfiles(raw);
+      await nucleoSyncPerfiles(normalizado);
+      return Array.isArray(normalizado.usuarios) ? normalizado.usuarios.length : 0;
     },
   },
 ];
@@ -137,8 +161,8 @@ export async function exportarTodoDesdeBlobs(onProgreso) {
   for (const modulo of MODULOS) {
     await avisar("corriendo", modulo.nombre);
     try {
-      await modulo.run();
-      resultados.push({ modulo: modulo.nombre, ok: true });
+      const filas = await modulo.run();
+      resultados.push({ modulo: modulo.nombre, ok: true, filas: typeof filas === "number" ? filas : undefined });
     } catch (e) {
       resultados.push({ modulo: modulo.nombre, ok: false, error: e?.message || String(e) });
     }

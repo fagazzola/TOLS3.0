@@ -398,6 +398,11 @@ export default function Cobranza({ session, perfiles }) {
   // Depósito. Pedido de Federico: "Necesitamos agregar un motivo más... para el tipo 'pago'. Es todo lo
   // del tablero de control, así es que nos faltó la inscripción."
   const cuotaInscripcionActiva = Number(tableroMapa?.[campeonatoSel]?.cuotaInscripcion) || 0;
+  // 118ª entrega: "Castigo x no declarar Re-buys o Add-on" del Tablero de Control — igual que la cuota
+  // de inscripción, es un cargo del jugador hacia TOLS (motivo más del combo de PAGO, nunca de Depósito),
+  // pero a diferencia de ella se aplica a un torneo puntual (el administrador debe indicar a cuál) y su
+  // monto, aunque trae el default del Tablero, se puede editar caso por caso al confirmarlo.
+  const castigoNoDeclaradoActivo = Number(tableroMapa?.[campeonatoSel]?.castigoNoDeclarar) || 0;
 
   // 76ª entrega: resultado (premioTotal - debeTotal) de un jugador en un torneo puntual ya publicado —
   // mismo cálculo que ya usa "Resultados de Torneos" más arriba, reutilizado acá para decidir el "monto
@@ -1046,6 +1051,16 @@ export default function Cobranza({ session, perfiles }) {
     nuevoMov.correo &&
     cuotaInscripcionActiva > 0 &&
     !data?.pagosInscripcion?.[`${campeonatoSel}|inscripcion|${nuevoMov.correo}`];
+  // 118ª entrega: opciones de torneo para el motivo "Castigo x no declarar compra" — a diferencia de
+  // `opcionesPago` (que solo ofrece un torneo si el jugador quedó con Debe de ese torneo en Estadísticas),
+  // el castigo es independiente del resultado: se puede aplicar a CUALQUIER torneo publicado del
+  // campeonato activo (`torneosSaldoOpciones`, sin filtrar por `resultadoTorneo`), excluyendo solo un
+  // torneo donde ya se le confirmó un castigo a ese mismo jugador (mismo criterio "no duplicar" del resto
+  // de los motivos de esta pantalla).
+  const opcionesCastigoPago =
+    nuevoMov?.tipo === "pago" && nuevoMov.correo
+      ? torneosSaldoOpciones.filter((t) => !data?.pagosCastigo?.[`${campeonatoSel}|${t.fecha}|${nuevoMov.correo}`])
+      : [];
   const opcionesDepositoTorneo =
     nuevoMov?.tipo === "deposito" && nuevoMov.correo
       ? torneosSaldoOpciones
@@ -1069,6 +1084,14 @@ export default function Cobranza({ session, perfiles }) {
     // torneo asociado.
     montoEsperadoMov = cuotaInscripcionActiva;
     etiquetaMotivoMov = "Inscripción";
+  } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo?.startsWith("castigo:")) {
+    // 118ª entrega: motivo nuevo — Castigo x no declarar Re-buys o Add-on. El "esperado" es siempre el
+    // default del Tablero de Control (nunca se calcula de Estadísticas, a diferencia de un Debe de
+    // torneo) — el Tesorero lo puede editar al confirmarlo, en el recuadro de "Monto realmente recibido".
+    const fecha = nuevoMov.motivo.slice("castigo:".length);
+    const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
+    montoEsperadoMov = castigoNoDeclaradoActivo;
+    etiquetaMotivoMov = entry ? `Castigo — Torneo ${etiquetaCorta(entry)}` : `Castigo — ${fecha}`;
   } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo?.startsWith("torneo:")) {
     // 89ª entrega: sin fecha — ver nota de homologación más abajo, junto al combo de Motivo.
     const fecha = nuevoMov.motivo.slice("torneo:".length);
@@ -1123,6 +1146,24 @@ export default function Cobranza({ session, perfiles }) {
         motivoTipo: "inscripcion",
         motivoId: "inscripcion",
         motivo: "Inscripción",
+        correo,
+        ...reg,
+      });
+    }
+    // 118ª entrega: motivo nuevo de Pago — Castigo x no declarar Re-buys o Add-on, aplicado a un torneo
+    // puntual (a diferencia de la Inscripción, que no tiene torneo asociado) — mapa propio
+    // (`pagosCastigo`) para no pisar un eventual Debe del mismo torneo en `pagosTorneo`.
+    for (const [clave, reg] of Object.entries(data?.pagosCastigo || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, fechaTorneo, correo] = clave.split("|");
+      const entry = numeracion[`${campeonatoSel}|${fechaTorneo}`];
+      filas.push({
+        clave,
+        tipo: "Pago",
+        tipoAccion: "pago",
+        motivoTipo: "castigo",
+        motivoId: fechaTorneo,
+        motivo: `Castigo — Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
       });
@@ -1279,6 +1320,10 @@ export default function Cobranza({ session, perfiles }) {
     } else if (editandoPago.motivoTipo === "inscripcion") {
       // 87ª entrega
       montoEsperadoEdicion = cuotaInscripcionActiva;
+    } else if (editandoPago.motivoTipo === "castigo") {
+      // 118ª entrega: igual que al confirmarlo, el "esperado" de un Castigo siempre es el default
+      // vigente del Tablero de Control, nunca un cálculo de Estadísticas.
+      montoEsperadoEdicion = castigoNoDeclaradoActivo;
     } else {
       const g = gastosCampeonatoActivo.find((x) => x.concepto === editandoPago.motivoId);
       montoEsperadoEdicion = Number(g?.monto) || 0;
@@ -1369,14 +1414,22 @@ export default function Cobranza({ session, perfiles }) {
     try {
       let body;
       if (nuevoMov.tipo === "pago") {
-        // 87ª entrega: `nuevoMov.motivo` ahora puede ser "torneo:{fecha}" (como antes, solo que con el
-        // prefijo que ya usaba Depósito) o el motivo fijo nuevo "inscripcion".
+        // 87ª entrega: `nuevoMov.motivo` puede ser "torneo:{fecha}" (como antes, solo que con el prefijo
+        // que ya usaba Depósito) o el motivo fijo "inscripcion".
+        // 118ª entrega: se agrega un tercer caso, "castigo:{fecha}" — Castigo x no declarar Re-buys o
+        // Add-on, aplicado a un torneo puntual (igual forma de clave que "torneo:", mapa propio del
+        // servidor para no pisar un eventual Debe del mismo torneo).
         const esInscripcion = nuevoMov.motivo === "inscripcion";
-        const fechaTorneo = esInscripcion ? "" : nuevoMov.motivo.slice("torneo:".length);
+        const esCastigo = nuevoMov.motivo.startsWith("castigo:");
+        const fechaTorneo = esInscripcion
+          ? ""
+          : esCastigo
+          ? nuevoMov.motivo.slice("castigo:".length)
+          : nuevoMov.motivo.slice("torneo:".length);
         body = {
           accion: "registrarPago",
           campeonato: campeonatoSel,
-          motivoTipo: esInscripcion ? "inscripcion" : "torneo",
+          motivoTipo: esInscripcion ? "inscripcion" : esCastigo ? "castigo" : "torneo",
           motivoId: esInscripcion ? "inscripcion" : fechaTorneo,
           fecha: esInscripcion ? undefined : fechaTorneo,
           correo,
@@ -2114,7 +2167,16 @@ export default function Cobranza({ session, perfiles }) {
                         className="field"
                         value={nuevoMov.motivo}
                         disabled={!nuevoMov.correo}
-                        onChange={(e) => setNuevoMov({ ...nuevoMov, motivo: e.target.value })}
+                        onChange={(e) => {
+                          const motivo = e.target.value;
+                          // 118ª entrega: al elegir un torneo para "Castigo x no declarar compra", el
+                          // recuadro de "Monto realmente recibido" se prellena con el default vigente del
+                          // Tablero de Control (editable después) — a diferencia de los demás motivos, que
+                          // arrancan ese recuadro vacío (81ª entrega) porque no tienen un monto "sugerido"
+                          // propio, solo un esperado calculado de Estadísticas/Tablero.
+                          const prefill = motivo.startsWith("castigo:") ? String(castigoNoDeclaradoActivo) : nuevoMov.montoReal;
+                          setNuevoMov({ ...nuevoMov, motivo, montoReal: prefill });
+                        }}
                       >
                         <option value="">— elegir —</option>
                         {nuevoMov.tipo === "pago" && (
@@ -2131,6 +2193,16 @@ export default function Cobranza({ session, perfiles }) {
                             ))}
                             {/* 87ª entrega: motivo nuevo — Cuota de inscripción (Tablero de Control) */}
                             {opcionInscripcionPago && <option value="inscripcion">Inscripción</option>}
+                            {/* 118ª entrega: motivo nuevo — Castigo x no declarar compra, con el torneo al
+                                que aplica ya incluido en la propia opción (el Tesorero elige los dos datos
+                                de un solo paso, igual que ya hace "Torneo N" arriba). Solo aparece bajo
+                                Pago — nunca bajo Depósito, por eso el Tipo "siempre será Pago" para este
+                                motivo. */}
+                            {opcionesCastigoPago.map((t) => (
+                              <option key={`castigo:${t.fecha}`} value={`castigo:${t.fecha}`}>
+                                Castigo x no declarar compra — Torneo {etiquetaCorta(t)}
+                              </option>
+                            ))}
                           </>
                         )}
                         {nuevoMov.tipo === "deposito" && (

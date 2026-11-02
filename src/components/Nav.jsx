@@ -1,10 +1,10 @@
-// 119ª entrega: botón al dashboard "TOLS Estadísticas" (proyecciones, comparativos y estadísticas por
-// jugador, sin dinero), que vive fuera del sitio. Se abre en otra pestaña y es igual para todos los roles.
+// 119ª/120ª/121ª entrega: un solo botón, "Estadísticas y proyecciones", que abre el dashboard externo en
+// otra pestaña. Jugadores (y cualquier otro rol) abren "TOLS Estadísticas", que no contiene dinero;
+// Administrador General, Administrador y Tesorero abren "TOLS Tesorería", que es el mismo dashboard más
+// la sección de dinero. Son dos artefactos distintos porque un artefacto no distingue roles: el dinero no
+// debe viajar en los archivos del que abren los jugadores. El control real de quién abre cada uno es su
+// menú Compartir en claude.ai.
 const URL_ESTADISTICAS = "https://claude.ai/artifact/FHgPm8JGGgrFEBqXWtDXmA";
-// 120ª entrega: la versión con dinero (deuda, ganancia, saldo, premios del campeonato) vive en un segundo
-// dashboard, "TOLS Tesorería", y su botón solo se muestra a Administrador General, Administrador y Tesorero
-// (mismo criterio que "Por resultado", 90ª entrega). El control real de quién abre el dashboard es su
-// menú Compartir en claude.ai: el botón solo evita ofrecerlo a quien no debe verlo.
 const URL_TESORERIA = "https://claude.ai/artifact/1Wgx4Jq5J6LjuKUaPUrgpc";
 const puedeVerDinero = (rol) => rol === "Administrador General" || rol === "Administrador" || rol === "Tesorero";
 
@@ -24,14 +24,14 @@ export default function Nav({ tabs, active, onChange, session, onLogout }) {
               {t.label}
             </button>
           ))}
-          <a className="nav-tab nav-tab-link" href={URL_ESTADISTICAS} target="_blank" rel="noopener noreferrer">
-            Estadísticas ↗
+          <a
+            className="nav-tab nav-tab-link"
+            href={puedeVerDinero(session.rol) ? URL_TESORERIA : URL_ESTADISTICAS}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Estadísticas y proyecciones ↗
           </a>
-          {puedeVerDinero(session.rol) && (
-            <a className="nav-tab nav-tab-link" href={URL_TESORERIA} target="_blank" rel="noopener noreferrer">
-              Tesorería ↗
-            </a>
-          )}
         </div>
         <div className="nav-session">
           {session.nombre} · {session.rol}

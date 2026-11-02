@@ -1,3 +1,7 @@
+// 119ª entrega: botón al dashboard "TOLS Estadísticas" (proyecciones, comparativos y estadísticas por
+// jugador, sin dinero), que vive fuera del sitio. Se abre en otra pestaña y es igual para todos los roles.
+const URL_ESTADISTICAS = "https://claude.ai/artifact/FHgPm8JGGgrFEBqXWtDXmA";
+
 export default function Nav({ tabs, active, onChange, session, onLogout }) {
   return (
     <>
@@ -14,6 +18,9 @@ export default function Nav({ tabs, active, onChange, session, onLogout }) {
               {t.label}
             </button>
           ))}
+          <a className="nav-tab nav-tab-link" href={URL_ESTADISTICAS} target="_blank" rel="noopener noreferrer">
+            Estadísticas ↗
+          </a>
         </div>
         <div className="nav-session">
           {session.nombre} · {session.rol}

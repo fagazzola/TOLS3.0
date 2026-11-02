@@ -10,6 +10,7 @@ import Jugadores from "./components/Jugadores.jsx";
 import Cobranza from "./components/Cobranza.jsx";
 import GameNight from "./components/GameNight.jsx";
 import Estadisticas from "./components/Estadisticas.jsx";
+import Proyecciones from "./components/Proyecciones.jsx";
 import MiPerfil from "./components/MiPerfil.jsx";
 import Registro from "./components/Registro.jsx";
 import { puedeVer } from "./lib/permisos.js";
@@ -54,6 +55,11 @@ const TABS = [
   // que dependa de esa clave; el componente y el archivo siguen llamándose Estadisticas.jsx.
   { key: "estadisticas", modKey: "mod7", label: "Resultados", Component: Estadisticas },
   { key: "jugadores", modKey: "mod6", label: "Jugadores", Component: Jugadores },
+  // 123ª entrega: "Estadísticas y proyecciones" — proyección del campeonato, comparativos y estadísticas por
+  // jugador, calculado en el navegador con los datos de Resultados/Tablero/Calendario (antes era un dashboard
+  // externo que exigía cuenta de Claude). Visible para cualquier rol, igual que Mi Perfil; el dinero dentro de
+  // la pantalla solo lo ven Administrador General/Administrador/Tesorero (ver Proyecciones.jsx).
+  { key: "proyecciones", modKey: null, label: "Estadísticas y proyecciones", Component: Proyecciones, siempreVisible: true },
   { key: "usuarios", modKey: "mod3", label: "Usuarios", Component: Perfiles, soloAdmins: true },
   { key: "miperfil", modKey: null, label: "Mi Perfil", Component: MiPerfil, siempreVisible: true },
 ];
@@ -321,7 +327,7 @@ export default function App() {
   // rol "Jugador" tiene una experiencia reducida a propósito (pedido de Federico) y solo debe ver
   // Calendario, Estadísticas y Mi Perfil; el resto de las pestañas se oculta por completo para ese rol,
   // no solo se deshabilita. (66ª entrega: Game Night salió de esta lista — quedó oculta para todos.)
-  const SOLO_JUGADOR_TABS = ["calendario", "estadisticas", "miperfil"];
+  const SOLO_JUGADOR_TABS = ["calendario", "estadisticas", "proyecciones", "miperfil"];
   // 72ª entrega: "sesión efectiva" — igual a la real, salvo que quien puede usar el switch (administrador
   // real, o desde la 75ª entrega también el Tesorero) activó "Ver como jugador" en Mi Perfil, en cuyo
   // caso se fuerza rol "Jugador" para que `puedeVerTab()`/la lista de pestañas reproduzcan EXACTAMENTE
@@ -341,7 +347,7 @@ export default function App() {
       <Decor />
       <VersionBadge />
       <div className="wrap">
-        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} rolEfectivo={effectiveSession?.rol} />
+        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
         {portalApagado && (
           <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
             ⚠ El portal está APAGADO para los jugadores (modo mantenimiento) — solo los administradores

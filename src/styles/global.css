@@ -90,7 +90,6 @@ body {
   background: var(--surface); color: var(--ink-soft); cursor: pointer;
 }
 .nav-tab.active { background: var(--ink); color: var(--bg); border: 2px solid var(--ink); }
-.nav-tab-link { text-decoration: none; display: inline-flex; align-items: center; }
 .nav-tab-disabled { opacity: 0.4; cursor: not-allowed; }
 .nav-tab-disabled:hover { opacity: 0.4; }
 .nav-session { font-size: 12px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace; display: flex; align-items: center; gap: 10px; }
@@ -699,3 +698,44 @@ h1 {
   .cal-month-label { min-width: 0; }
   .otp-box { width: 38px; height: 46px; font-size: 20px; }
 }
+
+/* ───────── 123ª entrega: "Estadísticas y proyecciones" (Proyecciones.jsx) ───────── */
+.pry { padding-bottom: 48px; }
+.pry-lead { font-size: 15px; line-height: 1.55; max-width: 75ch; margin: 8px 0 18px; }
+.pry-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 18px; }
+.pry-tab { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.pry-tab.activo { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pry-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 18px; min-width: 0; }
+.pry-card h2 { font-family: "Fraunces", serif; font-weight: 600; font-size: 18px; margin: 0 0 6px; }
+.pry-nota { font-size: 13px; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.5; max-width: 75ch; }
+.pry-rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 18px; align-items: start; }
+.pry-controles { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 16px; }
+.pry-campo { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
+.pry-campo select { font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 160px; }
+.pry-fichas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.pry-ficha { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.pry-ficha span { font-size: 12px; color: var(--ink-soft); }
+.pry-ficha strong { font-family: "Fraunces", serif; font-size: 22px; font-weight: 600; }
+.pry-wrap { overflow-x: auto; }
+.pry-tabla { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 6px 0 14px; font-variant-numeric: tabular-nums; }
+.pry-tabla th, .pry-tabla td { border: 1px solid var(--line); padding: 6px 8px; text-align: center; white-space: nowrap; }
+.pry-tabla th { background: var(--surface-2); font-weight: 600; }
+.pry-tabla .pry-l { text-align: left; }
+.pry-tabla tr.pry-total td { font-weight: 600; background: var(--surface-2); }
+.pry-sort { appearance: none; background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; }
+.pry-sort.activo { color: var(--gold-strong); }
+.pry-pos { color: var(--good); }
+.pry-neg { color: var(--bad); }
+.pry-barra { display: inline-block; height: .5rem; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+.pry-metodo { display: flex; flex-direction: column; gap: 10px; max-width: 75ch; margin: 0; padding-left: 1.2rem; line-height: 1.55; font-size: 14.5px; }
+.pry-leyenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+.pry-leyenda i { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-right: .35rem; }
+.pry-svg { display: block; font-size: 12px; }
+.pry-grid { stroke: var(--line); }
+.pry-eje { fill: var(--ink-soft); font-size: 11px; }
+.pry-txt { fill: var(--ink); font-size: 12px; }
+.pry-etq { font-size: 12px; font-weight: 600; }
+.pry-rango { stroke: var(--line); }
+.pry-matriz td { width: 1.6rem; min-width: 1.6rem; height: 1.6rem; padding: 0; }
+.pry-matriz th.pry-v { writing-mode: vertical-rl; transform: rotate(180deg); height: 7rem; padding: 4px 2px; text-align: left; }
+.pry-matriz .pry-k { position: sticky; left: 0; background: var(--surface); text-align: left; padding: 0 8px; z-index: 1; }

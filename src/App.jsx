@@ -341,7 +341,7 @@ export default function App() {
       <Decor />
       <VersionBadge />
       <div className="wrap">
-        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} />
+        <Nav tabs={tabsConPermiso} active={active?.key} onChange={setTab} session={session} onLogout={handleLogout} rolEfectivo={effectiveSession?.rol} />
         {portalApagado && (
           <div className="campeonato-banner campeonato-banner-alerta" style={{ marginBottom: 16 }}>
             ⚠ El portal está APAGADO para los jugadores (modo mantenimiento) — solo los administradores

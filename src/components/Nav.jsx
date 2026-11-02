@@ -8,7 +8,10 @@ const URL_ESTADISTICAS = "https://claude.ai/artifact/FHgPm8JGGgrFEBqXWtDXmA";
 const URL_TESORERIA = "https://claude.ai/artifact/1Wgx4Jq5J6LjuKUaPUrgpc";
 const puedeVerDinero = (rol) => rol === "Administrador General" || rol === "Administrador" || rol === "Tesorero";
 
-export default function Nav({ tabs, active, onChange, session, onLogout }) {
+export default function Nav({ tabs, active, onChange, session, onLogout, rolEfectivo }) {
+  // 122ª entrega: con "Ver como jugador" activo, el botón debe abrir la versión de jugadores (sin dinero)
+  // aunque la sesión real sea de Administrador/Tesorero; App.jsx pasa el rol efectivo.
+  const rolBoton = rolEfectivo || session.rol;
   return (
     <>
       <div className="nav">
@@ -26,7 +29,7 @@ export default function Nav({ tabs, active, onChange, session, onLogout }) {
           ))}
           <a
             className="nav-tab nav-tab-link"
-            href={puedeVerDinero(session.rol) ? URL_TESORERIA : URL_ESTADISTICAS}
+            href={puedeVerDinero(rolBoton) ? URL_TESORERIA : URL_ESTADISTICAS}
             target="_blank"
             rel="noopener noreferrer"
           >

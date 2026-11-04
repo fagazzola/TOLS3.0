@@ -197,6 +197,11 @@ export default function Cobranza({ session, perfiles }) {
   const [vista, setVista] = useState("resultado"); // "resultado" | "corte" | "movimientos" | "estado" | "finanzas"
   const [fechaSaldoSel, setFechaSaldoSel] = useState(""); // 74ª entrega: fecha del torneo elegido en "Torneos publicados" (antes "Resultados de Torneos")
   const [seleccionSaldo, setSeleccionSaldo] = useState(() => new Set());
+  // 125ª entrega: asignar castigos en "Torneos publicados" (jugador + número de castigos).
+  const [castigoCorreo, setCastigoCorreo] = useState("");
+  const [castigoCant, setCastigoCant] = useState("");
+  const [guardandoCastigo, setGuardandoCastigo] = useState(false);
+  const [errorCastigo, setErrorCastigo] = useState("");
   const [enviandoSaldo, setEnviandoSaldo] = useState(false);
   const [envioSaldoAviso, setEnvioSaldoAviso] = useState("");
   // 103ª entrega: fecha límite editable que va en el cuerpo del correo de "Saldo Torneo" — por default el
@@ -420,20 +425,31 @@ export default function Cobranza({ session, perfiles }) {
   // se saca del JSX (donde vivía como un `const filas = ...` dentro del IIFE de renderizado) a un
   // `useMemo` propio, para poder mostrar "xx correos enviados de yy" en el renglón del combo sin
   // duplicar este cálculo.
+  // 125ª entrega: castigos asignados por el Tesorero (mapa `castigosTorneo`, cantidad × valor del Tablero
+  // congelado al guardar). Devuelve el MONTO positivo del castigo de un jugador en un torneo (0 si no hay).
+  function castigoMontoDe(correo, fecha) {
+    const reg = data?.castigosTorneo?.[`${campeonatoSel}|${fecha}|${correo}`];
+    return reg ? (Number(reg.cantidad) || 0) * (Number(reg.valorUnitario) || 0) : 0;
+  }
+  // 125ª entrega: columnas "Resultado Torneo" (= Saldo del Corte de cobranza), "Castigo" (negativo) y
+  // "Saldo" (= Resultado Torneo − Castigo). Se listan los jugadores con Saldo negativo o con algún castigo.
   const filasSaldo = useMemo(() => {
     if (!fechaSaldoSel) return [];
     const torneo = estData?.torneos?.[campeonatoSel]?.[fechaSaldoSel];
     return directorioActivo
       .map((j) => {
         const jt = jugadorEnTorneo(torneo, j);
-        const resultado = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
-        return { jugador: j, alias: nombreCorto(j), resultado };
+        const resultadoTorneo = jt ? (Number(jt.premioTotal) || 0) - (Number(jt.debeTotal) || 0) : 0;
+        const reg = data?.castigosTorneo?.[`${campeonatoSel}|${fechaSaldoSel}|${j.correo}`];
+        const castigoCantidad = reg ? Number(reg.cantidad) || 0 : 0;
+        const castigo = castigoCantidad * (Number(reg?.valorUnitario) || 0);
+        return { jugador: j, alias: nombreCorto(j), participo: Boolean(jt), resultadoTorneo, castigoCantidad, castigo, resultado: resultadoTorneo - castigo };
       })
-      .filter((f) => f.resultado < 0)
+      .filter((f) => f.resultado < 0 || f.castigo > 0)
       .sort((a, b) => a.resultado - b.resultado);
-  }, [fechaSaldoSel, campeonatoSel, estData, directorioActivo]);
-  const totalCorreosSaldo = filasSaldo.length;
-  const enviadosSaldo = filasSaldo.filter((f) => data?.enviosSaldo?.[`${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`]).length;
+  }, [fechaSaldoSel, campeonatoSel, estData, directorioActivo, data?.castigosTorneo]);
+  const totalCorreosSaldo = filasSaldo.filter((f) => f.resultado < 0).length;
+  const enviadosSaldo = filasSaldo.filter((f) => f.resultado < 0).filter((f) => data?.enviosSaldo?.[`${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`]).length;
 
   // 103ª/106ª entrega: "Corte de cobranza" — radiografía de TODOS los jugadores que participaron en el
   // torneo elegido (no solo los que deben, a diferencia de "Torneos publicados"). 106ª entrega: Federico
@@ -1108,7 +1124,7 @@ export default function Cobranza({ session, perfiles }) {
     // torneo) — el Tesorero lo puede editar al confirmarlo, en el recuadro de "Monto realmente recibido".
     const fecha = nuevoMov.motivo.slice("castigo:".length);
     const entry = torneosSaldoOpciones.find((t) => t.fecha === fecha);
-    montoEsperadoMov = castigoNoDeclaradoActivo;
+    montoEsperadoMov = castigoMontoDe(nuevoMov.correo, fecha) || castigoNoDeclaradoActivo; // 125ª: el asignado, si existe
     etiquetaMotivoMov = entry ? `Castigo — Torneo ${etiquetaCorta(entry)}` : `Castigo — ${fecha}`;
   } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo?.startsWith("torneo:")) {
     // 89ª entrega: sin fecha — ver nota de homologación más abajo, junto al combo de Motivo.
@@ -1341,7 +1357,7 @@ export default function Cobranza({ session, perfiles }) {
     } else if (editandoPago.motivoTipo === "castigo") {
       // 118ª entrega: igual que al confirmarlo, el "esperado" de un Castigo siempre es el default
       // vigente del Tablero de Control, nunca un cálculo de Estadísticas.
-      montoEsperadoEdicion = castigoNoDeclaradoActivo;
+      montoEsperadoEdicion = castigoMontoDe(editandoPago.correo, editandoPago.motivoId) || castigoNoDeclaradoActivo; // 125ª
     } else {
       const g = gastosCampeonatoActivo.find((x) => x.concepto === editandoPago.motivoId);
       montoEsperadoEdicion = Number(g?.monto) || 0;
@@ -1868,14 +1884,101 @@ export default function Cobranza({ session, perfiles }) {
             const etiquetaSel = etiquetaCorta(entry);
             const filas = filasSaldo;
 
+            // 125ª entrega: asignar castigos — el Tesorero elige al jugador y el número de castigos
+            // (cantidad × valor del Tablero de Control); 0 quita el castigo. Reemplaza la cantidad
+            // anterior, no la suma.
+            const torneoSel = estData?.torneos?.[campeonatoSel]?.[fechaSaldoSel];
+            const participantesCastigo = directorioActivo
+              .filter((j) => jugadorEnTorneo(torneoSel, j))
+              .map((j) => ({ correo: j.correo, alias: nombreCorto(j) }))
+              .sort((a, b) => a.alias.localeCompare(b.alias));
+            const cantidadActualCastigo = (correo) => Number(data?.castigosTorneo?.[`${campeonatoSel}|${fechaSaldoSel}|${correo}`]?.cantidad) || 0;
+            async function guardarCastigo() {
+              setErrorCastigo("");
+              const cantidad = Number(castigoCant);
+              if (!castigoCorreo) return setErrorCastigo("Elige al jugador.");
+              if (!Number.isInteger(cantidad) || cantidad < 0 || cantidad > 99) return setErrorCastigo("El número de castigos debe ser un entero de 0 a 99 (0 quita el castigo).");
+              if (cantidad > 0 && !(castigoNoDeclaradoActivo > 0)) return setErrorCastigo("El Tablero de Control no tiene un valor de castigo configurado.");
+              setGuardandoCastigo(true);
+              try {
+                const r = await fetch(API, {
+                  method: "PUT",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    accion: "guardarCastigo",
+                    campeonato: campeonatoSel,
+                    fecha: fechaSaldoSel,
+                    correo: castigoCorreo,
+                    cantidad,
+                    valorUnitario: castigoNoDeclaradoActivo,
+                  }),
+                });
+                const json = await r.json();
+                if (!r.ok) throw new Error(json.error || "No se pudo guardar el castigo.");
+                setData(json);
+                setCastigoCorreo("");
+                setCastigoCant("");
+                setEnvioSaldoAviso("");
+              } catch (e) {
+                setErrorCastigo(e.message || "No se pudo guardar el castigo.");
+              } finally {
+                setGuardandoCastigo(false);
+              }
+            }
+            const panelCastigo = editable ? (
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#667" }}>Castigo x no declarar compra:</span>
+                <select
+                  className="field"
+                  style={{ maxWidth: 220 }}
+                  value={castigoCorreo}
+                  onChange={(e) => {
+                    setCastigoCorreo(e.target.value);
+                    setCastigoCant(e.target.value ? String(cantidadActualCastigo(e.target.value) || "") : "");
+                    setErrorCastigo("");
+                  }}
+                >
+                  <option value="">— jugador —</option>
+                  {participantesCastigo.map((p) => (
+                    <option key={p.correo} value={p.correo}>{p.alias}</option>
+                  ))}
+                </select>
+                <input
+                  className="field field-no-spin"
+                  style={{ maxWidth: 90 }}
+                  type="number"
+                  min="0"
+                  max="99"
+                  step="1"
+                  placeholder="# castigos"
+                  value={castigoCant}
+                  onChange={(e) => setCastigoCant(e.target.value)}
+                />
+                <span style={{ fontSize: 12.5, color: "#667" }}>
+                  × {money(castigoNoDeclaradoActivo)}
+                  {castigoCant !== "" && Number(castigoCant) > 0 ? ` = ${money(Number(castigoCant) * castigoNoDeclaradoActivo)}` : ""}
+                </span>
+                <button className="btn btn-secondary" disabled={guardandoCastigo || !castigoCorreo || castigoCant === ""} onClick={guardarCastigo}>
+                  {guardandoCastigo ? "Guardando…" : "Guardar castigo"}
+                </button>
+                {errorCastigo && <span className="login-error" style={{ margin: 0 }}>{errorCastigo}</span>}
+              </div>
+            ) : null;
+
             if (!filas.length) {
-              return <p className="section-sub">Ningún jugador tiene saldo negativo en el torneo {etiquetaSel} ({fechaFmt(fechaSaldoSel)}).</p>;
+              return (
+                <>
+                  <p className="section-sub">Ningún jugador tiene saldo negativo ni castigo en el torneo {etiquetaSel} ({fechaFmt(fechaSaldoSel)}).</p>
+                  {panelCastigo}
+                </>
+              );
             }
 
-            const todosSeleccionados = filas.every((f) => seleccionSaldo.has(f.jugador.correo));
+            const filasEnviables = filas.filter((f) => f.resultado < 0);
+            const todosSeleccionados = filasEnviables.length > 0 && filasEnviables.every((f) => seleccionSaldo.has(f.jugador.correo));
 
             function toggleTodos() {
-              setSeleccionSaldo(todosSeleccionados ? new Set() : new Set(filas.map((f) => f.jugador.correo)));
+              setSeleccionSaldo(todosSeleccionados ? new Set() : new Set(filasEnviables.map((f) => f.jugador.correo)));
             }
             function toggleUno(correo) {
               setSeleccionSaldo((prev) => {
@@ -1892,7 +1995,7 @@ export default function Cobranza({ session, perfiles }) {
               let ok = 0;
               const fallidos = [];
               for (const f of filas) {
-                if (!seleccionSaldo.has(f.jugador.correo)) continue;
+                if (!seleccionSaldo.has(f.jugador.correo) || f.resultado >= 0) continue;
                 try {
                   const r = await fetch(API_ENVIAR_SALDO, {
                     method: "POST",
@@ -1903,7 +2006,8 @@ export default function Cobranza({ session, perfiles }) {
                       campeonato: campeonatoSel,
                       fecha: fechaSaldoSel,
                       torneoLabel: etiquetaSel,
-                      monto: f.resultado,
+                      monto: f.resultadoTorneo, // 125ª: compras (resultado del torneo); el castigo va aparte
+                      castigo: f.castigo,
                       numeroRegistro: f.jugador.id,
                       fechaLimite: fechaLimiteSaldo,
                     }),
@@ -1928,12 +2032,16 @@ export default function Cobranza({ session, perfiles }) {
             return (
               <>
                 <div className="tbl" style={{ marginTop: 16 }}>
-                  <div className="trow thead" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 0.9fr 1fr" }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }}>
                     <div>
                       <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} title="Seleccionar todos" />
                     </div>
                     <div>Lugar</div>
                     <div>Alias PokerStars</div>
+                    {/* 125ª entrega: Resultado Torneo (= Saldo publicado en el Corte de cobranza) y Castigo
+                        (negativo) van antes de Saldo; Saldo = Resultado Torneo + Castigo. */}
+                    <div>Resultado Torneo</div>
+                    <div>Castigo</div>
                     {/* 106ª entrega: homologado a "Saldo" (mismo nombre que usan Estadísticas/Corte de
                         cobranza), el valor sigue siendo Ganancia + Deuda de siempre. */}
                     <div>Saldo</div>
@@ -1943,13 +2051,18 @@ export default function Cobranza({ session, perfiles }) {
                     const clave = `${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`;
                     const enviado = data?.enviosSaldo?.[clave];
                     return (
-                      <div className="trow" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 0.9fr 1fr" }} key={f.jugador.correo}>
+                      <div className="trow" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }} key={f.jugador.correo}>
                         <div>
-                          <input type="checkbox" checked={seleccionSaldo.has(f.jugador.correo)} onChange={() => toggleUno(f.jugador.correo)} />
+                          <input type="checkbox" disabled={f.resultado >= 0} title={f.resultado >= 0 ? "Sin saldo negativo: no se envía correo" : ""} checked={seleccionSaldo.has(f.jugador.correo)} onChange={() => toggleUno(f.jugador.correo)} />
                         </div>
                         <div className="num">{i + 1}</div>
                         <div>{f.alias}</div>
-                        <div className="num right"><Monto valor={f.resultado} /></div>
+                        <div className="num right"><Monto valor={f.resultadoTorneo} centavos /></div>
+                        <div className="num right">
+                          <Monto valor={f.castigo} forzarNegativo centavos />
+                          {f.castigoCantidad > 1 && <span style={{ fontSize: 11, color: "#889", marginLeft: 4 }}>({f.castigoCantidad}×)</span>}
+                        </div>
+                        <div className="num right"><Monto valor={f.resultado} centavos /></div>
                         <div>
                           <span className={"badge " + (enviado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{enviado ? "Sí" : "No"}</span>
                         </div>
@@ -1957,6 +2070,8 @@ export default function Cobranza({ session, perfiles }) {
                     );
                   })}
                 </div>
+
+                {panelCastigo}
 
                 <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {editable && (
@@ -1969,7 +2084,7 @@ export default function Cobranza({ session, perfiles }) {
                     className="btn btn-secondary"
                     onClick={() => {
                       const hoja = XLSX.utils.json_to_sheet(
-                        filas.map((f) => ({ "Alias PokerStars": f.alias, Saldo: f.resultado }))
+                        filas.map((f) => ({ "Alias PokerStars": f.alias, "Resultado Torneo": f.resultadoTorneo, Castigo: -f.castigo, Saldo: f.resultado }))
                       );
                       const libro = XLSX.utils.book_new();
                       XLSX.utils.book_append_sheet(libro, hoja, "Torneos publicados");
@@ -2199,7 +2314,7 @@ export default function Cobranza({ session, perfiles }) {
                           // Tablero de Control (editable después) — a diferencia de los demás motivos, que
                           // arrancan ese recuadro vacío (81ª entrega) porque no tienen un monto "sugerido"
                           // propio, solo un esperado calculado de Estadísticas/Tablero.
-                          const prefill = motivo.startsWith("castigo:") ? String(castigoNoDeclaradoActivo) : nuevoMov.montoReal;
+                          const prefill = motivo.startsWith("castigo:") ? String(castigoMontoDe(nuevoMov.correo, motivo.slice("castigo:".length)) || castigoNoDeclaradoActivo) : nuevoMov.montoReal;
                           setNuevoMov({ ...nuevoMov, motivo, montoReal: prefill });
                         }}
                       >

@@ -113,6 +113,24 @@ function normalizarMapaPagos(v) {
   return out;
 }
 
+// 125ª entrega: "Castigo x no declarar compra" ASIGNADO por el Tesorero a un jugador en un torneo
+// ("Torneos publicados"): { cantidad, valorUnitario } — el monto del castigo es cantidad × valorUnitario
+// (valor del Tablero de Control congelado al momento de guardar, para que un cambio posterior en el
+// Tablero no altere castigos ya asignados). Es la DEUDA; el pago de ese castigo sigue siendo `pagosCastigo`.
+function normalizarMapaCastigos(v) {
+  const out = {};
+  if (v && typeof v === "object") {
+    for (const [clave, reg] of Object.entries(v)) {
+      const cantidad = Math.floor(Number(reg?.cantidad));
+      const valorUnitario = Number(reg?.valorUnitario);
+      if (Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(valorUnitario) && valorUnitario >= 0) {
+        out[clave] = { cantidad, valorUnitario, registradoEn: String(reg?.registradoEn || "") };
+      }
+    }
+  }
+  return out;
+}
+
 // 83ª entrega: exportada (junto con respuestaCompleta/filasParaExcel más abajo) para que
 // lib/exportar-excel.js pueda reconstruir exactamente las mismas filas que ya arma esta pantalla al
 // guardar, en vez de reimplementar la lógica de Cobranza por su cuenta.
@@ -147,7 +165,9 @@ export function normalizar(data) {
   const depositosGasto = normalizarMapaPagos(base.depositosGasto);
   const pagosInscripcion = normalizarMapaPagos(base.pagosInscripcion);
   const pagosCastigo = normalizarMapaPagos(base.pagosCastigo);
-  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo };
+  // 125ª entrega: sexto mapa — castigos asignados (la deuda), "campeonato|fecha|correo".
+  const castigosTorneo = normalizarMapaCastigos(base.castigosTorneo);
+  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo, castigosTorneo };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -205,6 +225,7 @@ export async function respuestaCompleta(data) {
     depositosGasto: data.depositosGasto || {},
     pagosInscripcion: data.pagosInscripcion || {},
     pagosCastigo: data.pagosCastigo || {}, // 118ª entrega
+    castigosTorneo: data.castigosTorneo || {}, // 125ª entrega
     // 92ª entrega: el Calendario completo (todos los campeonatos, no solo el activo) — lo necesita
     // filasParaExcel() para numerar los torneos de "Pagos y depósitos confirmados" ("Torneo N"), igual
     // que ya hace Cobranza.jsx del lado del cliente con mapaNumeracionTorneos().
@@ -450,9 +471,10 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   const r4 = remapearClavesCampeonato(actual.depositosGasto, de, a);
   const r5 = remapearClavesCampeonato(actual.pagosInscripcion, de, a); // 87ª entrega
   const r6 = remapearClavesCampeonato(actual.pagosCastigo, de, a); // 118ª entrega
+  const r7 = remapearClavesCampeonato(actual.castigosTorneo, de, a); // 125ª entrega
   const cambia =
     actual.movimientos.some((m) => m.campeonato === de) ||
-    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio;
+    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio || r7.cambio;
   if (!cambia) return;
   const prefijoViejo = `gn-${de}-`;
   actual.movimientos = actual.movimientos.map((m) => {
@@ -466,6 +488,7 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   actual.depositosGasto = r4.mapa;
   actual.pagosInscripcion = r5.mapa; // 87ª entrega
   actual.pagosCastigo = r6.mapa; // 118ª entrega
+  actual.castigosTorneo = r7.mapa; // 125ª entrega
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
@@ -522,6 +545,26 @@ export default async (req) => {
       const fecha = String(body.fecha || "").trim();
       if (actual.jugadores[correo]) {
         actual.jugadores[correo].excepciones = actual.jugadores[correo].excepciones.filter((f) => f !== fecha);
+      }
+    } else if (body?.accion === "guardarCastigo") {
+      // 125ª entrega: el Tesorero asigna N castigos a un jugador en un torneo publicado. Reemplaza la
+      // cantidad anterior (no suma); cantidad 0 elimina el castigo. El valor unitario se congela aquí.
+      const campeonato = String(body.campeonato || "").trim();
+      const fecha = String(body.fecha || "").trim();
+      const correo = String(body.correo || "").trim().toLowerCase();
+      const cantidad = Math.floor(Number(body.cantidad));
+      const valorUnitario = Number(body.valorUnitario);
+      if (!campeonato || !fecha || !correo || !Number.isFinite(cantidad) || cantidad < 0 || cantidad > 99) {
+        return new Response(JSON.stringify({ error: "Faltan datos del castigo o la cantidad no es válida (0 a 99)." }), { status: 400, headers: HEADERS });
+      }
+      const clave = `${campeonato}|${fecha}|${correo}`;
+      if (cantidad === 0) {
+        delete actual.castigosTorneo[clave];
+      } else {
+        if (!Number.isFinite(valorUnitario) || valorUnitario <= 0) {
+          return new Response(JSON.stringify({ error: "El Tablero de Control no tiene un valor de castigo configurado." }), { status: 400, headers: HEADERS });
+        }
+        actual.castigosTorneo[clave] = { cantidad, valorUnitario, registradoEn: new Date().toISOString() };
       }
     } else if (body?.accion === "registrarPago") {
       // 76ª entrega: confirma que un jugador pagó a TOLS el Debe de un torneo ya publicado en

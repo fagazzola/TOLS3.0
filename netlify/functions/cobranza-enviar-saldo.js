@@ -30,6 +30,8 @@ export default async (req) => {
   // mmmm" de la semana en curso) — opcional, plantillaSaldoTorneo() cae a su texto fijo de siempre si no
   // llega nada.
   const fechaLimite = String(body?.fechaLimite || "").trim();
+  // 125ª entrega: monto del castigo asignado (positivo, ≥ 0) — opcional; si es 0 el correo no cambia.
+  const castigo = Math.max(0, Number(body?.castigo) || 0);
 
   if (!correo || !campeonato || !fecha || !torneoLabel || !Number.isFinite(monto) || numeroRegistro === undefined || numeroRegistro === null) {
     return new Response(JSON.stringify({ error: "Faltan datos del jugador o del torneo para armar el correo." }), { status: 400, headers: HEADERS });
@@ -39,7 +41,7 @@ export default async (req) => {
     await enviarCorreo({
       to: correo,
       subject: `Saldo Torneo ${torneoLabel} - TOLS 3.0`,
-      html: plantillaSaldoTorneo(nombre, torneoLabel, monto, numeroRegistro, fechaLimite),
+      html: plantillaSaldoTorneo(nombre, torneoLabel, monto, numeroRegistro, fechaLimite, castigo),
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message || "No se pudo enviar el correo." }), { status: 502, headers: HEADERS });

@@ -106,9 +106,31 @@ export function plantillaRegistroExitoso(nombre, numeroRegistro) {
 // 103ª entrega: `fechaLimite` (opcional) — a pedido de Federico, la fecha límite para pagar ahora la
 // pone el Tesorero a mano (recuadro en "Torneos publicados", con default "viernes xx de mmmm" de la
 // semana en curso) en vez de salir siempre fija como "el viernes de esta semana".
-export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegistro, fechaLimite) {
+export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegistro, fechaLimite, castigo = 0) {
   const num = String(numeroRegistro).padStart(2, "0");
-  const monto = Math.round(Math.abs(Number(montoDeuda) || 0)).toLocaleString("en-US");
+  const fmt = (n) => Math.round(Math.abs(Number(n) || 0)).toLocaleString("en-US");
+  // 125ª entrega: si el jugador tiene castigo (≠ 0), el correo desglosa compras + castigo y da el total.
+  // Sin castigo, el correo es exactamente el de siempre. Los centavos de referencia van en las cifras de
+  // compras y total; el castigo siempre lleva .00.
+  const castigoPesos = Math.round(Math.abs(Number(castigo) || 0));
+  const resultado = Number(montoDeuda) || 0; // negativo = debe por compras; positivo = a favor
+  let montoPrincipal;
+  let desglose = "";
+  if (castigoPesos > 0) {
+    const totalPesos = Math.round(Math.abs(resultado - castigoPesos));
+    montoPrincipal = `($ ${totalPesos.toLocaleString("en-US")}.${num})`;
+    const lineaCompras = resultado < 0
+      ? `($ ${fmt(resultado)}.${num}) por compras`
+      : `$ ${fmt(resultado)}.00 a favor por resultado del torneo`;
+    desglose = `
+      <p style="margin:0 0 6px; color:#b6c2cd; font-size:14px; text-align:center;">
+        ${lineaCompras}<br />
+        + ($ ${castigoPesos.toLocaleString("en-US")}.00) por castigo<br />
+        <strong>Total:</strong>
+      </p>`;
+  } else {
+    montoPrincipal = `($ ${fmt(resultado)}.${num})`;
+  }
   return `
   <div style="font-family: Segoe UI, Arial, sans-serif; background:#0f1720; padding:32px; color:#e8edf2;">
     <div style="max-width:460px; margin:0 auto; background:#182430; border-radius:14px; padding:28px; border:1px solid #2a3a4a;">
@@ -119,9 +141,9 @@ export function plantillaSaldoTorneo(nombre, torneoLabel, montoDeuda, numeroRegi
       </p>
       <p style="margin:0 0 16px; color:#b6c2cd; font-size:14px;">
         Nuestros registros indican que, después de cerrado el torneo ${torneoLabel}, tu saldo es de:
-      </p>
+      </p>${desglose}
       <div style="font-size:32px; font-weight:800; text-align:center; background:#0f1720; border-radius:10px; padding:18px 12px; color:#ff5c5c; border:1px solid #3a2530; margin:0 0 16px;">
-        ($ ${monto}.${num})
+        ${montoPrincipal}
       </div>
       <p style="margin:0 0 20px; color:#b6c2cd; font-size:14px;">
         <strong>Importante:</strong> los dos últimos dígitos de esa cifra (<strong>.${num}</strong>) son tu

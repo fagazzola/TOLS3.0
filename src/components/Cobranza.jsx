@@ -519,7 +519,9 @@ export default function Cobranza({ session, perfiles }) {
   // Depósito, blanco (con letra oscura, no blanca sobre blanco) si no.
   function estiloResultadoCorte(f) {
     if (f.saldo < 0) return f.pagado ? { background: "#1e7d32", color: "#fff" } : { background: "#c62828", color: "#fff" };
-    return f.depositado ? { background: "#0277bd", color: "#fff" } : { background: "#ffffff", color: "#222" };
+    // 125ª entrega: todo saldo positivo (el jugador cobra) va en verde con números blancos, se haya
+    // depositado o no (antes: azul si ya se depositó, blanco si no). Saldo $0 queda en blanco.
+    return f.saldo > 0 ? { background: "#1e7d32", color: "#fff" } : { background: "#ffffff", color: "#222" };
   }
   // 112ª entrega: arma el aoa (array de arrays) de "Finanzas Generales" en el mismo formato de 2
   // columnas que se despliega en el portal (Ingresos/Egresos a la izquierda, Gastos operativos/Reserva
@@ -1893,10 +1895,11 @@ export default function Cobranza({ session, perfiles }) {
               .map((j) => ({ correo: j.correo, alias: nombreCorto(j) }))
               .sort((a, b) => a.alias.localeCompare(b.alias));
             const cantidadActualCastigo = (correo) => Number(data?.castigosTorneo?.[`${campeonatoSel}|${fechaSaldoSel}|${correo}`]?.cantidad) || 0;
-            async function guardarCastigo() {
+            async function guardarCastigo(correoForzado, cantidadForzada) {
               setErrorCastigo("");
-              const cantidad = Number(castigoCant);
-              if (!castigoCorreo) return setErrorCastigo("Elige al jugador.");
+              const correoCast = typeof correoForzado === "string" ? correoForzado : castigoCorreo;
+              const cantidad = typeof correoForzado === "string" ? cantidadForzada : Number(castigoCant);
+              if (!correoCast) return setErrorCastigo("Elige al jugador.");
               if (!Number.isInteger(cantidad) || cantidad < 0 || cantidad > 99) return setErrorCastigo("El número de castigos debe ser un entero de 0 a 99 (0 quita el castigo).");
               if (cantidad > 0 && !(castigoNoDeclaradoActivo > 0)) return setErrorCastigo("El Tablero de Control no tiene un valor de castigo configurado.");
               setGuardandoCastigo(true);
@@ -1908,7 +1911,7 @@ export default function Cobranza({ session, perfiles }) {
                     accion: "guardarCastigo",
                     campeonato: campeonatoSel,
                     fecha: fechaSaldoSel,
-                    correo: castigoCorreo,
+                    correo: correoCast,
                     cantidad,
                     valorUnitario: castigoNoDeclaradoActivo,
                   }),
@@ -1958,7 +1961,7 @@ export default function Cobranza({ session, perfiles }) {
                   × {money(castigoNoDeclaradoActivo)}
                   {castigoCant !== "" && Number(castigoCant) > 0 ? ` = ${money(Number(castigoCant) * castigoNoDeclaradoActivo)}` : ""}
                 </span>
-                <button className="btn btn-secondary" disabled={guardandoCastigo || !castigoCorreo || castigoCant === ""} onClick={guardarCastigo}>
+                <button className="btn btn-secondary" disabled={guardandoCastigo || !castigoCorreo || castigoCant === ""} onClick={() => guardarCastigo()}>
                   {guardandoCastigo ? "Guardando…" : "Guardar castigo"}
                 </button>
                 {errorCastigo && <span className="login-error" style={{ margin: 0 }}>{errorCastigo}</span>}
@@ -2032,7 +2035,7 @@ export default function Cobranza({ session, perfiles }) {
             return (
               <>
                 <div className="tbl" style={{ marginTop: 16 }}>
-                  <div className="trow thead" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 80px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }}>
                     <div>
                       <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} title="Seleccionar todos" />
                     </div>
@@ -2046,12 +2049,13 @@ export default function Cobranza({ session, perfiles }) {
                         cobranza), el valor sigue siendo Ganancia + Deuda de siempre. */}
                     <div>Saldo</div>
                     <div>Correo enviado</div>
+                    {editable && <div>Corregir</div>}
                   </div>
                   {filas.map((f, i) => {
                     const clave = `${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`;
                     const enviado = data?.enviosSaldo?.[clave];
                     return (
-                      <div className="trow" style={{ gridTemplateColumns: "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }} key={f.jugador.correo}>
+                      <div className="trow" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 80px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }} key={f.jugador.correo}>
                         <div>
                           <input type="checkbox" disabled={f.resultado >= 0} title={f.resultado >= 0 ? "Sin saldo negativo: no se envía correo" : ""} checked={seleccionSaldo.has(f.jugador.correo)} onChange={() => toggleUno(f.jugador.correo)} />
                         </div>
@@ -2066,6 +2070,20 @@ export default function Cobranza({ session, perfiles }) {
                         <div>
                           <span className={"badge " + (enviado ? "badge-nivel-escritura" : "badge-nivel-ninguno")}>{enviado ? "Sí" : "No"}</span>
                         </div>
+                        {/* 125ª entrega: corregir un castigo puesto por error — ✎ lo carga en el control de
+                            abajo para cambiar el número; ✕ lo quita (queda en 0). */}
+                        {editable && (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {f.castigoCantidad > 0 ? (
+                              <>
+                                <button className="btn btn-secondary" style={{ padding: "2px 8px" }} title="Cambiar el número de castigos" disabled={guardandoCastigo}
+                                  onClick={() => { setCastigoCorreo(f.jugador.correo); setCastigoCant(String(f.castigoCantidad)); setErrorCastigo(""); }}>✎</button>
+                                <button className="btn btn-secondary" style={{ padding: "2px 8px" }} title="Quitar el castigo" disabled={guardandoCastigo}
+                                  onClick={() => { if (window.confirm(`¿Quitar el castigo de ${f.alias}?`)) guardarCastigo(f.jugador.correo, 0); }}>✕</button>
+                              </>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

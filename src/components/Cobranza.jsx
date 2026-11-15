@@ -2047,6 +2047,42 @@ export default function Cobranza({ session, perfiles }) {
                 setGuardandoCastigo(false);
               }
             }
+            // 129ª entrega: marcar/desmarcar "Descontado del depósito del jugador" directo desde la fila del
+            // castigo. Si todavía no existe el Pago de castigo lo crea (monto = castigo asignado, fecha de hoy);
+            // si ya existe, conserva monto y fecha y solo cambia la marca.
+            async function toggleDescontado(f) {
+              setErrorCastigo("");
+              const claveP = `${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`;
+              const existente = data?.pagosCastigo?.[claveP];
+              const hoyISO = new Date().toISOString().slice(0, 10);
+              const montoCast = Math.abs(Number(f.castigo) || 0);
+              setGuardandoCastigo(true);
+              try {
+                const r = await fetch(API, {
+                  method: "PUT",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    accion: "registrarPago",
+                    campeonato: campeonatoSel,
+                    motivoTipo: "castigo",
+                    motivoId: fechaSaldoSel,
+                    fecha: fechaSaldoSel,
+                    correo: f.jugador.correo,
+                    montoEsperado: existente?.montoEsperado ?? montoCast,
+                    monto: existente?.monto ?? montoCast,
+                    fechaRegistro: existente?.fecha || hoyISO,
+                    descontadoDeposito: !existente?.descontado,
+                  }),
+                });
+                const json = await r.json();
+                if (!r.ok) throw new Error(json.error || "No se pudo guardar.");
+                setData(json);
+              } catch (e) {
+                setErrorCastigo(e.message || "No se pudo guardar.");
+              } finally {
+                setGuardandoCastigo(false);
+              }
+            }
             const panelCastigo = editable ? (
               <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, color: "#667" }}>Castigo x no declarar compra:</span>
@@ -2154,7 +2190,7 @@ export default function Cobranza({ session, perfiles }) {
             return (
               <>
                 <div className="tbl" style={{ marginTop: 16 }}>
-                  <div className="trow thead" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 80px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }}>
+                  <div className="trow thead" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 210px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }}>
                     <div>
                       <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} title="Seleccionar todos" />
                     </div>
@@ -2174,7 +2210,7 @@ export default function Cobranza({ session, perfiles }) {
                     const clave = `${campeonatoSel}|${fechaSaldoSel}|${f.jugador.correo}`;
                     const enviado = data?.enviosSaldo?.[clave];
                     return (
-                      <div className="trow" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 80px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }} key={f.jugador.correo}>
+                      <div className="trow" style={{ gridTemplateColumns: editable ? "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr 210px" : "40px 0.6fr 1.4fr 1fr 1fr 1fr 1fr" }} key={f.jugador.correo}>
                         <div>
                           <input type="checkbox" disabled={f.resultado >= 0} title={f.resultado >= 0 ? "Sin saldo negativo: no se envía correo" : ""} checked={seleccionSaldo.has(f.jugador.correo)} onChange={() => toggleUno(f.jugador.correo)} />
                         </div>
@@ -2199,6 +2235,12 @@ export default function Cobranza({ session, perfiles }) {
                                   onClick={() => { setCastigoCorreo(f.jugador.correo); setCastigoCant(String(f.castigoCantidad)); setErrorCastigo(""); }}>✎</button>
                                 <button className="btn btn-secondary" style={{ padding: "2px 8px" }} title="Quitar el castigo" disabled={guardandoCastigo}
                                   onClick={() => { if (window.confirm(`¿Quitar el castigo de ${f.alias}?`)) guardarCastigo(f.jugador.correo, 0); }}>✕</button>
+                                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, whiteSpace: "nowrap" }} title="El castigo no entró en efectivo: el Tesorero lo descontó del depósito del jugador">
+                                  <input type="checkbox" disabled={guardandoCastigo}
+                                    checked={Boolean(data?.pagosCastigo?.[clave]?.descontado)}
+                                    onChange={() => toggleDescontado(f)} />
+                                  Desc. depósito
+                                </label>
                               </>
                             ) : null}
                           </div>

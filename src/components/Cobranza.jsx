@@ -564,7 +564,9 @@ export default function Cobranza({ session, perfiles }) {
     izquierda.push(
       fila("Torneos main — burbuja", v(catPremiosMain.burbuja, true), true),
       fila("Torneos main — mejor mano", v(catPremiosMain.mano, true), true),
-      fila("Subtotal egresos", v(subtotalEgresos, true)),
+      fila("Compras descontadas del depósito (ganadores)", v(ajusteComprasDescontadas), true),
+      fila("Diferencia depósito real vs esperado", v(ajusteDifDeposito), true),
+      fila("Subtotal egresos (depósitos reales)", v(subtotalEgresos, true)),
       fila("Balance general", v(balanceGeneral))
     );
 
@@ -588,6 +590,8 @@ export default function Cobranza({ session, perfiles }) {
     derecha.push(fila("Existente en la cuenta de banco", v(balanceGeneral)));
     derecha.push(fila("Reservado", v(reservarAcum, true)));
     derecha.push(fila("Gastos pendientes", v(gastosPendientes, true)));
+    derecha.push(fila("Premios por depositar", v(premiosPorDepositar, true)));
+    derecha.push(fila("Por cobrar", v(porCobrar)));
     derecha.push(fila("Remanente real", v(diffCuenta)));
 
     const maxFilas = Math.max(izquierda.length, derecha.length);
@@ -739,8 +743,21 @@ export default function Cobranza({ session, perfiles }) {
         }
       }
     }
-    const reFondoReservado = (reTotalPagosTorneo * pctAcumuladoActivo) / 100;
-    const reDisponible = reTotalPagosTorneo - reFondoReservado;
+    // 127ª entrega: la Provisión se calcula sobre el total de compras (Deuda) de la pestaña Resultados.
+    const reTotalCompras = resultadosRows.reduce((s, r) => s - (Number(r.deuda) || 0), 0);
+    const reFondoReservado = (reTotalCompras * pctAcumuladoActivo) / 100;
+    const reDisponible = reTotalCompras - reFondoReservado;
+    // Por cobrar / Premios por depositar: saldos de Resultados sin Pago / Depósito en Cobranza.
+    const pagosTorneoSet = new Set(cobranzaRows.filter((c) => c.motivoTipo === "torneo" && c.tipoAccion === "pago").map((c) => `${c.motivoId}|${c.correo}`));
+    const depositosTorneoSet = new Set(cobranzaRows.filter((c) => c.motivoTipo === "torneo" && c.tipoAccion === "deposito").map((c) => `${c.motivoId}|${c.correo}`));
+    const detPorCobrar = [];
+    const detPorDepositar = [];
+    let rePorCobrar = 0, rePorDepositar = 0;
+    for (const r of resultadosRows) {
+      const k = `${r.fecha}|${r.correo}`;
+      if (r.saldo < 0 && !pagosTorneoSet.has(k)) { rePorCobrar += -r.saldo; detPorCobrar.push([r.alias, r.torneoEtiqueta, -r.saldo]); }
+      if (r.saldo > 0 && !depositosTorneoSet.has(k)) { rePorDepositar += r.saldo; detPorDepositar.push([r.alias, r.torneoEtiqueta, r.saldo]); }
+    }
     const reSubtotalIngresos = reTotalInscripciones + rePagosRegular + rePagosMain + reTotalCastigos;
 
     const reRegular = { 1: 0, 2: 0, 3: 0, otros: 0 };
@@ -763,7 +780,14 @@ export default function Cobranza({ session, perfiles }) {
         if (r.premioMano) { reMain.mano += r.premioMano; detMain.mano.push([alias, r.torneoEtiqueta, r.premioMano]); }
       }
     }
-    const reSubtotalEgresos = reRegular[1] + reRegular[2] + reRegular[3] + reRegular.otros + reMain[1] + reMain[2] + reMain[3] + reMain.otros + reMain.burbuja + reMain.mano;
+    const rePremiosBrutos = reRegular[1] + reRegular[2] + reRegular[3] + reRegular.otros + reMain[1] + reMain[2] + reMain[3] + reMain.otros + reMain.burbuja + reMain.mano;
+    // 127ª: egresos = depósitos reales de la pestaña Cobranza (Esperado/Real en positivo para Depósito).
+    const depTorneoRows = cobranzaRows.filter((c) => c.motivoTipo === "torneo" && c.tipoAccion === "deposito");
+    const reDepEsperado = depTorneoRows.reduce((s, c) => s + (Number(c.montoEsperado) || 0), 0);
+    const reDepReal = depTorneoRows.reduce((s, c) => s + (Number(c.monto) || 0), 0);
+    const reAjusteCompras = rePremiosBrutos - reDepEsperado;
+    const reAjusteDif = reDepEsperado - reDepReal;
+    const reSubtotalEgresos = reDepReal;
     const reBalanceGeneral = reSubtotalIngresos - reSubtotalEgresos;
     const reAcumPorLugar = premiosCampeonatoConfig.map((l) => ({
       label: l.reyKiller ? "Rey Killer" : l.label,
@@ -773,7 +797,7 @@ export default function Cobranza({ session, perfiles }) {
     const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0) + reTotalCastigos;
     const reReservar = -(reFondoReservado + reTotalCastigos);
     const reGastosPend = -totalGastosOperativos; // config., ver bloque "Gastos operativos" en Soporte
-    const reDiff = reBalanceGeneral + reReservar + reGastosPend;
+    const reDiff = reBalanceGeneral + reReservar + reGastosPend - rePorDepositar + rePorCobrar;
 
     // ---------- Hoja "Soporte": un bloque por cada cifra, con el detalle que la compone ----------
     const soporteAoa = [
@@ -827,18 +851,19 @@ export default function Cobranza({ session, perfiles }) {
     const aProvision = bloque(
       "Provisión para acum. Camp. (15%)",
       [
-        "= Total de Pagos confirmados de torneo (regulares + main, SIN la inscripción) × % configurado en Tablero de Control.",
+        "= Total de compras (Deuda) de los torneos publicados, de la pestaña Resultados (SIN la inscripción) × % configurado en Tablero de Control.",
+        "Se calcula sobre las compras brutas, no sobre los pagos en efectivo: los pagos se registran por el saldo neto de cada jugador.",
         `En Conciliación se muestra en negativo (−${money(reFondoReservado)}) porque ahí se trata como un egreso.`,
       ],
       ["Concepto", "Monto"],
-      [["Total pagos de torneo (regular + main)", reTotalPagosTorneo], ["% configurado (Tablero de Control)", `${pctAcumuladoActivo}%`]],
+      [["Total compras de torneos publicados", reTotalCompras], ["% configurado (Tablero de Control)", `${pctAcumuladoActivo}%`]],
       "Provisión (15%)", reFondoReservado
     );
     const aDisponible = bloque(
       "Disponible (85%)",
-      ["= Total de Pagos de torneo (regular + main) − Provisión (15%)."],
+      ["= Total de compras (Deuda) de los torneos publicados − Provisión (15%). Es la bolsa de premios."],
       ["Concepto", "Monto"],
-      [["Total pagos de torneo (regular + main)", reTotalPagosTorneo], ["Provisión (15%)", -reFondoReservado]],
+      [["Total compras de torneos publicados", reTotalCompras], ["Provisión (15%)", -reFondoReservado]],
       "Disponible (85%)", reDisponible
     );
     const aReg1 = bloque("Torneos regulares — 1er lugar", ["Premio de 1er lugar de cada jugador en cada torneo Regular, solo de los Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detRegular[1], "TOTAL", reRegular[1]);
@@ -851,18 +876,30 @@ export default function Cobranza({ session, perfiles }) {
     const aMainOtros = bloque("Torneos main — otros lugares pagados", ["Premio de cualquier otro lugar pagado (4º en adelante) en torneos Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.otros, "TOTAL", reMain.otros);
     const aMainBurbuja = bloque("Torneos main — burbuja", ["Premio de burbuja de cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.burbuja, "TOTAL", reMain.burbuja);
     const aMainMano = bloque("Torneos main — mejor mano", ["Premio de mejor mano de cada torneo Main, solo Depósitos ya confirmados."], ["Jugador", "Torneo", "Monto"], detMain.mano, "TOTAL", reMain.mano);
+    const aAjusteCompras = bloque(
+      "Compras descontadas del depósito (ganadores)",
+      ["= Premios brutos por lugar (suma de los 10 bloques de arriba) − Monto esperado de los Depósitos confirmados. Un ganador que debe $900 y gana $1,500 recibe un depósito de $600: sus $900 de compra no entran como pago en efectivo."],
+      ["Concepto", "Monto"],
+      [["Premios brutos por lugar", rePremiosBrutos], ["Depósitos esperados (neto)", -reDepEsperado]],
+      "Ajuste", reAjusteCompras
+    );
+    const aAjusteDif = bloque(
+      "Diferencia depósito real vs esperado",
+      ["= Depósitos esperados − Depósitos reales (pestaña Cobranza). Positivo = el Tesorero depositó menos de lo esperado."],
+      ["Concepto", "Monto"],
+      [["Depósitos esperados (neto)", reDepEsperado], ["Depósitos reales", -reDepReal]],
+      "Diferencia", reAjusteDif
+    );
     const aSubtotalEgresos = bloque(
-      "Subtotal egresos",
-      ["Suma de las 10 categorías de premios (regular + main) de arriba — en Conciliación se muestra en negativo."],
+      "Subtotal egresos (depósitos reales)",
+      ["= Premios brutos por lugar − compras descontadas del depósito − diferencia real vs esperado = suma de los Depósitos reales confirmados de torneo. En Conciliación se muestra en negativo."],
       ["Concepto", "Monto"],
       [
-        ["Torneos regulares — 1er lugar", reRegular[1]], ["Torneos regulares — 2do lugar", reRegular[2]],
-        ["Torneos regulares — 3er lugar", reRegular[3]], ["Torneos regulares — otros lugares", reRegular.otros],
-        ["Torneos main — 1er lugar", reMain[1]], ["Torneos main — 2do lugar", reMain[2]],
-        ["Torneos main — 3er lugar", reMain[3]], ["Torneos main — otros lugares", reMain.otros],
-        ["Torneos main — burbuja", reMain.burbuja], ["Torneos main — mejor mano", reMain.mano],
+        ["Premios brutos por lugar (regular + main)", rePremiosBrutos],
+        ["Compras descontadas del depósito (ganadores)", -reAjusteCompras],
+        ["Diferencia depósito real vs esperado", -reAjusteDif],
       ],
-      "TOTAL", reSubtotalEgresos
+      "TOTAL (depósitos reales)", reSubtotalEgresos
     );
     const aBalance = bloque(
       "Balance general / Existente en la cuenta de banco",
@@ -894,11 +931,24 @@ export default function Cobranza({ session, perfiles }) {
       [...reAcumPorLugar.map((l) => [l.label, `${l.pct}%`, l.monto]), ["Castigos x no declarar compra", "100%", reTotalCastigos]],
       "TOTAL", reAcumAlMomento
     );
+    const aPorDepositar = bloque(
+      "Premios por depositar",
+      ["Saldos positivos de la pestaña Resultados que todavía no tienen Depósito en la pestaña Cobranza (dinero que ya se debe a los jugadores)."],
+      ["Jugador", "Torneo", "Monto"], detPorDepositar, "TOTAL", rePorDepositar
+    );
+    const aPorCobrar = bloque(
+      "Por cobrar",
+      ["Saldos negativos de la pestaña Resultados que todavía no tienen Pago en la pestaña Cobranza (dinero que los jugadores aún deben)."],
+      ["Jugador", "Torneo", "Monto"], detPorCobrar, "TOTAL", rePorCobrar
+    );
     const aRemanente = bloque(
       "Remanente real",
-      ["= Balance general + Reservado (−Provisión 15%) + Gastos pendientes (config., en negativo)."],
+      ["= Balance general + Reservado (−Provisión 15% − Castigos) + Gastos pendientes (config., en negativo) − Premios por depositar + Por cobrar."],
       ["Concepto", "Monto"],
-      [["Balance general", reBalanceGeneral], ["Reservado (Provisión + Castigos)", reReservar], ["Gastos pendientes", reGastosPend]],
+      [
+        ["Balance general", reBalanceGeneral], ["Reservado (Provisión + Castigos)", reReservar], ["Gastos pendientes", reGastosPend],
+        ["Premios por depositar", -rePorDepositar], ["Por cobrar", rePorCobrar],
+      ],
       "Remanente real", reDiff
     );
 
@@ -935,7 +985,9 @@ export default function Cobranza({ session, perfiles }) {
     aoaConc.push(filaConc("Torneos main — otros lugares pagados", -reMain.otros, -catPremiosMain.otros, aMainOtros));
     aoaConc.push(filaConc("Torneos main — burbuja", -reMain.burbuja, -catPremiosMain.burbuja, aMainBurbuja));
     aoaConc.push(filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano, aMainMano));
-    aoaConc.push(filaConc("Subtotal egresos", -reSubtotalEgresos, -subtotalEgresos, aSubtotalEgresos));
+    aoaConc.push(filaConc("Compras descontadas del depósito (ganadores)", reAjusteCompras, ajusteComprasDescontadas, aAjusteCompras));
+    aoaConc.push(filaConc("Diferencia depósito real vs esperado", reAjusteDif, ajusteDifDeposito, aAjusteDif));
+    aoaConc.push(filaConc("Subtotal egresos (depósitos reales)", -reSubtotalEgresos, -subtotalEgresos, aSubtotalEgresos));
     aoaConc.push(filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral, aBalance));
     aoaConc.push(filaConc(
       "Subtotal gastos operativos", -totalGastosOperativos, -totalGastosOperativos, aGastosOperativos,
@@ -950,6 +1002,8 @@ export default function Cobranza({ session, perfiles }) {
       "Gastos pendientes", reGastosPend, gastosPendientes, aGastosOperativos,
       "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
     ));
+    aoaConc.push(filaConc("Premios por depositar", -rePorDepositar, -premiosPorDepositar, aPorDepositar));
+    aoaConc.push(filaConc("Por cobrar", rePorCobrar, porCobrar, aPorCobrar));
     aoaConc.push(filaConc("Remanente real", reDiff, diffCuenta, aRemanente));
 
     // ---------- aoa de la pestaña "Resultados" (con columna Lugar agregada) ----------
@@ -1673,8 +1727,35 @@ export default function Cobranza({ session, perfiles }) {
   // reservado, ya estaba bien desde la 96ª entrega — solo se agrega "Disponible (85%)" como el
   // complemento, para mostrarlo en la vista.
   const pctAcumuladoActivo = Number(tableroMapa?.[campeonatoSel]?.premios?.porTorneo?.pctAcumulado) || 0;
-  const fondoAcumuladoReservado = (totalPagosConfirmados * pctAcumuladoActivo) / 100; // "Provisión 15%"
-  const disponiblePagosTorneo = totalPagosConfirmados - fondoAcumuladoReservado; // "Disponible (85%)"
+  // 127ª entrega — CORRECCIÓN de fondo (Federico, 15/11/2026: el Remanente real daba ($7,988.82) cuando en
+  // realidad sobraban ~$4,846). Los pagos y depósitos de torneo se registran por el saldo NETO de cada
+  // jugador (quien debe $900 y gana $1,500 solo recibe $600), así que ni los pagos en efectivo ni los
+  // depósitos reales representan el monto bruto del torneo. Por eso:
+  //  - la Provisión 15% / Disponible 85% se calculan sobre el TOTAL de compras (Deuda) de los torneos
+  //    publicados, no sobre los pagos en efectivo (que ya vienen netos);
+  //  - los Egresos son los depósitos REALES (los premios brutos por lugar se siguen mostrando, con dos
+  //    renglones de ajuste: compras descontadas del depósito y diferencia depósito real vs esperado);
+  //  - el Pasivo suma "Por cobrar" (saldos negativos aún sin pago) y resta "Premios por depositar"
+  //    (saldos positivos aún sin depósito), para que el Remanente real sea correcto en cualquier momento.
+  const { totalCompras, porCobrar, premiosPorDepositar } = (() => {
+    let compras = 0, cobrar = 0, depositar = 0;
+    for (const t of torneosSaldoOpciones) {
+      const torneo = estData?.torneos?.[campeonatoSel]?.[t.fecha];
+      for (const j of directorioActivo) {
+        const jt = jugadorEnTorneo(torneo, j);
+        if (!jt) continue;
+        const debe = Number(jt.debeTotal) || 0;
+        const saldo = (Number(jt.premioTotal) || 0) - debe;
+        compras += debe;
+        const clave = `${campeonatoSel}|${t.fecha}|${j.correo}`;
+        if (saldo < 0 && !data?.pagosTorneo?.[clave]) cobrar += -saldo;
+        if (saldo > 0 && !data?.depositosTorneo?.[clave]) depositar += saldo;
+      }
+    }
+    return { totalCompras: compras, porCobrar: cobrar, premiosPorDepositar: depositar };
+  })();
+  const fondoAcumuladoReservado = (totalCompras * pctAcumuladoActivo) / 100; // "Provisión 15%"
+  const disponiblePagosTorneo = totalCompras - fondoAcumuladoReservado; // "Disponible (85%)"
 
   // "Subtotal ingresos" del Excel (A6: =B2+B4, pero en el archivo de Federico faltaba sumar B5/torneos
   // main — ejemplo en el que Main daba $0, así que el faltante no se notaba; acá se suma siempre).
@@ -1729,7 +1810,17 @@ export default function Cobranza({ session, perfiles }) {
   const subtotalEgresosRegular = catPremiosRegular[1] + catPremiosRegular[2] + catPremiosRegular[3] + catPremiosRegular.otros;
   const subtotalEgresosMain =
     catPremiosMain[1] + catPremiosMain[2] + catPremiosMain[3] + catPremiosMain.otros + catPremiosMain.burbuja + catPremiosMain.mano;
-  const subtotalEgresos = subtotalEgresosRegular + subtotalEgresosMain; // premios de torneo YA depositados/confirmados
+  const premiosBrutosDepositados = subtotalEgresosRegular + subtotalEgresosMain; // premios brutos por lugar de los depósitos confirmados
+  // 127ª: depósitos reales vs esperados (neto) del campeonato.
+  let sumDepEsperado = 0, sumDepReal = 0;
+  for (const [clave, reg] of Object.entries(data?.depositosTorneo || {})) {
+    if (!clave.startsWith(`${campeonatoSel}|`)) continue;
+    sumDepEsperado += Number(reg.montoEsperado) || 0;
+    sumDepReal += Number(reg.monto) || 0;
+  }
+  const ajusteComprasDescontadas = premiosBrutosDepositados - sumDepEsperado; // compras del ganador descontadas del depósito
+  const ajusteDifDeposito = sumDepEsperado - sumDepReal; // depósito real menor (+) o mayor (−) al esperado
+  const subtotalEgresos = sumDepReal; // lo que realmente salió de la cuenta por premios de torneo
 
   // "BALANCE GENERAL" / "Existente en la cuenta de banco" del Excel: en el archivo de Federico son
   // literalmente la misma fórmula (B23 y E17 ambas =B6+B21) — acá también se calculan una sola vez.
@@ -1760,7 +1851,7 @@ export default function Cobranza({ session, perfiles }) {
   // lo que debería quedar libre si se pagara todo lo pendiente ahora mismo.
   const reservarAcum = -(fondoAcumuladoReservado + totalCastigosConfirmados); // 124ª: incluye castigos
   const gastosPendientes = -totalGastosOperativos;
-  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes;
+  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes - premiosPorDepositar + porCobrar;
 
   const hoy = new Date();
   const fechaHoyStr = `${String(hoy.getDate()).padStart(2, "0")}/${String(hoy.getMonth() + 1).padStart(2, "0")}/${hoy.getFullYear()}`;
@@ -2791,12 +2882,15 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Torneos main — burbuja" sangria><Monto valor={catPremiosMain.burbuja} forzarNegativo /></FilaFin>
                 <FilaFin label="Torneos main — mejor mano" sangria><Monto valor={catPremiosMain.mano} forzarNegativo /></FilaFin>
 
-                <FilaFin label="Subtotal egresos" bold><Monto valor={subtotalEgresos} forzarNegativo /></FilaFin>
+                <FilaFin label="Compras descontadas del depósito (ganadores)" sangria><Monto valor={ajusteComprasDescontadas} /></FilaFin>
+                <FilaFin label="Diferencia depósito real vs esperado" sangria><Monto valor={ajusteDifDeposito} /></FilaFin>
+                <FilaFin label="Subtotal egresos (depósitos reales)" bold><Monto valor={subtotalEgresos} forzarNegativo /></FilaFin>
                 <FilaFin label="Balance general" bold><Monto valor={balanceGeneral} /></FilaFin>
               </TablaFin>
               <div className="section-sub" style={{ marginTop: -8 }}>
-                El 15%/85% se calcula solo sobre pagos de torneos (regulares + main) — excluye la inscripción y los
-                castigos (estos van directo al acumulado final).
+                El 15%/85% se calcula sobre el total de compras de los torneos publicados — excluye la inscripción y los
+                castigos (estos van directo al acumulado final). Los pagos y depósitos se registran por el saldo neto
+                de cada jugador, por eso los egresos son los depósitos reales.
               </div>
             </div>
 
@@ -2834,6 +2928,8 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Existente en la cuenta de banco"><Monto valor={balanceGeneral} /></FilaFin>
                 <FilaFin label="Reservado"><Monto valor={reservarAcum} forzarNegativo /></FilaFin>
                 <FilaFin label="Gastos pendientes"><Monto valor={gastosPendientes} forzarNegativo /></FilaFin>
+                <FilaFin label="Premios por depositar"><Monto valor={premiosPorDepositar} forzarNegativo /></FilaFin>
+                <FilaFin label="Por cobrar"><Monto valor={porCobrar} /></FilaFin>
                 <FilaFin label="Remanente real" bold><Monto valor={diffCuenta} /></FilaFin>
               </TablaFin>
             </div>

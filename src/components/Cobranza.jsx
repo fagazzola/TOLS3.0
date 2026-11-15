@@ -581,6 +581,7 @@ export default function Cobranza({ session, perfiles }) {
     derecha.push(seccion("Reserva para el Campeonato"));
     derecha.push(fila("Total reservado", v(acumCampeonatoAlMomento, true)));
     derecha.push(fila("Castigos x no declarar compra (directo al acumulado final)", v(totalCastigosConfirmados, true), true));
+    derecha.push(fila("Sobrante asignado al acumulado (inscripciones − gastos, centavos y diferencias)", v(sobranteAcumulado, true), true));
     if (acumCampeonatoPorLugar.length) {
       acumCampeonatoPorLugar.forEach((l) => derecha.push(fila(l.reyKiller ? "Rey Killer" : l.label, v(l.monto, true), true)));
     } else {
@@ -797,11 +798,14 @@ export default function Cobranza({ session, perfiles }) {
       pct: Number(l.pct) || 0,
       monto: (reFondoReservado * (Number(l.pct) || 0)) / 100,
     }));
-    const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0) + reTotalCastigos;
-    const reReservar = -(reFondoReservado + reTotalCastigos);
+    const reReservarBase = -(reFondoReservado + reTotalCastigos);
     const reGastosPend = -totalGastosOperativos; // config., ver bloque "Gastos operativos" en Soporte
     const rePorDepositarTotal = rePorDepositar + reAjusteDif; // 128ª: + depósitos menores al esperado
-    const reDiff = reBalanceGeneral + reReservar + reGastosPend - rePorDepositarTotal + rePorCobrar;
+    const reRemanenteAntes = reBalanceGeneral + reReservarBase + reGastosPend - rePorDepositarTotal + rePorCobrar;
+    const reSobrante = Math.max(0, Math.round(reRemanenteAntes * 100) / 100); // 129ª: sobrante → acumulado
+    const reReservar = reReservarBase - reSobrante;
+    const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0) + reTotalCastigos + reSobrante;
+    const reDiff = reRemanenteAntes - reSobrante;
 
     // ---------- Hoja "Soporte": un bloque por cada cifra, con el detalle que la compone ----------
     const soporteAoa = [
@@ -929,10 +933,11 @@ export default function Cobranza({ session, perfiles }) {
       [
         "Cada lugar = Provisión (15%) × % configurado en Tablero de Control para ese lugar (incluye Rey Killer).",
         "Más los Castigos x no declarar compra, que van completos (100%) al acumulado final.",
-        "\"Reservado\" (sección Pasivo) es la Provisión (15%) completa + los Castigos, en negativo.",
+        "Más el Sobrante (remanente positivo tras Pasivo: inscripciones − gastos, centavos y diferencias), asignado completo al acumulado final.",
+        "\"Reservado\" (sección Pasivo) es la Provisión (15%) completa + los Castigos + el Sobrante, en negativo.",
       ],
       ["Lugar", "% configurado", "Monto"],
-      [...reAcumPorLugar.map((l) => [l.label, `${l.pct}%`, l.monto]), ["Castigos x no declarar compra", "100%", reTotalCastigos]],
+      [...reAcumPorLugar.map((l) => [l.label, `${l.pct}%`, l.monto]), ["Castigos x no declarar compra", "100%", reTotalCastigos], ["Sobrante asignado al acumulado", "100%", reSobrante]],
       "TOTAL", reAcumAlMomento
     );
     const aPorDepositar = bloque(
@@ -947,11 +952,11 @@ export default function Cobranza({ session, perfiles }) {
     );
     const aRemanente = bloque(
       "Remanente real",
-      ["= Balance general + Reservado (−Provisión 15% − Castigos) + Gastos pendientes (config., en negativo) − Premios por depositar + Por cobrar."],
+      ["= Balance general + Reservado (−Provisión 15% − Castigos − Sobrante asignado) + Gastos pendientes (config., en negativo) − Premios por depositar + Por cobrar. Queda en 0 cuando el sobrante se asigna al acumulado; un valor negativo es un faltante."],
       ["Concepto", "Monto"],
       [
-        ["Balance general", reBalanceGeneral], ["Reservado (Provisión + Castigos)", reReservar], ["Gastos pendientes", reGastosPend],
-        ["Premios por depositar", -rePorDepositar], ["Por cobrar", rePorCobrar],
+        ["Balance general", reBalanceGeneral], ["Reservado (Provisión + Castigos + Sobrante)", reReservar], ["Gastos pendientes", reGastosPend],
+        ["Premios por depositar", -rePorDepositarTotal], ["Por cobrar", rePorCobrar],
       ],
       "Remanente real", reDiff
     );
@@ -1001,7 +1006,8 @@ export default function Cobranza({ session, perfiles }) {
     aoaConc.push(filaConc("Total reservado (Acum. Campeonato)", -reAcumAlMomento, -acumCampeonatoAlMomento, aAcumLugar));
     reAcumPorLugar.forEach((l, i) => aoaConc.push(filaConc(l.label, -l.monto, -(acumCampeonatoPorLugar[i]?.monto || 0), aAcumLugar)));
     aoaConc.push(filaConc("Castigos x no declarar compra (en el acumulado final)", -reTotalCastigos, -totalCastigosConfirmados, aCastigos));
-    aoaConc.push(filaConc("Reservado (Provisión + Castigos)", reReservar, reservarAcum, aAcumLugar));
+    aoaConc.push(filaConc("Sobrante asignado al acumulado", -reSobrante, -sobranteAcumulado, aAcumLugar));
+    aoaConc.push(filaConc("Reservado (Provisión + Castigos + Sobrante)", reReservar, reservarAcum, aAcumLugar));
     aoaConc.push(filaConc(
       "Gastos pendientes", reGastosPend, gastosPendientes, aGastosOperativos,
       "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
@@ -1852,7 +1858,6 @@ export default function Cobranza({ session, perfiles }) {
   }));
   // 124ª entrega: el total reservado = reparto de la Provisión por lugar + castigos (directo al acumulado final).
   const acumCampeonatoProvision = acumCampeonatoPorLugar.reduce((s, l) => s + l.monto, 0);
-  const acumCampeonatoAlMomento = acumCampeonatoProvision + totalCastigosConfirmados;
 
   // Centavos acumulados: Federico confirmó (pregunta 4) que se muestra en positivo (es un ingreso extra
   // a favor de TOLS, no un pasivo) — mismo cálculo que ya existía desde la 78ª entrega
@@ -1862,12 +1867,19 @@ export default function Cobranza({ session, perfiles }) {
   // dinero real que ya entró y salió) menos lo que todavía hay que reservar (Provisión 15%) y los
   // gastos operativos presupuestados que todavía están pendientes de pagar — el remanente ("Diff") es
   // lo que debería quedar libre si se pagara todo lo pendiente ahora mismo.
-  const reservarAcum = -(fondoAcumuladoReservado + totalCastigosConfirmados); // 124ª: incluye castigos
+  const reservarBase = -(fondoAcumuladoReservado + totalCastigosConfirmados); // 124ª: incluye castigos
   const gastosPendientes = -totalGastosOperativos;
   // 128ª entrega: un depósito menor al esperado (sin castigo que lo explique) es dinero que se le debe al
   // jugador — se suma a "Premios por depositar" (si fue mayor, lo reduce).
   const premiosPorDepositarTotal = premiosPorDepositar + ajusteDifDeposito;
-  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes - premiosPorDepositarTotal + porCobrar;
+  // 129ª entrega: el sobrante (inscripciones − gastos, centavos y diferencias de depósito) se asigna
+  // completo a la reserva del Campeonato para repartirse entre los ganadores. Solo si es positivo; si
+  // fuera negativo (faltante) se deja a la vista en el Remanente real.
+  const remanenteAntesSobrante = balanceGeneral + reservarBase + gastosPendientes - premiosPorDepositarTotal + porCobrar;
+  const sobranteAcumulado = Math.max(0, Math.round(remanenteAntesSobrante * 100) / 100);
+  const reservarAcum = reservarBase - sobranteAcumulado;
+  const acumCampeonatoAlMomento = acumCampeonatoProvision + totalCastigosConfirmados + sobranteAcumulado;
+  const diffCuenta = remanenteAntesSobrante - sobranteAcumulado;
 
   const hoy = new Date();
   const fechaHoyStr = `${String(hoy.getDate()).padStart(2, "0")}/${String(hoy.getMonth() + 1).padStart(2, "0")}/${hoy.getFullYear()}`;
@@ -2649,9 +2661,9 @@ export default function Cobranza({ session, perfiles }) {
               return confirmadosCampeonato
                 .slice(paginaSegura * MOV_CONFIRMADOS_POR_PAGINA, paginaSegura * MOV_CONFIRMADOS_POR_PAGINA + MOV_CONFIRMADOS_POR_PAGINA)
                 .map((c) =>
-              editandoPago?.clave === c.clave ? (
+              (editandoPago?.clave === c.clave && editandoPago?.tipoAccion === c.tipoAccion && editandoPago?.motivoTipo === c.motivoTipo) ? (
                 <div
-                  key={c.clave}
+                  key={`${c.clave}|${c.tipoAccion}|${c.motivoTipo}`}
                   style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", padding: "12px", borderBottom: "1px solid #eee" }}
                 >
                   <div style={{ minWidth: 200, alignSelf: "center" }}>
@@ -2707,7 +2719,7 @@ export default function Cobranza({ session, perfiles }) {
                   </div>
                 </div>
               ) : (
-                <div className="trow" style={{ gridTemplateColumns: "1.3fr 0.6fr 1fr 1.1fr 1.1fr 0.9fr 40px" }} key={c.clave}>
+                <div className="trow" style={{ gridTemplateColumns: "1.3fr 0.6fr 1fr 1.1fr 1.1fr 0.9fr 40px" }} key={`${c.clave}|${c.tipoAccion}|${c.motivoTipo}`}>
                   <div>{aliasDeCorreo(c.correo)}</div>
                   {/* 81ª entrega: "Tipo" sin óvalo/badge, texto normal, a pedido de Federico. */}
                   <div>{c.tipo}</div>
@@ -2953,6 +2965,9 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Total reservado" bold><Monto valor={acumCampeonatoAlMomento} forzarNegativo /></FilaFin>
                 <FilaFin label="Castigos x no declarar compra (directo al acumulado final)" sangria>
                   <Monto valor={totalCastigosConfirmados} forzarNegativo />
+                </FilaFin>
+                <FilaFin label="Sobrante asignado al acumulado (inscripciones − gastos, centavos y diferencias)" sangria>
+                  <Monto valor={sobranteAcumulado} forzarNegativo />
                 </FilaFin>
                 {acumCampeonatoPorLugar.map((l, i) => (
                   <FilaFin key={i} label={l.reyKiller ? "Rey Killer" : l.label} sangria>

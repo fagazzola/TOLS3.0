@@ -101,6 +101,9 @@ function normalizarRegistroPago(v) {
     fecha: String(v?.fecha || "").trim(),
     hora: String(v?.hora || "").trim(),
     registradoEn: String(v?.registradoEn || "").trim() || new Date().toISOString(),
+    // 128ª entrega: solo para el Pago de "Castigo x no declarar compra" — true si el castigo NO entró en
+    // efectivo porque el Tesorero lo descontó del depósito del jugador (el depósito real quedó menor).
+    ...(v?.descontado === true ? { descontado: true } : {}),
   };
 }
 function normalizarMapaPagos(v) {
@@ -610,6 +613,7 @@ export default async (req) => {
           monto: body.monto,
           fecha: body.fechaRegistro,
           hora: body.horaRegistro,
+          descontado: body.descontadoDeposito === true, // 128ª entrega
         });
       } else {
         const fecha = String(body.fecha || body.motivoId || "").trim();

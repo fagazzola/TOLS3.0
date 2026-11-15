@@ -565,7 +565,7 @@ export default function Cobranza({ session, perfiles }) {
       fila("Torneos main — burbuja", v(catPremiosMain.burbuja, true), true),
       fila("Torneos main — mejor mano", v(catPremiosMain.mano, true), true),
       fila("Compras descontadas del depósito (ganadores)", v(ajusteComprasDescontadas), true),
-      fila("Diferencia depósito real vs esperado", v(ajusteDifDeposito), true),
+      fila("Diferencia depósito real vs esperado (sin castigos descontados)", v(ajusteDifDeposito), true),
       fila("Subtotal egresos (depósitos reales)", v(subtotalEgresos, true)),
       fila("Balance general", v(balanceGeneral))
     );
@@ -590,7 +590,7 @@ export default function Cobranza({ session, perfiles }) {
     derecha.push(fila("Existente en la cuenta de banco", v(balanceGeneral)));
     derecha.push(fila("Reservado", v(reservarAcum, true)));
     derecha.push(fila("Gastos pendientes", v(gastosPendientes, true)));
-    derecha.push(fila("Premios por depositar", v(premiosPorDepositar, true)));
+    derecha.push(fila("Premios por depositar", v(premiosPorDepositarTotal, true)));
     derecha.push(fila("Por cobrar", v(porCobrar)));
     derecha.push(fila("Remanente real", v(diffCuenta)));
 
@@ -786,8 +786,11 @@ export default function Cobranza({ session, perfiles }) {
     const reDepEsperado = depTorneoRows.reduce((s, c) => s + (Number(c.montoEsperado) || 0), 0);
     const reDepReal = depTorneoRows.reduce((s, c) => s + (Number(c.monto) || 0), 0);
     const reAjusteCompras = rePremiosBrutos - reDepEsperado;
-    const reAjusteDif = reDepEsperado - reDepReal;
-    const reSubtotalEgresos = reDepReal;
+    const reCastigosDesc = cobranzaRows
+      .filter((c) => c.motivoTipo === "castigo" && c.tipoAccion === "pago" && c.descontado)
+      .reduce((s, c) => s + (Number(c.monto) || 0), 0);
+    const reAjusteDif = reDepEsperado - reDepReal - reCastigosDesc;
+    const reSubtotalEgresos = reDepReal + reCastigosDesc;
     const reBalanceGeneral = reSubtotalIngresos - reSubtotalEgresos;
     const reAcumPorLugar = premiosCampeonatoConfig.map((l) => ({
       label: l.reyKiller ? "Rey Killer" : l.label,
@@ -797,7 +800,8 @@ export default function Cobranza({ session, perfiles }) {
     const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0) + reTotalCastigos;
     const reReservar = -(reFondoReservado + reTotalCastigos);
     const reGastosPend = -totalGastosOperativos; // config., ver bloque "Gastos operativos" en Soporte
-    const reDiff = reBalanceGeneral + reReservar + reGastosPend - rePorDepositar + rePorCobrar;
+    const rePorDepositarTotal = rePorDepositar + reAjusteDif; // 128ª: + depósitos menores al esperado
+    const reDiff = reBalanceGeneral + reReservar + reGastosPend - rePorDepositarTotal + rePorCobrar;
 
     // ---------- Hoja "Soporte": un bloque por cada cifra, con el detalle que la compone ----------
     const soporteAoa = [
@@ -884,10 +888,10 @@ export default function Cobranza({ session, perfiles }) {
       "Ajuste", reAjusteCompras
     );
     const aAjusteDif = bloque(
-      "Diferencia depósito real vs esperado",
-      ["= Depósitos esperados − Depósitos reales (pestaña Cobranza). Positivo = el Tesorero depositó menos de lo esperado."],
+      "Diferencia depósito real vs esperado (sin castigos descontados)",
+      ["= Depósitos esperados − Depósitos reales − Castigos descontados del depósito (pestaña Cobranza). Positivo = el Tesorero depositó menos de lo esperado y aún se le debe al jugador (se suma a Premios por depositar)."],
       ["Concepto", "Monto"],
-      [["Depósitos esperados (neto)", reDepEsperado], ["Depósitos reales", -reDepReal]],
+      [["Depósitos esperados (neto)", reDepEsperado], ["Depósitos reales", -reDepReal], ["Castigos descontados del depósito", -reCastigosDesc]],
       "Diferencia", reAjusteDif
     );
     const aSubtotalEgresos = bloque(
@@ -897,9 +901,9 @@ export default function Cobranza({ session, perfiles }) {
       [
         ["Premios brutos por lugar (regular + main)", rePremiosBrutos],
         ["Compras descontadas del depósito (ganadores)", -reAjusteCompras],
-        ["Diferencia depósito real vs esperado", -reAjusteDif],
+        ["Diferencia depósito real vs esperado (sin castigos descontados)", -reAjusteDif],
       ],
-      "TOTAL (depósitos reales)", reSubtotalEgresos
+      "TOTAL (depósitos reales + castigos descontados)", reSubtotalEgresos
     );
     const aBalance = bloque(
       "Balance general / Existente en la cuenta de banco",
@@ -933,8 +937,8 @@ export default function Cobranza({ session, perfiles }) {
     );
     const aPorDepositar = bloque(
       "Premios por depositar",
-      ["Saldos positivos de la pestaña Resultados que todavía no tienen Depósito en la pestaña Cobranza (dinero que ya se debe a los jugadores)."],
-      ["Jugador", "Torneo", "Monto"], detPorDepositar, "TOTAL", rePorDepositar
+      ["Saldos positivos de la pestaña Resultados que todavía no tienen Depósito en la pestaña Cobranza (dinero que ya se debe a los jugadores), más depósitos menores al esperado (sin castigos descontados)."],
+      ["Jugador", "Torneo", "Monto"], [...detPorDepositar, ...(reAjusteDif ? [["Depósitos menores al esperado", "", reAjusteDif]] : [])], "TOTAL", rePorDepositarTotal
     );
     const aPorCobrar = bloque(
       "Por cobrar",
@@ -986,7 +990,7 @@ export default function Cobranza({ session, perfiles }) {
     aoaConc.push(filaConc("Torneos main — burbuja", -reMain.burbuja, -catPremiosMain.burbuja, aMainBurbuja));
     aoaConc.push(filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano, aMainMano));
     aoaConc.push(filaConc("Compras descontadas del depósito (ganadores)", reAjusteCompras, ajusteComprasDescontadas, aAjusteCompras));
-    aoaConc.push(filaConc("Diferencia depósito real vs esperado", reAjusteDif, ajusteDifDeposito, aAjusteDif));
+    aoaConc.push(filaConc("Diferencia depósito real vs esperado (sin castigos descontados)", reAjusteDif, ajusteDifDeposito, aAjusteDif));
     aoaConc.push(filaConc("Subtotal egresos (depósitos reales)", -reSubtotalEgresos, -subtotalEgresos, aSubtotalEgresos));
     aoaConc.push(filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral, aBalance));
     aoaConc.push(filaConc(
@@ -1002,7 +1006,7 @@ export default function Cobranza({ session, perfiles }) {
       "Gastos pendientes", reGastosPend, gastosPendientes, aGastosOperativos,
       "(config. en Tablero de Control — no depende de Resultados/Cobranza)"
     ));
-    aoaConc.push(filaConc("Premios por depositar", -rePorDepositar, -premiosPorDepositar, aPorDepositar));
+    aoaConc.push(filaConc("Premios por depositar", -rePorDepositar, -premiosPorDepositarTotal, aPorDepositar));
     aoaConc.push(filaConc("Por cobrar", rePorCobrar, porCobrar, aPorCobrar));
     aoaConc.push(filaConc("Remanente real", reDiff, diffCuenta, aRemanente));
 
@@ -1450,6 +1454,7 @@ export default function Cobranza({ session, perfiles }) {
           montoEsperado: montoEsperadoEdicion,
           monto,
           fechaRegistro: editandoPago.fecha,
+          descontadoDeposito: editandoPago.motivoTipo === "castigo" ? Boolean(editandoPago.descontado) : undefined, // 128ª
         };
       } else {
         body = {
@@ -1526,6 +1531,7 @@ export default function Cobranza({ session, perfiles }) {
           montoEsperado: montoEsperadoMov,
           monto,
           fechaRegistro: nuevoMov.fechaReal,
+          descontadoDeposito: esCastigo ? Boolean(nuevoMov.descontado) : undefined, // 128ª entrega
         };
       } else {
         const esTorneo = nuevoMov.motivo.startsWith("torneo:");
@@ -1819,8 +1825,15 @@ export default function Cobranza({ session, perfiles }) {
     sumDepReal += Number(reg.monto) || 0;
   }
   const ajusteComprasDescontadas = premiosBrutosDepositados - sumDepEsperado; // compras del ganador descontadas del depósito
-  const ajusteDifDeposito = sumDepEsperado - sumDepReal; // depósito real menor (+) o mayor (−) al esperado
-  const subtotalEgresos = sumDepReal; // lo que realmente salió de la cuenta por premios de torneo
+  // 128ª entrega: castigos que el Tesorero descontó del depósito del jugador (no entraron en efectivo). Se
+  // cuentan como ingreso de castigo (acumulado final) y, para que el banco siga cuadrando, como si el
+  // depósito hubiera sido completo: egresos = depósitos reales + castigos descontados.
+  let castigosDescontados = 0;
+  for (const [clave, reg] of Object.entries(data?.pagosCastigo || {})) {
+    if (clave.startsWith(`${campeonatoSel}|`) && reg.descontado) castigosDescontados += Number(reg.monto) || 0;
+  }
+  const ajusteDifDeposito = sumDepEsperado - sumDepReal - castigosDescontados; // depósito menor (+) o mayor (−) al esperado, sin castigos descontados
+  const subtotalEgresos = sumDepReal + castigosDescontados;
 
   // "BALANCE GENERAL" / "Existente en la cuenta de banco" del Excel: en el archivo de Federico son
   // literalmente la misma fórmula (B23 y E17 ambas =B6+B21) — acá también se calculan una sola vez.
@@ -1851,7 +1864,10 @@ export default function Cobranza({ session, perfiles }) {
   // lo que debería quedar libre si se pagara todo lo pendiente ahora mismo.
   const reservarAcum = -(fondoAcumuladoReservado + totalCastigosConfirmados); // 124ª: incluye castigos
   const gastosPendientes = -totalGastosOperativos;
-  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes - premiosPorDepositar + porCobrar;
+  // 128ª entrega: un depósito menor al esperado (sin castigo que lo explique) es dinero que se le debe al
+  // jugador — se suma a "Premios por depositar" (si fue mayor, lo reduce).
+  const premiosPorDepositarTotal = premiosPorDepositar + ajusteDifDeposito;
+  const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes - premiosPorDepositarTotal + porCobrar;
 
   const hoy = new Date();
   const fechaHoyStr = `${String(hoy.getDate()).padStart(2, "0")}/${String(hoy.getMonth() + 1).padStart(2, "0")}/${hoy.getFullYear()}`;
@@ -2424,7 +2440,7 @@ export default function Cobranza({ session, perfiles }) {
                           // arrancan ese recuadro vacío (81ª entrega) porque no tienen un monto "sugerido"
                           // propio, solo un esperado calculado de Estadísticas/Tablero.
                           const prefill = motivo.startsWith("castigo:") ? String(castigoMontoDe(nuevoMov.correo, motivo.slice("castigo:".length)) || castigoNoDeclaradoActivo) : nuevoMov.montoReal;
-                          setNuevoMov({ ...nuevoMov, motivo, montoReal: prefill });
+                          setNuevoMov({ ...nuevoMov, motivo, montoReal: prefill, descontado: false });
                         }}
                       >
                         <option value="">— elegir —</option>
@@ -2524,6 +2540,18 @@ export default function Cobranza({ session, perfiles }) {
                           />
                         </div>
                       </div>
+
+                      {/* 128ª entrega: el castigo no entró en efectivo — se descontó del depósito del jugador. */}
+                      {nuevoMov.tipo === "pago" && nuevoMov.motivo.startsWith("castigo:") && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, margin: "6px 0" }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(nuevoMov.descontado)}
+                            onChange={(e) => setNuevoMov({ ...nuevoMov, descontado: e.target.checked })}
+                          />
+                          Descontado del depósito del jugador (no entró en efectivo)
+                        </label>
+                      )}
                     </>
                   )}
 
@@ -2654,6 +2682,16 @@ export default function Cobranza({ session, perfiles }) {
                       onChange={(e) => setEditandoPago({ ...editandoPago, fecha: e.target.value })}
                     />
                   </div>
+                  {editandoPago.tipoAccion === "pago" && editandoPago.motivoTipo === "castigo" && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(editandoPago.descontado)}
+                        onChange={(e) => setEditandoPago({ ...editandoPago, descontado: e.target.checked })}
+                      />
+                      Descontado del depósito del jugador (no entró en efectivo)
+                    </label>
+                  )}
                   {errorEdicion && <div className="login-error">{errorEdicion}</div>}
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn btn-primary" disabled={guardandoEdicion} onClick={guardarEdicionPago}>
@@ -2694,6 +2732,7 @@ export default function Cobranza({ session, perfiles }) {
                             correo: c.correo,
                             monto: c.monto,
                             fecha: c.fecha || "",
+                            descontado: Boolean(c.descontado), // 128ª entrega
                           });
                           setErrorEdicion("");
                         }}
@@ -2883,7 +2922,7 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Torneos main — mejor mano" sangria><Monto valor={catPremiosMain.mano} forzarNegativo /></FilaFin>
 
                 <FilaFin label="Compras descontadas del depósito (ganadores)" sangria><Monto valor={ajusteComprasDescontadas} /></FilaFin>
-                <FilaFin label="Diferencia depósito real vs esperado" sangria><Monto valor={ajusteDifDeposito} /></FilaFin>
+                <FilaFin label="Diferencia depósito real vs esperado (sin castigos descontados)" sangria><Monto valor={ajusteDifDeposito} /></FilaFin>
                 <FilaFin label="Subtotal egresos (depósitos reales)" bold><Monto valor={subtotalEgresos} forzarNegativo /></FilaFin>
                 <FilaFin label="Balance general" bold><Monto valor={balanceGeneral} /></FilaFin>
               </TablaFin>
@@ -2928,7 +2967,7 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Existente en la cuenta de banco"><Monto valor={balanceGeneral} /></FilaFin>
                 <FilaFin label="Reservado"><Monto valor={reservarAcum} forzarNegativo /></FilaFin>
                 <FilaFin label="Gastos pendientes"><Monto valor={gastosPendientes} forzarNegativo /></FilaFin>
-                <FilaFin label="Premios por depositar"><Monto valor={premiosPorDepositar} forzarNegativo /></FilaFin>
+                <FilaFin label="Premios por depositar"><Monto valor={premiosPorDepositarTotal} forzarNegativo /></FilaFin>
                 <FilaFin label="Por cobrar"><Monto valor={porCobrar} /></FilaFin>
                 <FilaFin label="Remanente real" bold><Monto valor={diffCuenta} /></FilaFin>
               </TablaFin>

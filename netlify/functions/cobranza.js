@@ -689,7 +689,7 @@ export default async (req) => {
       const motivoId = String(body.motivoId || "").trim();
       const correo = String(body.correo || "").trim().toLowerCase();
       const fechaRegistro = String(body.fechaRegistro || "").trim();
-      if (!campeonato || !motivoTipo || !motivoId || !correo) {
+      if (!campeonato || !motivoTipo || !motivoId || (!correo && motivoTipo !== "otros")) { // 135ª: "otros" puede ir sin jugador
         return new Response(JSON.stringify({ error: "Falta el campeonato, el motivo o el jugador del depósito." }), { status: 400, headers: HEADERS });
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaRegistro)) {

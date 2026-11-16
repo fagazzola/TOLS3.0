@@ -1219,25 +1219,28 @@ export default function Cobranza({ session, perfiles }) {
   ];
   function conceptosDeTipo(tipo) {
     return tipo === "pago"
-      ? [{ id: "inscripcion", label: "Inscripción" }, { id: "participacion", label: "Participación" }, { id: "castigo", label: "Castigo" }, { id: "diverso", label: "Diverso" }]
-      : [{ id: "premio", label: "Premio" }, { id: "gastos", label: "Gastos en General" }, { id: "diverso", label: "Diverso" }];
+      ? [{ id: "inscripcion", label: "Inscripción" }, { id: "participacion", label: "Participación" }, { id: "castigo", label: "Castigo" }, { id: "ajuste", label: "Ajuste Manual" }]
+      : [
+          { id: "premio1", label: "Premio 1er lugar" }, { id: "premio2", label: "Premio 2o lugar" }, { id: "premio3", label: "Premio 3er lugar" },
+          { id: "premio4", label: "Premio 4to lugar" }, { id: "premiorK", label: "Premio Rey Killer" },
+          { id: "gastos", label: "Gastos en General" }, { id: "ajuste", label: "Ajuste Manual" },
+        ];
   }
   function categoriasDeConcepto(tipo, concepto) {
     if (tipo === "pago") {
       if (concepto === "inscripcion") return [{ id: "inscripcion", label: "Campeonato" }];
       if (concepto === "participacion") return [{ id: "participacion", label: "Torneo", num: true }];
       if (concepto === "castigo") return [{ id: "castigo-rebuy", label: "No declarar Rebuy", num: true }, { id: "castigo-addon", label: "No declarar Add on", num: true }];
-      if (concepto === "diverso") return [{ id: "ajuste", label: "Ajuste Manual" }];
+      if (concepto === "ajuste") return [{ id: "ajuste", label: "Otros" }];
       return [];
     }
-    if (concepto === "premio") {
-      return [
-        { id: "premio1", label: "1er lugar en torneo", num: true }, { id: "premio2", label: "2do lugar en torneo", num: true }, { id: "premio3", label: "3er lugar en torneo", num: true },
-        ...LUGARES_CAMPEONATO,
-      ];
+    if (concepto === "premio1" || concepto === "premio2" || concepto === "premio3") {
+      return [{ id: concepto, label: "Torneo", num: true }, { id: `pc${concepto.slice(-1)}`, label: "Campeonato" }];
     }
+    if (concepto === "premio4") return [{ id: "pc4", label: "Campeonato" }];
+    if (concepto === "premiorK") return [{ id: "pcrk", label: "Campeonato" }];
     if (concepto === "gastos") return gastosCampeonatoActivo.filter((g) => g.concepto).map((g) => ({ id: `gasto:${g.concepto}`, label: g.concepto }));
-    if (concepto === "diverso") return [{ id: "otros", label: "Otros" }];
+    if (concepto === "ajuste") return [{ id: "otros", label: "Otros" }];
     return [];
   }
   function categoriaPideNumero(tipo, concepto, base) {
@@ -1651,7 +1654,8 @@ export default function Cobranza({ session, perfiles }) {
     if (!nuevoMov) return;
     setErrorMov("");
     const correo = nuevoMov.correo.trim().toLowerCase();
-    if (!correo) {
+    // 135ª entrega: el Egreso Ajuste Manual / Otros puede registrarse sin jugador.
+    if (!correo && nuevoMov.motivo !== "otros") {
       setErrorMov("Elegí un jugador.");
       return;
     }
@@ -2604,7 +2608,7 @@ export default function Cobranza({ session, perfiles }) {
                       </select>
                     </div>
                     <div className="login-field" style={{ flex: 2 }}>
-                      <label>Jugador (Alias PokerStars / Nº de referencia)</label>
+                      <label>Jugador (Alias PokerStars){nuevoMov.motivo === "otros" ? " — opcional en Ajuste Manual (Egreso)" : ""}</label>
                       <select
                         className="field"
                         value={nuevoMov.correo}
@@ -2671,7 +2675,6 @@ export default function Cobranza({ session, perfiles }) {
                       <select
                         className="field"
                         value={nuevoMov.concepto || ""}
-                        disabled={!nuevoMov.correo}
                         onChange={(e) => {
                           const concepto = e.target.value;
                           const cats = categoriasDeConcepto(nuevoMov.tipo, concepto);

@@ -177,6 +177,17 @@ export async function renombrarCampeonatoEnTablero(de, a) {
   await syncTablero(mapa);
 }
 
+// 132ª entrega: la sincronización a Excel ya no se espera dentro de la respuesta (ver
+// sync-tablero-background.js). Si no se pudiera disparar, el guardado en el sitio igual queda hecho.
+async function dispararSyncTablero(req, mapa) {
+  try {
+    const origin = new URL(req.url).origin;
+    await fetch(`${origin}/api/sync-tablero-background`, { method: "POST" });
+  } catch (e) {
+    try { await syncTablero(mapa); } catch (_) { /* best-effort */ }
+  }
+}
+
 export default async (req) => {
   const store = getStore({ name: "tols-tablero", consistency: "strong" });
 
@@ -196,7 +207,7 @@ export default async (req) => {
     const normalizado = normalizarMapa(raw);
     if (!raw || JSON.stringify(raw) !== JSON.stringify(normalizado)) {
       await store.setJSON("data", normalizado);
-      await syncTablero(normalizado);
+      await dispararSyncTablero(req, normalizado);
     }
     return new Response(JSON.stringify(normalizado), { headers: HEADERS });
   }
@@ -318,7 +329,7 @@ export default async (req) => {
     }
 
     await store.setJSON("data", mapa);
-    await syncTablero(mapa);
+    await dispararSyncTablero(req, mapa);
     return new Response(JSON.stringify(mapa), { headers: HEADERS });
   }
 

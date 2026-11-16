@@ -216,10 +216,18 @@ export async function obtenerInfoExcel() {
 async function graphFetch(pathSuffix, options = {}) {
   const token = await getAccessToken();
   const url = `${GRAPH_BASE}/me/drive/root:/${encodePath(EXCEL_PATH)}:${pathSuffix}`;
-  const r = await fetch(url, {
-    ...options,
-    headers: { ...(options.headers || {}), authorization: `Bearer ${token}`, "content-type": "application/json" },
-  });
+  // 133ª entrega: Graph a veces responde 429/502/503/504 (p. ej. "MaxRequestDurationExceeded" al limpiar un
+  // rango) aunque la siguiente llamada funcione. Las escrituras de esta librería (limpiar rango, escribir
+  // valores) son idempotentes, así que se reintenta hasta 3 veces con espera creciente antes de fallar.
+  let r;
+  for (let intento = 1; intento <= 3; intento++) {
+    r = await fetch(url, {
+      ...options,
+      headers: { ...(options.headers || {}), authorization: `Bearer ${token}`, "content-type": "application/json" },
+    });
+    if (r.ok || ![429, 502, 503, 504].includes(r.status) || intento === 3) break;
+    await new Promise((res) => setTimeout(res, 2000 * intento));
+  }
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`Graph API ${r.status} en ${pathSuffix}: ${text}`);

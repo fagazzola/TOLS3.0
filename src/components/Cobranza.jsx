@@ -542,6 +542,7 @@ export default function Cobranza({ session, perfiles }) {
       fila("Ingresos confirmados — torneos regulares", v(totalPagosRegular)),
       fila("Ingresos confirmados — torneos main", v(totalPagosMain)),
       fila("Castigos x no declarar compra (directo al acumulado final)", v(totalCastigosConfirmados)),
+      fila("Ajustes manuales (pagos)", v(totalAjustesConfirmados)),
       fila("Subtotal ingresos", v(subtotalIngresos)),
       fila("Provisión para acum. Camp. (15%)", v(fondoAcumuladoReservado, true)),
       seccion("Egresos"),
@@ -715,6 +716,9 @@ export default function Cobranza({ session, perfiles }) {
     const detCentavos = [];
     const detCastigos = [];
     let reTotalCastigos = 0;
+    const detAjustes = [];
+    let reTotalAjustes = 0;
+    const gruposCent = {};
     let reTotalInscripciones = 0;
     let rePagosRegular = 0, rePagosMain = 0, reTotalPagosTorneo = 0, reCentavos = 0;
     for (const c of cobranzaRows) {
@@ -737,11 +741,24 @@ export default function Cobranza({ session, perfiles }) {
         if (tipoTorneo === "Main") { rePagosMain += monto; detPagosMain.push([aliasDeCorreo(c.correo), etiqueta, monto]); }
         else { rePagosRegular += monto; detPagosRegular.push([aliasDeCorreo(c.correo), etiqueta, monto]); }
         reTotalPagosTorneo += monto;
-        const remanente = monto - (Number(c.montoEsperado) || 0);
-        if (remanente > 0) {
-          reCentavos += remanente;
-          detCentavos.push([aliasDeCorreo(c.correo), etiqueta, Number(c.montoEsperado) || 0, monto, remanente]);
-        }
+        // 132ª entrega: varios pagos del mismo jugador/torneo — el remanente se calcula sobre el grupo.
+        const kg = `${c.motivoId}|${c.correo}`;
+        if (!gruposCent[kg]) gruposCent[kg] = { alias: aliasDeCorreo(c.correo), etiqueta, esp: 0, real: 0 };
+        gruposCent[kg].esp += Number(c.montoEsperado) || 0;
+        gruposCent[kg].real += monto;
+      }
+      if (c.motivoTipo === "ajuste" && c.tipoAccion === "pago") {
+        // 132ª entrega: Ajuste manual (Pago) — ingreso aparte, sin Provisión ni reserva.
+        const monto = Number(c.monto) || 0;
+        reTotalAjustes += monto;
+        detAjustes.push([aliasDeCorreo(c.correo), c.causa || "(sin causa)", monto]);
+      }
+    }
+    for (const g of Object.values(gruposCent)) {
+      const remanente = g.real - g.esp;
+      if (remanente > 0) {
+        reCentavos += remanente;
+        detCentavos.push([g.alias, g.etiqueta, g.esp, g.real, remanente]);
       }
     }
     // 127ª entrega: la Provisión se calcula sobre el total de compras (Deuda) de la pestaña Resultados.
@@ -759,7 +776,7 @@ export default function Cobranza({ session, perfiles }) {
       if (r.saldo < 0 && !pagosTorneoSet.has(k)) { rePorCobrar += -r.saldo; detPorCobrar.push([r.alias, r.torneoEtiqueta, -r.saldo]); }
       if (r.saldo > 0 && !depositosTorneoSet.has(k)) { rePorDepositar += r.saldo; detPorDepositar.push([r.alias, r.torneoEtiqueta, r.saldo]); }
     }
-    const reSubtotalIngresos = reTotalInscripciones + rePagosRegular + rePagosMain + reTotalCastigos;
+    const reSubtotalIngresos = reTotalInscripciones + rePagosRegular + rePagosMain + reTotalCastigos + reTotalAjustes;
 
     const reRegular = { 1: 0, 2: 0, 3: 0, otros: 0 };
     const reMain = { 1: 0, 2: 0, 3: 0, otros: 0, burbuja: 0, mano: 0 };
@@ -767,6 +784,7 @@ export default function Cobranza({ session, perfiles }) {
     const detMain = { 1: [], 2: [], 3: [], otros: [], burbuja: [], mano: [] };
     for (const c of cobranzaRows) {
       if (c.motivoTipo !== "torneo" || c.tipoAccion !== "deposito") continue;
+      if (String(c.clave || "").split("|").length > 3) continue; // 132ª: movimiento adicional, el premio bruto cuenta una vez
       const r = porJugadorTorneo[`${c.motivoId}|${c.correo}`];
       if (!r) continue;
       const bucket = r.tipoTorneo === "Main" ? reMain : reRegular;
@@ -843,6 +861,11 @@ export default function Cobranza({ session, perfiles }) {
       ["Suma de los Pagos confirmados de torneo cuyo torneo (pestaña Resultados) es Main."],
       ["Jugador", "Torneo", "Monto"], detPagosMain, "TOTAL", rePagosMain
     );
+    const aAjustes = bloque(
+      "Ajustes manuales (pagos)",
+      ["Pagos de jugadores a TOLS con motivo Ajuste manual (pestaña Cobranza), con la causa escrita por el Tesorero."],
+      ["Jugador", "Causa", "Monto"], detAjustes, "TOTAL", reTotalAjustes
+    );
     const aCastigos = bloque(
       "Castigos x no declarar compra (directo al acumulado final)",
       ["Suma de los Pagos confirmados con Motivo = Castigo, de la pestaña Cobranza. NO entran a la Provisión (15%): van directo al acumulado final del campeonato."],
@@ -850,9 +873,9 @@ export default function Cobranza({ session, perfiles }) {
     );
     const aSubtotalIngresos = bloque(
       "Subtotal ingresos",
-      ["= Inscripciones reales + Ingresos torneos regulares + Ingresos torneos main + Castigos x no declarar compra."],
+      ["= Inscripciones reales + Ingresos torneos regulares + Ingresos torneos main + Castigos x no declarar compra + Ajustes manuales."],
       ["Concepto", "Monto"],
-      [["Inscripciones reales", reTotalInscripciones], ["Ingresos — torneos regulares", rePagosRegular], ["Ingresos — torneos main", rePagosMain], ["Castigos x no declarar compra", reTotalCastigos]],
+      [["Inscripciones reales", reTotalInscripciones], ["Ingresos — torneos regulares", rePagosRegular], ["Ingresos — torneos main", rePagosMain], ["Castigos x no declarar compra", reTotalCastigos], ["Ajustes manuales", reTotalAjustes]],
       "TOTAL", reSubtotalIngresos
     );
     const aProvision = bloque(
@@ -980,6 +1003,7 @@ export default function Cobranza({ session, perfiles }) {
     aoaConc.push(filaConc("Ingresos confirmados — torneos regulares", rePagosRegular, totalPagosRegular, aPagosRegular));
     aoaConc.push(filaConc("Ingresos confirmados — torneos main", rePagosMain, totalPagosMain, aPagosMain));
     aoaConc.push(filaConc("Castigos x no declarar compra (directo al acumulado final)", reTotalCastigos, totalCastigosConfirmados, aCastigos));
+    aoaConc.push(filaConc("Ajustes manuales (pagos)", reTotalAjustes, totalAjustesConfirmados, aAjustes));
     aoaConc.push(filaConc("Subtotal ingresos", reSubtotalIngresos, subtotalIngresos, aSubtotalIngresos));
     aoaConc.push(filaConc("Provisión para acum. Camp. (15%)", -reFondoReservado, -fondoAcumuladoReservado, aProvision));
     aoaConc.push(filaConc("Disponible (85%)", reDisponible, disponiblePagosTorneo, aDisponible));
@@ -1173,6 +1197,22 @@ export default function Cobranza({ session, perfiles }) {
         )
       : [];
 
+  // 132ª entrega: arma el motivo compuesto a partir de Motivo (base) + Sub motivo (n de torneo).
+  function componerMotivo(m) {
+    let motivo = "";
+    if (m.tipo === "pago") {
+      if (m.base === "participacion" && m.sub) motivo = `torneo:${m.sub}`;
+      else if (m.base === "castigo" && m.sub) motivo = `castigo:${m.sub}`;
+      else if (m.base === "inscripcion") motivo = "inscripcion";
+      else if (m.base === "ajuste") motivo = "ajuste";
+    } else if (/^premio[123]$/.test(m.base || "") && m.sub) {
+      motivo = `torneo:${m.sub}`;
+    } else if ((m.base || "").startsWith("gasto:")) {
+      motivo = m.base;
+    }
+    return { ...m, motivo };
+  }
+
   // 76ª entrega: "monto esperado" (recuadro inactivo) y etiqueta legible del motivo elegido — se
   // recalculan en cada render a partir de `nuevoMov.motivo`, nunca se guardan en el estado (para que
   // siempre reflejen el dato más reciente de Estadísticas/Tablero).
@@ -1207,6 +1247,24 @@ export default function Cobranza({ session, perfiles }) {
     const g = gastosCampeonatoActivo.find((x) => x.concepto === concepto);
     montoEsperadoMov = Number(g?.monto) || 0;
     etiquetaMotivoMov = concepto;
+  } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo === "ajuste") {
+    montoEsperadoMov = 0;
+    etiquetaMotivoMov = "Ajuste manual";
+  }
+  // 132ª entrega: si ya hay un registro del mismo jugador y motivo, el nuevo es un movimiento adicional
+  // (esperado 0, se suma al real del primero).
+  let esExtraMov = false;
+  if (nuevoMov?.correo && nuevoMov.motivo) {
+    const m = nuevoMov.motivo, c = nuevoMov.correo;
+    let mapaMov = null, kMov = "";
+    if (nuevoMov.tipo === "pago") {
+      if (m === "inscripcion") { mapaMov = data?.pagosInscripcion; kMov = `${campeonatoSel}|inscripcion|${c}`; }
+      else if (m === "ajuste") { mapaMov = data?.pagosAjuste; kMov = `${campeonatoSel}|ajuste|${c}`; }
+      else if (m.startsWith("castigo:")) { mapaMov = data?.pagosCastigo; kMov = `${campeonatoSel}|${m.slice(8)}|${c}`; }
+      else if (m.startsWith("torneo:")) { mapaMov = data?.pagosTorneo; kMov = `${campeonatoSel}|${m.slice(7)}|${c}`; }
+    } else if (m.startsWith("torneo:")) { mapaMov = data?.depositosTorneo; kMov = `${campeonatoSel}|${m.slice(7)}|${c}`; }
+    else if (m.startsWith("gasto:")) { mapaMov = data?.depositosGasto; kMov = `${campeonatoSel}|${m.slice(6)}|${c}`; }
+    if (mapaMov && mapaMov[kMov]) { esExtraMov = true; montoEsperadoMov = 0; }
   }
 
   // 76ª entrega: tabla de pagos/depósitos ya confirmados para el campeonato activo, juntando los 3
@@ -1249,6 +1307,21 @@ export default function Cobranza({ session, perfiles }) {
         ...reg,
       });
     }
+    // 132ª entrega: Ajuste manual (Pago) — la causa se muestra en el motivo.
+    for (const [clave, reg] of Object.entries(data?.pagosAjuste || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, , correo] = clave.split("|");
+      filas.push({
+        clave,
+        tipo: "Pago",
+        tipoAccion: "pago",
+        motivoTipo: "ajuste",
+        motivoId: "ajuste",
+        motivo: `Ajuste manual${reg.causa ? ` — ${reg.causa}` : ""}`,
+        correo,
+        ...reg,
+      });
+    }
     // 118ª entrega: motivo nuevo de Pago — Castigo x no declarar Re-buys o Add-on, aplicado a un torneo
     // puntual (a diferencia de la Inscripción, que no tiene torneo asociado) — mapa propio
     // (`pagosCastigo`) para no pisar un eventual Debe del mismo torneo en `pagosTorneo`.
@@ -1280,7 +1353,7 @@ export default function Cobranza({ session, perfiles }) {
         tipoAccion: "deposito",
         motivoTipo: "torneo",
         motivoId: fechaTorneo,
-        motivo: `Torneo ${entry ? etiquetaCorta(entry) : ""}`,
+        motivo: `${reg.lugar ? `Premio ${reg.lugar}º lugar — ` : ""}Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
       });
@@ -1427,6 +1500,8 @@ export default function Cobranza({ session, perfiles }) {
       const g = gastosCampeonatoActivo.find((x) => x.concepto === editandoPago.motivoId);
       montoEsperadoEdicion = Number(g?.monto) || 0;
     }
+    // 132ª entrega: un movimiento adicional (llave con "|2", "|3"…) o un ajuste manual no lleva esperado.
+    if (editandoPago.motivoTipo === "ajuste" || String(editandoPago.clave || "").split("|").length > 3) montoEsperadoEdicion = 0;
   }
 
   async function guardarEdicionPago() {
@@ -1456,6 +1531,8 @@ export default function Cobranza({ session, perfiles }) {
           motivoId: editandoPago.motivoId,
           fecha: editandoPago.motivoTipo === "torneo" ? editandoPago.motivoId : undefined,
           correo: editandoPago.correo,
+          clave: editandoPago.clave, // 132ª: edita ESE registro (puede haber varios del mismo jugador/torneo)
+          causa: editandoPago.motivoTipo === "ajuste" ? String(editandoPago.causa || "").trim() : undefined,
           montoEsperado: montoEsperadoEdicion,
           monto,
           fechaRegistro: editandoPago.fecha,
@@ -1467,6 +1544,8 @@ export default function Cobranza({ session, perfiles }) {
           campeonato: campeonatoSel,
           motivoTipo: editandoPago.motivoTipo,
           motivoId: editandoPago.motivoId,
+          clave: editandoPago.clave, // 132ª
+          lugar: editandoPago.lugar || undefined,
           correo: editandoPago.correo,
           montoEsperado: montoEsperadoEdicion,
           monto,
@@ -1520,8 +1599,14 @@ export default function Cobranza({ session, perfiles }) {
         // Add-on, aplicado a un torneo puntual (igual forma de clave que "torneo:", mapa propio del
         // servidor para no pisar un eventual Debe del mismo torneo).
         const esInscripcion = nuevoMov.motivo === "inscripcion";
+        const esAjuste = nuevoMov.motivo === "ajuste";
         const esCastigo = nuevoMov.motivo.startsWith("castigo:");
-        const fechaTorneo = esInscripcion
+        if (esAjuste && !String(nuevoMov.causa || "").trim()) {
+          setErrorMov("Escribe la causa del ajuste manual.");
+          setGuardandoMov(false);
+          return;
+        }
+        const fechaTorneo = (esInscripcion || esAjuste)
           ? ""
           : esCastigo
           ? nuevoMov.motivo.slice("castigo:".length)
@@ -1529,9 +1614,10 @@ export default function Cobranza({ session, perfiles }) {
         body = {
           accion: "registrarPago",
           campeonato: campeonatoSel,
-          motivoTipo: esInscripcion ? "inscripcion" : esCastigo ? "castigo" : "torneo",
-          motivoId: esInscripcion ? "inscripcion" : fechaTorneo,
-          fecha: esInscripcion ? undefined : fechaTorneo,
+          motivoTipo: esInscripcion ? "inscripcion" : esAjuste ? "ajuste" : esCastigo ? "castigo" : "torneo",
+          motivoId: esInscripcion ? "inscripcion" : esAjuste ? "ajuste" : fechaTorneo,
+          fecha: (esInscripcion || esAjuste) ? undefined : fechaTorneo,
+          causa: esAjuste ? String(nuevoMov.causa).trim() : undefined, // 132ª entrega
           correo,
           montoEsperado: montoEsperadoMov,
           monto,
@@ -1545,6 +1631,7 @@ export default function Cobranza({ session, perfiles }) {
           campeonato: campeonatoSel,
           motivoTipo: esTorneo ? "torneo" : "gasto",
           motivoId: esTorneo ? nuevoMov.motivo.slice("torneo:".length) : nuevoMov.motivo.slice("gasto:".length),
+          lugar: esTorneo ? Number(String(nuevoMov.base || "").replace("premio", "")) || undefined : undefined, // 132ª
           correo,
           montoEsperado: montoEsperadoMov,
           monto,
@@ -1670,7 +1757,7 @@ export default function Cobranza({ session, perfiles }) {
     for (const [clave, reg] of Object.entries(mapa || {})) {
       if (!clave.startsWith(prefijo)) continue;
       const partes = clave.split("|");
-      const correo = partes[partes.length - 1];
+      const correo = partes[2]; // 132ª: la llave puede tener un sufijo "|2", "|3"… (varios movimientos)
       if (filtroCorreo && correo !== filtroCorreo) continue;
       total += Number(reg.monto) || 0;
     }
@@ -1691,11 +1778,15 @@ export default function Cobranza({ session, perfiles }) {
   function centavosAcumuladosCampeonato() {
     const prefijo = `${campeonatoSel}|`;
     let total = 0;
+    // 132ª entrega: puede haber varios pagos del mismo jugador/torneo — el remanente (centavos) se calcula
+    // sobre el grupo: suma de lo recibido − esperado (que vive en el primer registro).
+    const grupos = {};
     for (const [clave, reg] of Object.entries(data?.pagosTorneo || {})) {
       if (!clave.startsWith(prefijo)) continue;
-      const remanente = (Number(reg.monto) || 0) - (Number(reg.montoEsperado) || 0);
-      if (remanente > 0) total += remanente;
+      const kb = clave.split("|").slice(0, 3).join("|");
+      grupos[kb] = (grupos[kb] || 0) + (Number(reg.monto) || 0) - (Number(reg.montoEsperado) || 0);
     }
+    for (const v of Object.values(grupos)) if (v > 0) total += v;
     return total;
   }
   const centavosAcumulados = centavosAcumuladosCampeonato();
@@ -1775,7 +1866,8 @@ export default function Cobranza({ session, perfiles }) {
   // pasan por la Provisión 15%/Disponible 85%: van DIRECTO al acumulado final del campeonato (ver
   // "Reserva para el Campeonato" más abajo) — a pedido de Federico.
   const totalCastigosConfirmados = sumaMapaConfirmado(data?.pagosCastigo);
-  const subtotalIngresos = totalInscripcionesConfirmadas + totalPagosRegular + totalPagosMain + totalCastigosConfirmados;
+  const totalAjustesConfirmados = sumaMapaConfirmado(data?.pagosAjuste); // 132ª entrega
+  const subtotalIngresos = totalInscripcionesConfirmadas + totalPagosRegular + totalPagosMain + totalCastigosConfirmados + totalAjustesConfirmados;
 
   // Gastos operativos: a diferencia de la 96ª entrega (que mostraba lo ya DEPOSITADO y confirmado por
   // concepto), Federico aclaró (pregunta 3) que esto es el PRESUPUESTO fijo configurado en el Tablero de
@@ -1799,7 +1891,8 @@ export default function Cobranza({ session, perfiles }) {
       if (!clave.startsWith(prefijo)) continue;
       const partes = clave.split("|");
       const fecha = partes[1];
-      const correo = partes[partes.length - 1];
+      if (partes.length > 3) continue; // 132ª: movimientos adicionales — el premio bruto se cuenta una sola vez por jugador/torneo
+      const correo = partes[2];
       const torneo = estData?.torneos?.[campeonatoSel]?.[fecha];
       const j = torneo ? jugadorEnTorneo(torneo, { correo }) : null;
       if (!j || !torneo) continue;
@@ -2065,6 +2158,7 @@ export default function Cobranza({ session, perfiles }) {
                     motivoTipo: "castigo",
                     motivoId: fechaSaldoSel,
                     fecha: fechaSaldoSel,
+                    clave: existente ? claveP : undefined, // 132ª: edita el registro base, no crea otro
                     correo: f.jugador.correo,
                     montoEsperado: existente?.montoEsperado ?? montoCast,
                     monto: existente?.monto ?? montoCast,
@@ -2394,7 +2488,7 @@ export default function Cobranza({ session, perfiles }) {
                 <button
                   className="btn btn-primary btn-add"
                   onClick={() => {
-                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", montoReal: "", fechaReal: "" });
+                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", base: "", sub: "", causa: "", montoReal: "", fechaReal: "" });
                     setErrorMov("");
                     setAvisoDatosCuenta("");
                   }}
@@ -2410,12 +2504,12 @@ export default function Cobranza({ session, perfiles }) {
                         className="field"
                         value={nuevoMov.tipo}
                         onChange={(e) => {
-                          setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "" });
+                          setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
                           setAvisoDatosCuenta("");
                         }}
                       >
-                        <option value="pago">Pago (jugador → TOLS)</option>
-                        <option value="deposito">Depósito (TOLS → jugador)</option>
+                        <option value="pago">Pago (jugador a TOLS)</option>
+                        <option value="deposito">Depósito (TOLS a jugador)</option>
                       </select>
                     </div>
                     <div className="login-field" style={{ flex: 2 }}>
@@ -2424,7 +2518,7 @@ export default function Cobranza({ session, perfiles }) {
                         className="field"
                         value={nuevoMov.correo}
                         onChange={(e) => {
-                          setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "" });
+                          setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
                           setAvisoDatosCuenta("");
                         }}
                       >
@@ -2477,84 +2571,81 @@ export default function Cobranza({ session, perfiles }) {
                     </div>
                   )}
 
+                  {/* 132ª entrega: Tipo / Motivo / Sub motivo, los 3 en combos (tablas de Federico). El
+                      "motivo compuesto" de siempre (torneo:fecha, castigo:fecha, inscripcion, ajuste,
+                      gasto:concepto) se arma desde Motivo + Sub motivo con componerMotivo(). */}
                   <div className="login-field-row">
                     <div className="login-field" style={{ flex: 2 }}>
                       <label>Motivo</label>
                       <select
                         className="field"
-                        value={nuevoMov.motivo}
+                        value={nuevoMov.base || ""}
                         disabled={!nuevoMov.correo}
-                        onChange={(e) => {
-                          const motivo = e.target.value;
-                          // 118ª entrega: al elegir un torneo para "Castigo x no declarar compra", el
-                          // recuadro de "Monto realmente recibido" se prellena con el default vigente del
-                          // Tablero de Control (editable después) — a diferencia de los demás motivos, que
-                          // arrancan ese recuadro vacío (81ª entrega) porque no tienen un monto "sugerido"
-                          // propio, solo un esperado calculado de Estadísticas/Tablero.
-                          const prefill = motivo.startsWith("castigo:") ? String(castigoMontoDe(nuevoMov.correo, motivo.slice("castigo:".length)) || castigoNoDeclaradoActivo) : nuevoMov.montoReal;
-                          setNuevoMov({ ...nuevoMov, motivo, montoReal: prefill, descontado: false });
-                        }}
+                        onChange={(e) => setNuevoMov(componerMotivo({ ...nuevoMov, base: e.target.value, sub: "", montoReal: "", descontado: false }))}
                       >
                         <option value="">— elegir —</option>
                         {nuevoMov.tipo === "pago" && (
                           <>
-                            {/* 89ª entrega: sin fecha — a pedido de Federico, el mismo torneo (ej. "Torneo
-                                1") aparecía con fecha para un Depósito y sin fecha para un Pago, dando la
-                                impresión de ser dos cosas distintas. Se homologó para que ningún motivo de
-                                torneo muestre fecha al registrarlo (la fecha de cuándo se recibió/depositó
-                                ya tiene su propio campo más abajo). */}
-                            {opcionesPago.map((t) => (
-                              <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
-                                Torneo {etiquetaCorta(t)}
-                              </option>
-                            ))}
-                            {/* 87ª entrega: motivo nuevo — Cuota de inscripción (Tablero de Control) */}
-                            {opcionInscripcionPago && <option value="inscripcion">Inscripción</option>}
-                            {/* 118ª entrega: motivo nuevo — Castigo x no declarar compra, con el torneo al
-                                que aplica ya incluido en la propia opción (el Tesorero elige los dos datos
-                                de un solo paso, igual que ya hace "Torneo N" arriba). Solo aparece bajo
-                                Pago — nunca bajo Depósito, por eso el Tipo "siempre será Pago" para este
-                                motivo. */}
-                            {opcionesCastigoPago.map((t) => (
-                              <option key={`castigo:${t.fecha}`} value={`castigo:${t.fecha}`}>
-                                Castigo x no declarar compra — Torneo {etiquetaCorta(t)}
-                              </option>
-                            ))}
+                            <option value="participacion">Participación en torneo</option>
+                            <option value="castigo">Castigo por no declarar Rebuy</option>
+                            <option value="inscripcion">Inscripción al Campeonato</option>
+                            <option value="ajuste">Ajuste manual</option>
                           </>
                         )}
                         {nuevoMov.tipo === "deposito" && (
                           <>
-                            {opcionesDepositoTorneo.map((t) => (
-                              <option key={`torneo:${t.fecha}`} value={`torneo:${t.fecha}`}>
-                                Torneo {etiquetaCorta(t)}
-                              </option>
-                            ))}
-                            {opcionesDepositoGasto.map((g) => (
-                              <option key={`gasto:${g.concepto}`} value={`gasto:${g.concepto}`}>
-                                {g.concepto}
-                              </option>
+                            <option value="premio1">Premio de 1er lugar en torneo</option>
+                            <option value="premio2">Premio de 2do lugar en torneo</option>
+                            <option value="premio3">Premio de 3er lugar en torneo</option>
+                            {gastosCampeonatoActivo.filter((g) => g.concepto).map((g) => (
+                              <option key={`gasto:${g.concepto}`} value={`gasto:${g.concepto}`}>{g.concepto}</option>
                             ))}
                           </>
                         )}
                       </select>
-                      {nuevoMov.correo &&
-                        nuevoMov.tipo === "pago" &&
-                        opcionesPago.length === 0 &&
-                        !opcionInscripcionPago && (
-                          <div className="section-sub" style={{ marginTop: 4 }}>
-                            No hay pagos pendientes de confirmar para este jugador.
-                          </div>
-                        )}
-                      {nuevoMov.correo &&
-                        nuevoMov.tipo === "deposito" &&
-                        opcionesDepositoTorneo.length === 0 &&
-                        opcionesDepositoGasto.length === 0 && (
-                          <div className="section-sub" style={{ marginTop: 4 }}>
-                            No hay depósitos pendientes de confirmar para este jugador.
-                          </div>
-                        )}
+                    </div>
+                    <div className="login-field" style={{ flex: 1, minWidth: 180 }}>
+                      <label>Sub motivo</label>
+                      {["participacion", "castigo", "premio1", "premio2", "premio3"].includes(nuevoMov.base) ? (
+                        <select
+                          className="field"
+                          value={nuevoMov.sub || ""}
+                          onChange={(e) => {
+                            const sub = e.target.value;
+                            const prefill = nuevoMov.base === "castigo" && sub
+                              ? String(castigoMontoDe(nuevoMov.correo, sub) || castigoNoDeclaradoActivo)
+                              : "";
+                            setNuevoMov(componerMotivo({ ...nuevoMov, sub, montoReal: prefill }));
+                          }}
+                        >
+                          <option value="">— # de torneo —</option>
+                          {torneosSaldoOpciones.map((t) => (
+                            <option key={t.fecha} value={t.fecha}>Torneo {etiquetaCorta(t)}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <select className="field" disabled value=""><option value="">—</option></select>
+                      )}
                     </div>
                   </div>
+                  {nuevoMov.base === "ajuste" && (
+                    <div className="login-field">
+                      <label>Causa del ajuste manual</label>
+                      <input
+                        className="field"
+                        type="text"
+                        maxLength={200}
+                        placeholder="Escribe la causa del ajuste"
+                        value={nuevoMov.causa || ""}
+                        onChange={(e) => setNuevoMov({ ...nuevoMov, causa: e.target.value })}
+                      />
+                    </div>
+                  )}
+                  {esExtraMov && (
+                    <div className="section-sub">
+                      Ya hay un registro de este jugador para este motivo: este será un movimiento adicional (su monto se suma al anterior; el esperado ya está en el primero).
+                    </div>
+                  )}
 
                   {nuevoMov.motivo && (
                     <>
@@ -2734,6 +2825,13 @@ export default function Cobranza({ session, perfiles }) {
                       onChange={(e) => setEditandoPago({ ...editandoPago, fecha: e.target.value })}
                     />
                   </div>
+                  {editandoPago.motivoTipo === "ajuste" && (
+                    <div className="login-field" style={{ minWidth: 240 }}>
+                      <label>Causa del ajuste</label>
+                      <input className="field" type="text" maxLength={200} value={editandoPago.causa || ""}
+                        onChange={(e) => setEditandoPago({ ...editandoPago, causa: e.target.value })} />
+                    </div>
+                  )}
                   {editandoPago.tipoAccion === "pago" && editandoPago.motivoTipo === "castigo" && (
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
                       <input
@@ -2785,6 +2883,8 @@ export default function Cobranza({ session, perfiles }) {
                             monto: c.monto,
                             fecha: c.fecha || "",
                             descontado: Boolean(c.descontado), // 128ª entrega
+                            causa: c.causa || "", // 132ª
+                            lugar: c.lugar || 0, // 132ª
                           });
                           setErrorEdicion("");
                         }}
@@ -2947,6 +3047,7 @@ export default function Cobranza({ session, perfiles }) {
                 <FilaFin label="Ingresos confirmados — torneos regulares"><Monto valor={totalPagosRegular} /></FilaFin>
                 <FilaFin label="Ingresos confirmados — torneos main"><Monto valor={totalPagosMain} /></FilaFin>
                 <FilaFin label="Castigos x no declarar compra (directo al acumulado final)"><Monto valor={totalCastigosConfirmados} /></FilaFin>
+                <FilaFin label="Ajustes manuales (pagos)"><Monto valor={totalAjustesConfirmados} /></FilaFin>
                 <FilaFin label="Subtotal ingresos" bold><Monto valor={subtotalIngresos} /></FilaFin>
                 <FilaFin label="Provisión para acum. Camp. (15%)"><Monto valor={fondoAcumuladoReservado} forzarNegativo /></FilaFin>
 

@@ -104,7 +104,17 @@ function normalizarRegistroPago(v) {
     // 128ª entrega: solo para el Pago de "Castigo x no declarar compra" — true si el castigo NO entró en
     // efectivo porque el Tesorero lo descontó del depósito del jugador (el depósito real quedó menor).
     ...(v?.descontado === true ? { descontado: true } : {}),
+    // 132ª entrega: Ajuste manual (causa escrita por el Tesorero) y lugar del Premio (1, 2 o 3) de un Depósito.
+    ...(String(v?.causa || "").trim() ? { causa: String(v.causa).trim().slice(0, 200) } : {}),
+    ...([1, 2, 3].includes(Number(v?.lugar)) ? { lugar: Number(v.lugar) } : {}),
   };
+}
+// 132ª entrega: primera llave libre — "base", luego "base|2", "base|3"…
+function claveLibre(mapa, base) {
+  if (!mapa[base]) return base;
+  let n = 2;
+  while (mapa[`${base}|${n}`]) n++;
+  return `${base}|${n}`;
 }
 function normalizarMapaPagos(v) {
   const out = {};
@@ -170,7 +180,10 @@ export function normalizar(data) {
   const pagosCastigo = normalizarMapaPagos(base.pagosCastigo);
   // 125ª entrega: sexto mapa — castigos asignados (la deuda), "campeonato|fecha|correo".
   const castigosTorneo = normalizarMapaCastigos(base.castigosTorneo);
-  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo, castigosTorneo };
+  // 132ª entrega: séptimo mapa — Ajuste manual (Pago del jugador a TOLS con la causa escrita a mano),
+  // "campeonato|ajuste|correo" (+ "|2", "|3"… si hay más de uno).
+  const pagosAjuste = normalizarMapaPagos(base.pagosAjuste);
+  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo, castigosTorneo, pagosAjuste };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -229,6 +242,7 @@ export async function respuestaCompleta(data) {
     pagosInscripcion: data.pagosInscripcion || {},
     pagosCastigo: data.pagosCastigo || {}, // 118ª entrega
     castigosTorneo: data.castigosTorneo || {}, // 125ª entrega
+    pagosAjuste: data.pagosAjuste || {}, // 132ª entrega
     // 92ª entrega: el Calendario completo (todos los campeonatos, no solo el activo) — lo necesita
     // filasParaExcel() para numerar los torneos de "Pagos y depósitos confirmados" ("Torneo N"), igual
     // que ya hace Cobranza.jsx del lado del cliente con mapaNumeracionTorneos().
@@ -271,7 +285,7 @@ function aliasONombre(resumen, correo) {
   const r = resumen?.[correo];
   return (r?.aliasPokerStars || r?.nombre || "").trim();
 }
-function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, depositosTorneo, depositosGasto, resumen, torneos }) {
+function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, resumen, torneos }) {
   const numeracion = mapaNumeracionTorneos(torneos);
   const filas = [];
   for (const [clave, reg] of Object.entries(pagosTorneo || {})) {
@@ -297,6 +311,14 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, deposit
       aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
+  // 132ª entrega: Ajuste manual (Pago) — la causa va en el motivo.
+  for (const [clave, reg] of Object.entries(pagosAjuste || {})) {
+    const [campeonato, , correo] = clave.split("|");
+    filas.push([
+      campeonato, "Pago", `Ajuste manual — ${reg.causa || "sin causa"}`, correo,
+      aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
   // 94ª entrega: a pedido de Federico, en ESTA hoja (Cobranza_Confirmados) un Depósito se escribe en
   // negativo — son salidas de dinero de TOLS — para que Monto Esperado/Monto Real reflejen esa
   // perspectiva directo en el Excel. Esto es puramente de presentación en el espejo: `depositosTorneo`/
@@ -305,7 +327,7 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, deposit
   for (const [clave, reg] of Object.entries(depositosTorneo || {})) {
     const [campeonato, fecha, correo] = clave.split("|");
     filas.push([
-      campeonato, "Depósito", etiquetaTorneoExcel(numeracion, campeonato, fecha), correo,
+      campeonato, "Depósito", `${reg.lugar ? `Premio ${reg.lugar}º lugar — ` : ""}${etiquetaTorneoExcel(numeracion, campeonato, fecha)}`, correo,
       aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
@@ -327,8 +349,8 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, deposit
 // se usó en producción) y pidió dejar de escribirlas para poder borrarlas del Excel maestro sin riesgo.
 // `filasParaExcel()` quedó así en una sola pieza real, `confirmadosRows` (92ª entrega) — el resto de la
 // firma de esta función (`movimientos`/`resumen` ya no se usan directo acá) se simplificó acorde.
-export function filasParaExcel({ resumen, pagosTorneo, pagosInscripcion, pagosCastigo, depositosTorneo, depositosGasto, torneos }) {
-  const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, depositosTorneo, depositosGasto, resumen, torneos });
+export function filasParaExcel({ resumen, pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, torneos }) {
+  const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, resumen, torneos });
   return { confirmadosRows };
 }
 
@@ -475,9 +497,10 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   const r5 = remapearClavesCampeonato(actual.pagosInscripcion, de, a); // 87ª entrega
   const r6 = remapearClavesCampeonato(actual.pagosCastigo, de, a); // 118ª entrega
   const r7 = remapearClavesCampeonato(actual.castigosTorneo, de, a); // 125ª entrega
+  const r8 = remapearClavesCampeonato(actual.pagosAjuste, de, a); // 132ª entrega
   const cambia =
     actual.movimientos.some((m) => m.campeonato === de) ||
-    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio || r7.cambio;
+    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio || r7.cambio || r8.cambio;
   if (!cambia) return;
   const prefijoViejo = `gn-${de}-`;
   actual.movimientos = actual.movimientos.map((m) => {
@@ -492,6 +515,7 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   actual.pagosInscripcion = r5.mapa; // 87ª entrega
   actual.pagosCastigo = r6.mapa; // 118ª entrega
   actual.castigosTorneo = r7.mapa; // 125ª entrega
+  actual.pagosAjuste = r8.mapa; // 132ª entrega
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
@@ -589,45 +613,42 @@ export default async (req) => {
       // 118ª entrega: tercer motivo posible — "castigo" (Castigo x no declarar Re-buys o Add-on),
       // aplicado a un torneo puntual (igual que "torneo", pero en su propio mapa, `pagosCastigo`, para no
       // pisar un eventual Debe del mismo torneo en `pagosTorneo`).
-      const motivoTipo = body.motivoTipo === "inscripcion" ? "inscripcion" : body.motivoTipo === "castigo" ? "castigo" : "torneo";
+      const motivoTipo = body.motivoTipo === "inscripcion" ? "inscripcion" : body.motivoTipo === "castigo" ? "castigo" : body.motivoTipo === "ajuste" ? "ajuste" : "torneo";
       const correo = String(body.correo || "").trim().toLowerCase();
-      if (motivoTipo === "inscripcion") {
-        if (!campeonato || !correo) {
-          return new Response(JSON.stringify({ error: "Falta el campeonato o el jugador del pago." }), { status: 400, headers: HEADERS });
-        }
-        const clave = `${campeonato}|inscripcion|${correo}`;
-        actual.pagosInscripcion[clave] = normalizarRegistroPago({
-          montoEsperado: body.montoEsperado,
-          monto: body.monto,
-          fecha: body.fechaRegistro,
-          hora: body.horaRegistro,
-        });
-      } else if (motivoTipo === "castigo") {
-        const fecha = String(body.fecha || body.motivoId || "").trim();
-        if (!campeonato || !fecha || !correo) {
-          return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del castigo." }), { status: 400, headers: HEADERS });
-        }
-        const clave = `${campeonato}|${fecha}|${correo}`;
-        actual.pagosCastigo[clave] = normalizarRegistroPago({
-          montoEsperado: body.montoEsperado,
-          monto: body.monto,
-          fecha: body.fechaRegistro,
-          hora: body.horaRegistro,
-          descontado: body.descontadoDeposito === true, // 128ª entrega
-        });
-      } else {
-        const fecha = String(body.fecha || body.motivoId || "").trim();
-        if (!campeonato || !fecha || !correo) {
-          return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del pago." }), { status: 400, headers: HEADERS });
-        }
-        const clave = `${campeonato}|${fecha}|${correo}`;
-        actual.pagosTorneo[clave] = normalizarRegistroPago({
-          montoEsperado: body.montoEsperado,
-          monto: body.monto,
-          fecha: body.fechaRegistro,
-          hora: body.horaRegistro,
-        });
+      // 132ª entrega: puede haber más de un pago del mismo jugador al mismo motivo/torneo. Un registro
+      // NUEVO toma la primera llave libre ("base", "base|2", "base|3"…) y, si no es el primero, su monto
+      // esperado es 0 (el esperado ya vive en el primer registro; el real se suma). Para EDITAR un
+      // registro puntual el cliente manda `clave` (la llave exacta) y se sobrescribe ese mismo.
+      const mapaNombre = motivoTipo === "inscripcion" ? "pagosInscripcion" : motivoTipo === "castigo" ? "pagosCastigo" : motivoTipo === "ajuste" ? "pagosAjuste" : "pagosTorneo";
+      const fecha = String(body.fecha || body.motivoId || "").trim();
+      if (!campeonato || !correo || (motivoTipo !== "inscripcion" && motivoTipo !== "ajuste" && !fecha)) {
+        return new Response(JSON.stringify({ error: "Falta el campeonato, el torneo o el jugador del pago." }), { status: 400, headers: HEADERS });
       }
+      if (motivoTipo === "ajuste" && !String(body.causa || "").trim()) {
+        return new Response(JSON.stringify({ error: "Escribe la causa del ajuste manual." }), { status: 400, headers: HEADERS });
+      }
+      const claveBase = motivoTipo === "inscripcion" || motivoTipo === "ajuste"
+        ? `${campeonato}|${motivoTipo}|${correo}`
+        : `${campeonato}|${fecha}|${correo}`;
+      const claveExacta = String(body.clave || "").trim();
+      let clave = claveBase;
+      if (claveExacta) {
+        if (!(claveExacta === claveBase || claveExacta.startsWith(`${claveBase}|`)) || !actual[mapaNombre][claveExacta]) {
+          return new Response(JSON.stringify({ error: "No se encontró el registro a editar." }), { status: 400, headers: HEADERS });
+        }
+        clave = claveExacta;
+      } else {
+        clave = claveLibre(actual[mapaNombre], claveBase);
+      }
+      const esExtra = clave !== claveBase;
+      actual[mapaNombre][clave] = normalizarRegistroPago({
+        montoEsperado: esExtra ? 0 : motivoTipo === "ajuste" ? 0 : body.montoEsperado,
+        monto: body.monto,
+        fecha: body.fechaRegistro,
+        hora: body.horaRegistro,
+        descontado: motivoTipo === "castigo" ? body.descontadoDeposito === true : false, // 128ª entrega
+        causa: motivoTipo === "ajuste" ? body.causa : "",
+      });
     } else if (body?.accion === "registrarDeposito") {
       // 76ª entrega: confirma que TOLS le depositó a un jugador — por el Premio de un torneo ya
       // publicado ("motivoTipo":"torneo", "motivoId": fecha del torneo) o por un gasto del Tablero de
@@ -646,12 +667,23 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: "La fecha del depósito es obligatoria (AAAA-MM-DD)." }), { status: 400, headers: HEADERS });
       }
       const mapa = motivoTipo === "gasto" ? "depositosGasto" : "depositosTorneo";
-      const clave = `${campeonato}|${motivoId}|${correo}`;
+      const claveBase = `${campeonato}|${motivoId}|${correo}`;
+      const claveExacta = String(body.clave || "").trim();
+      let clave = claveBase;
+      if (claveExacta) {
+        if (!(claveExacta === claveBase || claveExacta.startsWith(`${claveBase}|`)) || !actual[mapa][claveExacta]) {
+          return new Response(JSON.stringify({ error: "No se encontró el registro a editar." }), { status: 400, headers: HEADERS });
+        }
+        clave = claveExacta;
+      } else {
+        clave = claveLibre(actual[mapa], claveBase); // 132ª entrega: varios depósitos al mismo jugador/torneo
+      }
       actual[mapa][clave] = normalizarRegistroPago({
-        montoEsperado: body.montoEsperado,
+        montoEsperado: clave !== claveBase ? 0 : body.montoEsperado,
         monto: body.monto,
         fecha: fechaRegistro,
         hora: body.horaRegistro,
+        lugar: motivoTipo === "torneo" ? body.lugar : undefined,
       });
     } else {
       return new Response(JSON.stringify({ error: "Acción no reconocida." }), { status: 400, headers: HEADERS });

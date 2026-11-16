@@ -567,6 +567,8 @@ export default function Cobranza({ session, perfiles }) {
       fila("Torneos main — mejor mano", v(catPremiosMain.mano, true), true),
       fila("Compras descontadas del depósito (ganadores)", v(ajusteComprasDescontadas), true),
       fila("Diferencia depósito real vs esperado (sin castigos descontados)", v(ajusteDifDeposito), true),
+      fila("Premios de campeonato pagados", v(totalPremiosCampeonatoPagados, true), true),
+      fila("Otros egresos (Diverso)", v(totalOtrosEgresos, true), true),
       fila("Subtotal egresos (depósitos reales)", v(subtotalEgresos, true)),
       fila("Balance general", v(balanceGeneral))
     );
@@ -583,6 +585,7 @@ export default function Cobranza({ session, perfiles }) {
     derecha.push(fila("Total reservado", v(acumCampeonatoAlMomento, true)));
     derecha.push(fila("Castigos x no declarar compra (directo al acumulado final)", v(totalCastigosConfirmados, true), true));
     derecha.push(fila("Centavos acumulados (al acumulado final)", v(centavosAlAcumulado, true), true));
+    derecha.push(fila("Premios de campeonato ya pagados (bajan lo reservado)", v(totalPremiosCampeonatoPagados), true));
     if (acumCampeonatoPorLugar.length) {
       acumCampeonatoPorLugar.forEach((l) => derecha.push(fila(l.reyKiller ? "Rey Killer" : l.label, v(l.monto, true), true)));
     } else {
@@ -809,7 +812,9 @@ export default function Cobranza({ session, perfiles }) {
       .filter((c) => c.motivoTipo === "castigo" && c.tipoAccion === "pago" && c.descontado)
       .reduce((s, c) => s + (Number(c.monto) || 0), 0);
     const reAjusteDif = reDepEsperado - reDepReal - reCastigosDesc;
-    const reSubtotalEgresos = reDepReal + reCastigosDesc;
+    const rePremiosCamp = cobranzaRows.filter((c) => c.motivoTipo === "campeonato" && c.tipoAccion === "deposito").reduce((s, c) => s + (Number(c.monto) || 0), 0); // 134ª
+    const reOtros = cobranzaRows.filter((c) => c.motivoTipo === "otros" && c.tipoAccion === "deposito").reduce((s, c) => s + (Number(c.monto) || 0), 0); // 134ª
+    const reSubtotalEgresos = reDepReal + reCastigosDesc + rePremiosCamp + reOtros;
     const reBalanceGeneral = reSubtotalIngresos - reSubtotalEgresos;
     const reAcumPorLugar = premiosCampeonatoConfig.map((l) => ({
       label: l.reyKiller ? "Rey Killer" : l.label,
@@ -820,7 +825,7 @@ export default function Cobranza({ session, perfiles }) {
     const reGastosPend = -totalGastosOperativos; // config., ver bloque "Gastos operativos" en Soporte
     const rePorDepositarTotal = rePorDepositar + reAjusteDif; // 128ª: + depósitos menores al esperado
     const reCentavosAcum = Math.max(0, Number(reCentavos) || 0); // 130ª: solo los centavos van al acumulado
-    const reReservar = reReservarBase - reCentavosAcum;
+    const reReservar = reReservarBase - reCentavosAcum + rePremiosCamp; // 134ª
     const reAcumAlMomento = reAcumPorLugar.reduce((s, l) => s + l.monto, 0) + reTotalCastigos + reCentavosAcum;
     const reDiff = reBalanceGeneral + reReservar + reGastosPend - rePorDepositarTotal + rePorCobrar;
 
@@ -928,8 +933,10 @@ export default function Cobranza({ session, perfiles }) {
         ["Premios brutos por lugar (regular + main)", rePremiosBrutos],
         ["Compras descontadas del depósito (ganadores)", -reAjusteCompras],
         ["Diferencia depósito real vs esperado (sin castigos descontados)", -reAjusteDif],
+        ["Premios de campeonato pagados", rePremiosCamp],
+        ["Otros egresos (Diverso)", reOtros],
       ],
-      "TOTAL (depósitos reales + castigos descontados)", reSubtotalEgresos
+      "TOTAL (depósitos reales + castigos descontados + premios de campeonato + otros)", reSubtotalEgresos
     );
     const aBalance = bloque(
       "Balance general / Existente en la cuenta de banco",
@@ -1019,6 +1026,8 @@ export default function Cobranza({ session, perfiles }) {
     aoaConc.push(filaConc("Torneos main — mejor mano", -reMain.mano, -catPremiosMain.mano, aMainMano));
     aoaConc.push(filaConc("Compras descontadas del depósito (ganadores)", reAjusteCompras, ajusteComprasDescontadas, aAjusteCompras));
     aoaConc.push(filaConc("Diferencia depósito real vs esperado (sin castigos descontados)", reAjusteDif, ajusteDifDeposito, aAjusteDif));
+    aoaConc.push(filaConc("Premios de campeonato pagados", -rePremiosCamp, -totalPremiosCampeonatoPagados, aSubtotalEgresos));
+    aoaConc.push(filaConc("Otros egresos (Diverso)", -reOtros, -totalOtrosEgresos, aSubtotalEgresos));
     aoaConc.push(filaConc("Subtotal egresos (depósitos reales)", -reSubtotalEgresos, -subtotalEgresos, aSubtotalEgresos));
     aoaConc.push(filaConc("Balance general / Existente en la cuenta de banco", reBalanceGeneral, balanceGeneral, aBalance));
     aoaConc.push(filaConc(
@@ -1197,18 +1206,60 @@ export default function Cobranza({ session, perfiles }) {
         )
       : [];
 
-  // 132ª entrega: arma el motivo compuesto a partir de Motivo (base) + Sub motivo (n de torneo).
+  // 134ª entrega: jugadores en orden alfabético por Alias PokerStars (antes iban por número de registro).
+  const directorioOrdenadoAlias = [...directorioActivo].sort((a, b) =>
+    String(nombreCorto(a)).localeCompare(String(nombreCorto(b)), "es", { sensitivity: "base" })
+  );
+  // 134ª entrega: catálogo Tipo → Concepto → Categoría → Número (tabla de Federico). Tipo "pago" = Ingreso,
+  // "deposito" = Egreso (los valores internos no cambian). `num: true` = la categoría pide Número (# de torneo).
+  const LUGARES_CAMPEONATO = [
+    { id: "pc1", label: "1er lugar campeonato" }, { id: "pc2", label: "2do lugar campeonato" },
+    { id: "pc3", label: "3er lugar campeonato" }, { id: "pc4", label: "4to lugar campeonato" },
+    { id: "pcrk", label: "Rey Killer en campeonato" },
+  ];
+  function conceptosDeTipo(tipo) {
+    return tipo === "pago"
+      ? [{ id: "inscripcion", label: "Inscripción" }, { id: "participacion", label: "Participación" }, { id: "castigo", label: "Castigo" }, { id: "diverso", label: "Diverso" }]
+      : [{ id: "premio", label: "Premio" }, { id: "gastos", label: "Gastos en General" }, { id: "diverso", label: "Diverso" }];
+  }
+  function categoriasDeConcepto(tipo, concepto) {
+    if (tipo === "pago") {
+      if (concepto === "inscripcion") return [{ id: "inscripcion", label: "Campeonato" }];
+      if (concepto === "participacion") return [{ id: "participacion", label: "Torneo", num: true }];
+      if (concepto === "castigo") return [{ id: "castigo-rebuy", label: "No declarar Rebuy", num: true }, { id: "castigo-addon", label: "No declarar Add on", num: true }];
+      if (concepto === "diverso") return [{ id: "ajuste", label: "Ajuste Manual" }];
+      return [];
+    }
+    if (concepto === "premio") {
+      return [
+        { id: "premio1", label: "1er lugar en torneo", num: true }, { id: "premio2", label: "2do lugar en torneo", num: true }, { id: "premio3", label: "3er lugar en torneo", num: true },
+        ...LUGARES_CAMPEONATO,
+      ];
+    }
+    if (concepto === "gastos") return gastosCampeonatoActivo.filter((g) => g.concepto).map((g) => ({ id: `gasto:${g.concepto}`, label: g.concepto }));
+    if (concepto === "diverso") return [{ id: "otros", label: "Otros" }];
+    return [];
+  }
+  function categoriaPideNumero(tipo, concepto, base) {
+    return Boolean(categoriasDeConcepto(tipo, concepto).find((c) => c.id === base)?.num);
+  }
+  // Arma el motivo compuesto a partir de Categoría (`base`) + Número (`sub`).
   function componerMotivo(m) {
     let motivo = "";
+    const b = m.base || "";
     if (m.tipo === "pago") {
-      if (m.base === "participacion" && m.sub) motivo = `torneo:${m.sub}`;
-      else if (m.base === "castigo" && m.sub) motivo = `castigo:${m.sub}`;
-      else if (m.base === "inscripcion") motivo = "inscripcion";
-      else if (m.base === "ajuste") motivo = "ajuste";
-    } else if (/^premio[123]$/.test(m.base || "") && m.sub) {
+      if (b === "participacion" && m.sub) motivo = `torneo:${m.sub}`;
+      else if (b.startsWith("castigo-") && m.sub) motivo = `castigo:${m.sub}`;
+      else if (b === "inscripcion") motivo = "inscripcion";
+      else if (b === "ajuste") motivo = "ajuste";
+    } else if (/^premio[123]$/.test(b) && m.sub) {
       motivo = `torneo:${m.sub}`;
-    } else if ((m.base || "").startsWith("gasto:")) {
-      motivo = m.base;
+    } else if (/^pc(1|2|3|4|rk)$/.test(b)) {
+      motivo = `campeonato:${b === "pcrk" ? "rk" : "c" + b.slice(2)}`;
+    } else if (b.startsWith("gasto:")) {
+      motivo = b;
+    } else if (b === "otros") {
+      motivo = "otros";
     }
     return { ...m, motivo };
   }
@@ -1250,6 +1301,9 @@ export default function Cobranza({ session, perfiles }) {
   } else if (nuevoMov?.tipo === "pago" && nuevoMov.motivo === "ajuste") {
     montoEsperadoMov = 0;
     etiquetaMotivoMov = "Ajuste manual";
+  } else if (nuevoMov?.tipo === "deposito" && (nuevoMov.motivo?.startsWith("campeonato:") || nuevoMov.motivo === "otros")) {
+    montoEsperadoMov = 0; // 134ª: premios de campeonato y Otros no llevan esperado
+    etiquetaMotivoMov = nuevoMov.motivo === "otros" ? "Otros" : "Premio de campeonato";
   }
   // 132ª entrega: si ya hay un registro del mismo jugador y motivo, el nuevo es un movimiento adicional
   // (esperado 0, se suma al real del primero).
@@ -1264,6 +1318,8 @@ export default function Cobranza({ session, perfiles }) {
       else if (m.startsWith("torneo:")) { mapaMov = data?.pagosTorneo; kMov = `${campeonatoSel}|${m.slice(7)}|${c}`; }
     } else if (m.startsWith("torneo:")) { mapaMov = data?.depositosTorneo; kMov = `${campeonatoSel}|${m.slice(7)}|${c}`; }
     else if (m.startsWith("gasto:")) { mapaMov = data?.depositosGasto; kMov = `${campeonatoSel}|${m.slice(6)}|${c}`; }
+    else if (m.startsWith("campeonato:")) { mapaMov = data?.depositosCampeonato; kMov = `${campeonatoSel}|${m.slice(11)}|${c}`; }
+    else if (m === "otros") { mapaMov = data?.depositosOtros; kMov = `${campeonatoSel}|otros|${c}`; }
     if (mapaMov && mapaMov[kMov]) { esExtraMov = true; montoEsperadoMov = 0; }
   }
 
@@ -1335,7 +1391,7 @@ export default function Cobranza({ session, perfiles }) {
         tipoAccion: "pago",
         motivoTipo: "castigo",
         motivoId: fechaTorneo,
-        motivo: `Castigo — Torneo ${entry ? etiquetaCorta(entry) : ""}`,
+        motivo: `Castigo${reg.cat === "addon" ? " (Add on)" : reg.cat === "rebuy" ? " (Rebuy)" : ""} — Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
       });
@@ -1356,6 +1412,24 @@ export default function Cobranza({ session, perfiles }) {
         motivo: `${reg.lugar ? `Premio ${reg.lugar}º lugar — ` : ""}Torneo ${entry ? etiquetaCorta(entry) : ""}`,
         correo,
         ...reg,
+      });
+    }
+    // 134ª entrega: Egreso — Premio de campeonato (1º–4º lugar y Rey Killer) y Diverso / Otros (con causa).
+    const ETQ_PREMIO_CAMP = { c1: "1er lugar campeonato", c2: "2do lugar campeonato", c3: "3er lugar campeonato", c4: "4to lugar campeonato", rk: "Rey Killer en campeonato" };
+    for (const [clave, reg] of Object.entries(data?.depositosCampeonato || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, idPremio, correo] = clave.split("|");
+      filas.push({
+        clave, tipo: "Depósito", tipoAccion: "deposito", motivoTipo: "campeonato", motivoId: idPremio,
+        motivo: `Premio ${ETQ_PREMIO_CAMP[idPremio] || idPremio}`, correo, ...reg,
+      });
+    }
+    for (const [clave, reg] of Object.entries(data?.depositosOtros || {})) {
+      if (!clave.startsWith(prefijo)) continue;
+      const [, , correo] = clave.split("|");
+      filas.push({
+        clave, tipo: "Depósito", tipoAccion: "deposito", motivoTipo: "otros", motivoId: "otros",
+        motivo: `Otros${reg.causa ? ` — ${reg.causa}` : ""}`, correo, ...reg,
       });
     }
     for (const [clave, reg] of Object.entries(data?.depositosGasto || {})) {
@@ -1501,7 +1575,7 @@ export default function Cobranza({ session, perfiles }) {
       montoEsperadoEdicion = Number(g?.monto) || 0;
     }
     // 132ª entrega: un movimiento adicional (llave con "|2", "|3"…) o un ajuste manual no lleva esperado.
-    if (editandoPago.motivoTipo === "ajuste" || String(editandoPago.clave || "").split("|").length > 3) montoEsperadoEdicion = 0;
+    if (["ajuste", "campeonato", "otros"].includes(editandoPago.motivoTipo) || String(editandoPago.clave || "").split("|").length > 3) montoEsperadoEdicion = 0;
   }
 
   async function guardarEdicionPago() {
@@ -1510,6 +1584,10 @@ export default function Cobranza({ session, perfiles }) {
     const monto = Number(editandoPago.monto);
     if (!(monto > 0)) {
       setErrorEdicion("Ingresá un monto mayor a 0.");
+      return;
+    }
+    if ((editandoPago.motivoTipo === "ajuste" || editandoPago.motivoTipo === "otros") && !String(editandoPago.causa || "").trim()) {
+      setErrorEdicion("La causa es obligatoria.");
       return;
     }
     if (editandoPago.tipoAccion === "deposito" && !editandoPago.fecha) {
@@ -1546,6 +1624,7 @@ export default function Cobranza({ session, perfiles }) {
           motivoId: editandoPago.motivoId,
           clave: editandoPago.clave, // 132ª
           lugar: editandoPago.lugar || undefined,
+          causa: editandoPago.motivoTipo === "otros" ? String(editandoPago.causa || "").trim() : undefined, // 134ª
           correo: editandoPago.correo,
           montoEsperado: montoEsperadoEdicion,
           monto,
@@ -1618,6 +1697,7 @@ export default function Cobranza({ session, perfiles }) {
           motivoId: esInscripcion ? "inscripcion" : esAjuste ? "ajuste" : fechaTorneo,
           fecha: (esInscripcion || esAjuste) ? undefined : fechaTorneo,
           causa: esAjuste ? String(nuevoMov.causa).trim() : undefined, // 132ª entrega
+          categoria: esCastigo ? (nuevoMov.base === "castigo-addon" ? "addon" : "rebuy") : undefined, // 134ª
           correo,
           montoEsperado: montoEsperadoMov,
           monto,
@@ -1626,11 +1706,19 @@ export default function Cobranza({ session, perfiles }) {
         };
       } else {
         const esTorneo = nuevoMov.motivo.startsWith("torneo:");
+        const esCamp = nuevoMov.motivo.startsWith("campeonato:");
+        const esOtros = nuevoMov.motivo === "otros";
+        if (esOtros && !String(nuevoMov.causa || "").trim()) {
+          setErrorMov("Escribe la causa de Otros.");
+          setGuardandoMov(false);
+          return;
+        }
         body = {
           accion: "registrarDeposito",
           campeonato: campeonatoSel,
-          motivoTipo: esTorneo ? "torneo" : "gasto",
-          motivoId: esTorneo ? nuevoMov.motivo.slice("torneo:".length) : nuevoMov.motivo.slice("gasto:".length),
+          motivoTipo: esTorneo ? "torneo" : esCamp ? "campeonato" : esOtros ? "otros" : "gasto",
+          motivoId: esTorneo ? nuevoMov.motivo.slice("torneo:".length) : esCamp ? nuevoMov.motivo.slice("campeonato:".length) : esOtros ? "otros" : nuevoMov.motivo.slice("gasto:".length),
+          causa: esOtros ? String(nuevoMov.causa).trim() : undefined,
           lugar: esTorneo ? Number(String(nuevoMov.base || "").replace("premio", "")) || undefined : undefined, // 132ª
           correo,
           montoEsperado: montoEsperadoMov,
@@ -1931,7 +2019,10 @@ export default function Cobranza({ session, perfiles }) {
     if (clave.startsWith(`${campeonatoSel}|`) && reg.descontado) castigosDescontados += Number(reg.monto) || 0;
   }
   const ajusteDifDeposito = sumDepEsperado - sumDepReal - castigosDescontados; // depósito menor (+) o mayor (−) al esperado, sin castigos descontados
-  const subtotalEgresos = sumDepReal + castigosDescontados;
+  // 134ª entrega: Egresos nuevos — premios de campeonato ya pagados (salen de la reserva) y Diverso / Otros.
+  const totalPremiosCampeonatoPagados = sumaMapaConfirmado(data?.depositosCampeonato);
+  const totalOtrosEgresos = sumaMapaConfirmado(data?.depositosOtros);
+  const subtotalEgresos = sumDepReal + castigosDescontados + totalPremiosCampeonatoPagados + totalOtrosEgresos;
 
   // "BALANCE GENERAL" / "Existente en la cuenta de banco" del Excel: en el archivo de Federico son
   // literalmente la misma fórmula (B23 y E17 ambas =B6+B21) — acá también se calculan una sola vez.
@@ -1968,7 +2059,7 @@ export default function Cobranza({ session, perfiles }) {
   // del Campeonato — su destino lo decidirá Federico con los administradores. Del sobrante solo los
   // centavos acumulados van al acumulado final.
   const centavosAlAcumulado = Math.max(0, Number(centavosAcumulados) || 0);
-  const reservarAcum = reservarBase - centavosAlAcumulado;
+  const reservarAcum = reservarBase - centavosAlAcumulado + totalPremiosCampeonatoPagados; // 134ª: lo ya pagado del acumulado baja lo reservado
   const acumCampeonatoAlMomento = acumCampeonatoProvision + totalCastigosConfirmados + centavosAlAcumulado;
   const diffCuenta = balanceGeneral + reservarAcum + gastosPendientes - premiosPorDepositarTotal + porCobrar;
 
@@ -2488,7 +2579,7 @@ export default function Cobranza({ session, perfiles }) {
                 <button
                   className="btn btn-primary btn-add"
                   onClick={() => {
-                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", base: "", sub: "", causa: "", montoReal: "", fechaReal: "" });
+                    setNuevoMov({ tipo: "pago", correo: "", motivo: "", concepto: "", base: "", sub: "", causa: "", montoReal: "", fechaReal: "" });
                     setErrorMov("");
                     setAvisoDatosCuenta("");
                   }}
@@ -2504,12 +2595,12 @@ export default function Cobranza({ session, perfiles }) {
                         className="field"
                         value={nuevoMov.tipo}
                         onChange={(e) => {
-                          setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
+                          setNuevoMov({ ...nuevoMov, tipo: e.target.value, motivo: "", concepto: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
                           setAvisoDatosCuenta("");
                         }}
                       >
-                        <option value="pago">Pago (jugador a TOLS)</option>
-                        <option value="deposito">Depósito (TOLS a jugador)</option>
+                        <option value="pago">Ingreso</option>
+                        <option value="deposito">Egreso</option>
                       </select>
                     </div>
                     <div className="login-field" style={{ flex: 2 }}>
@@ -2518,14 +2609,14 @@ export default function Cobranza({ session, perfiles }) {
                         className="field"
                         value={nuevoMov.correo}
                         onChange={(e) => {
-                          setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
+                          setNuevoMov({ ...nuevoMov, correo: e.target.value, motivo: "", concepto: "", base: "", sub: "", causa: "", montoReal: "", descontado: false });
                           setAvisoDatosCuenta("");
                         }}
                       >
                         <option value="">— elegir jugador —</option>
-                        {directorioActivo.map((j) => (
+                        {directorioOrdenadoAlias.map((j) => (
                           <option key={j.correo} value={j.correo}>
-                            {nombreCorto(j)} (#{j.id})
+                            {nombreCorto(j)}
                           </option>
                         ))}
                       </select>
@@ -2571,48 +2662,52 @@ export default function Cobranza({ session, perfiles }) {
                     </div>
                   )}
 
-                  {/* 132ª entrega: Tipo / Motivo / Sub motivo, los 3 en combos (tablas de Federico). El
-                      "motivo compuesto" de siempre (torneo:fecha, castigo:fecha, inscripcion, ajuste,
-                      gasto:concepto) se arma desde Motivo + Sub motivo con componerMotivo(). */}
+                  {/* 134ª entrega: Tipo (Ingreso / Egreso) → Concepto → Categoría → Número, todos combos (tabla de
+                      Federico, 16/11). El "motivo compuesto" de siempre (torneo:fecha, castigo:fecha, inscripcion,
+                      ajuste, gasto:concepto…) se arma con componerMotivo() a partir de Categoría (`base`) + Número (`sub`). */}
                   <div className="login-field-row">
-                    <div className="login-field" style={{ flex: 2 }}>
-                      <label>Motivo</label>
+                    <div className="login-field" style={{ flex: 1, minWidth: 160 }}>
+                      <label>Concepto</label>
+                      <select
+                        className="field"
+                        value={nuevoMov.concepto || ""}
+                        disabled={!nuevoMov.correo}
+                        onChange={(e) => {
+                          const concepto = e.target.value;
+                          const cats = categoriasDeConcepto(nuevoMov.tipo, concepto);
+                          const unica = cats.length === 1 ? cats[0].id : "";
+                          setNuevoMov(componerMotivo({ ...nuevoMov, concepto, base: unica, sub: "", montoReal: "", descontado: false }));
+                        }}
+                      >
+                        <option value="">— elegir —</option>
+                        {conceptosDeTipo(nuevoMov.tipo).map((c) => (
+                          <option key={c.id} value={c.id}>{c.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="login-field" style={{ flex: 1, minWidth: 200 }}>
+                      <label>Categoría</label>
                       <select
                         className="field"
                         value={nuevoMov.base || ""}
-                        disabled={!nuevoMov.correo}
+                        disabled={!nuevoMov.concepto}
                         onChange={(e) => setNuevoMov(componerMotivo({ ...nuevoMov, base: e.target.value, sub: "", montoReal: "", descontado: false }))}
                       >
                         <option value="">— elegir —</option>
-                        {nuevoMov.tipo === "pago" && (
-                          <>
-                            <option value="participacion">Participación en torneo</option>
-                            <option value="castigo">Castigo por no declarar Rebuy</option>
-                            <option value="inscripcion">Inscripción al Campeonato</option>
-                            <option value="ajuste">Ajuste manual</option>
-                          </>
-                        )}
-                        {nuevoMov.tipo === "deposito" && (
-                          <>
-                            <option value="premio1">Premio de 1er lugar en torneo</option>
-                            <option value="premio2">Premio de 2do lugar en torneo</option>
-                            <option value="premio3">Premio de 3er lugar en torneo</option>
-                            {gastosCampeonatoActivo.filter((g) => g.concepto).map((g) => (
-                              <option key={`gasto:${g.concepto}`} value={`gasto:${g.concepto}`}>{g.concepto}</option>
-                            ))}
-                          </>
-                        )}
+                        {categoriasDeConcepto(nuevoMov.tipo, nuevoMov.concepto).map((c) => (
+                          <option key={c.id} value={c.id}>{c.label}</option>
+                        ))}
                       </select>
                     </div>
-                    <div className="login-field" style={{ flex: 1, minWidth: 180 }}>
-                      <label>Sub motivo</label>
-                      {["participacion", "castigo", "premio1", "premio2", "premio3"].includes(nuevoMov.base) ? (
+                    <div className="login-field" style={{ flex: 1, minWidth: 150 }}>
+                      <label>Número</label>
+                      {categoriaPideNumero(nuevoMov.tipo, nuevoMov.concepto, nuevoMov.base) ? (
                         <select
                           className="field"
                           value={nuevoMov.sub || ""}
                           onChange={(e) => {
                             const sub = e.target.value;
-                            const prefill = nuevoMov.base === "castigo" && sub
+                            const prefill = (nuevoMov.base || "").startsWith("castigo-") && sub
                               ? String(castigoMontoDe(nuevoMov.correo, sub) || castigoNoDeclaradoActivo)
                               : "";
                             setNuevoMov(componerMotivo({ ...nuevoMov, sub, montoReal: prefill }));
@@ -2628,14 +2723,14 @@ export default function Cobranza({ session, perfiles }) {
                       )}
                     </div>
                   </div>
-                  {nuevoMov.base === "ajuste" && (
+                  {(nuevoMov.base === "ajuste" || nuevoMov.base === "otros") && (
                     <div className="login-field">
-                      <label>Causa del ajuste manual</label>
+                      <label>{nuevoMov.base === "ajuste" ? "Causa del ajuste manual (obligatoria)" : "Causa de Otros (obligatoria)"}</label>
                       <input
                         className="field"
                         type="text"
                         maxLength={200}
-                        placeholder="Escribe la causa del ajuste"
+                        placeholder="Escribe la causa"
                         value={nuevoMov.causa || ""}
                         onChange={(e) => setNuevoMov({ ...nuevoMov, causa: e.target.value })}
                       />
@@ -2650,10 +2745,12 @@ export default function Cobranza({ session, perfiles }) {
                   {nuevoMov.motivo && (
                     <>
                       <div className="login-field-row">
-                        <div className="login-field" style={{ maxWidth: 220 }}>
-                          <label>Monto esperado a {nuevoMov.tipo === "pago" ? "recibir" : "depositar"}</label>
-                          <input className="field" value={money(montoEsperadoMov)} disabled readOnly />
-                        </div>
+                        {!(["ajuste", "otros"].includes(nuevoMov.motivo) || nuevoMov.motivo.startsWith("campeonato:")) && (
+                          <div className="login-field" style={{ maxWidth: 220 }}>
+                            <label>Monto esperado a {nuevoMov.tipo === "pago" ? "recibir" : "depositar"}</label>
+                            <input className="field" value={money(montoEsperadoMov)} disabled readOnly />
+                          </div>
+                        )}
                         <div className="login-field" style={{ maxWidth: 220 }}>
                           <label>Monto realmente {nuevoMov.tipo === "pago" ? "recibido" : "depositado"}</label>
                           {/* 81ª entrega: sin el "0" fijo (se guarda como texto, no como número, para que
@@ -2701,7 +2798,7 @@ export default function Cobranza({ session, perfiles }) {
                   {errorMov && <div className="login-error">{errorMov}</div>}
 
                   <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
-                    <button className="btn btn-primary" disabled={guardandoMov} onClick={confirmarNuevoMov}>
+                    <button className="btn btn-primary" disabled={guardandoMov || ((nuevoMov.base === "ajuste" || nuevoMov.base === "otros") && !String(nuevoMov.causa || "").trim())} onClick={confirmarNuevoMov}>
                       {guardandoMov ? "Guardando…" : "Confirmar"}
                     </button>
                     <button
@@ -2825,7 +2922,7 @@ export default function Cobranza({ session, perfiles }) {
                       onChange={(e) => setEditandoPago({ ...editandoPago, fecha: e.target.value })}
                     />
                   </div>
-                  {editandoPago.motivoTipo === "ajuste" && (
+                  {(editandoPago.motivoTipo === "ajuste" || editandoPago.motivoTipo === "otros") && (
                     <div className="login-field" style={{ minWidth: 240 }}>
                       <label>Causa del ajuste</label>
                       <input className="field" type="text" maxLength={200} value={editandoPago.causa || ""}
@@ -2954,9 +3051,9 @@ export default function Cobranza({ session, perfiles }) {
             }}
           >
             <option value="">— elegir jugador —</option>
-            {directorioActivo.map((j) => (
+            {directorioOrdenadoAlias.map((j) => (
               <option key={j.correo} value={j.correo}>
-                {nombreCorto(j)} (#{j.id})
+                {nombreCorto(j)}
               </option>
             ))}
           </select>
@@ -3076,6 +3173,8 @@ export default function Cobranza({ session, perfiles }) {
 
                 <FilaFin label="Compras descontadas del depósito (ganadores)" sangria><Monto valor={ajusteComprasDescontadas} /></FilaFin>
                 <FilaFin label="Diferencia depósito real vs esperado (sin castigos descontados)" sangria><Monto valor={ajusteDifDeposito} /></FilaFin>
+                <FilaFin label="Premios de campeonato pagados" sangria><Monto valor={totalPremiosCampeonatoPagados} forzarNegativo /></FilaFin>
+                <FilaFin label="Otros egresos (Diverso)" sangria><Monto valor={totalOtrosEgresos} forzarNegativo /></FilaFin>
                 <FilaFin label="Subtotal egresos (depósitos reales)" bold><Monto valor={subtotalEgresos} forzarNegativo /></FilaFin>
                 <FilaFin label="Balance general" bold><Monto valor={balanceGeneral} /></FilaFin>
               </TablaFin>
@@ -3109,6 +3208,9 @@ export default function Cobranza({ session, perfiles }) {
                 </FilaFin>
                 <FilaFin label="Centavos acumulados (al acumulado final)" sangria>
                   <Monto valor={centavosAlAcumulado} forzarNegativo />
+                </FilaFin>
+                <FilaFin label="Premios de campeonato ya pagados (bajan lo reservado)" sangria>
+                  <Monto valor={totalPremiosCampeonatoPagados} />
                 </FilaFin>
                 {acumCampeonatoPorLugar.map((l, i) => (
                   <FilaFin key={i} label={l.reyKiller ? "Rey Killer" : l.label} sangria>

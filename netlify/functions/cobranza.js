@@ -107,6 +107,8 @@ function normalizarRegistroPago(v) {
     // 132ª entrega: Ajuste manual (causa escrita por el Tesorero) y lugar del Premio (1, 2 o 3) de un Depósito.
     ...(String(v?.causa || "").trim() ? { causa: String(v.causa).trim().slice(0, 200) } : {}),
     ...([1, 2, 3].includes(Number(v?.lugar)) ? { lugar: Number(v.lugar) } : {}),
+    // 134ª entrega: categoría del Castigo — "rebuy" (No declarar Rebuy) o "addon" (No declarar Add on).
+    ...(v?.cat === "rebuy" || v?.cat === "addon" ? { cat: v.cat } : {}),
   };
 }
 // 132ª entrega: primera llave libre — "base", luego "base|2", "base|3"…
@@ -183,7 +185,11 @@ export function normalizar(data) {
   // 132ª entrega: séptimo mapa — Ajuste manual (Pago del jugador a TOLS con la causa escrita a mano),
   // "campeonato|ajuste|correo" (+ "|2", "|3"… si hay más de uno).
   const pagosAjuste = normalizarMapaPagos(base.pagosAjuste);
-  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo, castigosTorneo, pagosAjuste };
+  // 134ª entrega: Egresos nuevos — Premio de campeonato (1º–4º lugar y Rey Killer, "campeonato|id|correo") y
+  // Diverso / Otros (con causa, "campeonato|otros|correo"); ambos admiten varios movimientos (sufijo "|2"…).
+  const depositosCampeonato = normalizarMapaPagos(base.depositosCampeonato);
+  const depositosOtros = normalizarMapaPagos(base.depositosOtros);
+  return { jugadores, movimientos, enviosSaldo, pagosTorneo, depositosTorneo, depositosGasto, pagosInscripcion, pagosCastigo, castigosTorneo, pagosAjuste, depositosCampeonato, depositosOtros };
 }
 
 // próxima fecha (hoy o después) del campeonato activo — mismo criterio que usa Jugadores.jsx para el
@@ -243,6 +249,8 @@ export async function respuestaCompleta(data) {
     pagosCastigo: data.pagosCastigo || {}, // 118ª entrega
     castigosTorneo: data.castigosTorneo || {}, // 125ª entrega
     pagosAjuste: data.pagosAjuste || {}, // 132ª entrega
+    depositosCampeonato: data.depositosCampeonato || {}, // 134ª entrega
+    depositosOtros: data.depositosOtros || {}, // 134ª entrega
     // 92ª entrega: el Calendario completo (todos los campeonatos, no solo el activo) — lo necesita
     // filasParaExcel() para numerar los torneos de "Pagos y depósitos confirmados" ("Torneo N"), igual
     // que ya hace Cobranza.jsx del lado del cliente con mapaNumeracionTorneos().
@@ -285,7 +293,7 @@ function aliasONombre(resumen, correo) {
   const r = resumen?.[correo];
   return (r?.aliasPokerStars || r?.nombre || "").trim();
 }
-function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, resumen, torneos }) {
+function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, depositosCampeonato, depositosOtros, resumen, torneos }) {
   const numeracion = mapaNumeracionTorneos(torneos);
   const filas = [];
   for (const [clave, reg] of Object.entries(pagosTorneo || {})) {
@@ -307,7 +315,7 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAj
   for (const [clave, reg] of Object.entries(pagosCastigo || {})) {
     const [campeonato, fecha, correo] = clave.split("|");
     filas.push([
-      campeonato, "Pago", `Castigo — ${etiquetaTorneoExcel(numeracion, campeonato, fecha)}`, correo,
+      campeonato, "Pago", `Castigo${reg.cat === "addon" ? " (Add on)" : reg.cat === "rebuy" ? " (Rebuy)" : ""} — ${etiquetaTorneoExcel(numeracion, campeonato, fecha)}`, correo,
       aliasONombre(resumen, correo), reg.montoEsperado, reg.monto, reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
@@ -338,6 +346,22 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAj
       aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
     ]);
   }
+  // 134ª entrega: Premios de campeonato y Diverso / Otros (egresos, en negativo como el resto de Depósitos).
+  const ETQ_CAMP = { c1: "1er lugar campeonato", c2: "2do lugar campeonato", c3: "3er lugar campeonato", c4: "4to lugar campeonato", rk: "Rey Killer en campeonato" };
+  for (const [clave, reg] of Object.entries(depositosCampeonato || {})) {
+    const [campeonato, id, correo] = clave.split("|");
+    filas.push([
+      campeonato, "Depósito", `Premio ${ETQ_CAMP[id] || id}`, correo,
+      aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
+  for (const [clave, reg] of Object.entries(depositosOtros || {})) {
+    const [campeonato, , correo] = clave.split("|");
+    filas.push([
+      campeonato, "Depósito", `Otros — ${reg.causa || "sin causa"}`, correo,
+      aliasONombre(resumen, correo), -(reg.montoEsperado || 0), -(reg.monto || 0), reg.fecha, reg.hora, reg.registradoEn,
+    ]);
+  }
   filas.sort((a, b) => (a[0] + (a[9] || "")).localeCompare(b[0] + (b[9] || "")));
   return filas;
 }
@@ -349,8 +373,8 @@ function filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAj
 // se usó en producción) y pidió dejar de escribirlas para poder borrarlas del Excel maestro sin riesgo.
 // `filasParaExcel()` quedó así en una sola pieza real, `confirmadosRows` (92ª entrega) — el resto de la
 // firma de esta función (`movimientos`/`resumen` ya no se usan directo acá) se simplificó acorde.
-export function filasParaExcel({ resumen, pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, torneos }) {
-  const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, resumen, torneos });
+export function filasParaExcel({ resumen, pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, depositosCampeonato, depositosOtros, torneos }) {
+  const confirmadosRows = filasConfirmados({ pagosTorneo, pagosInscripcion, pagosCastigo, pagosAjuste, depositosTorneo, depositosGasto, depositosCampeonato, depositosOtros, resumen, torneos });
   return { confirmadosRows };
 }
 
@@ -498,9 +522,11 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   const r6 = remapearClavesCampeonato(actual.pagosCastigo, de, a); // 118ª entrega
   const r7 = remapearClavesCampeonato(actual.castigosTorneo, de, a); // 125ª entrega
   const r8 = remapearClavesCampeonato(actual.pagosAjuste, de, a); // 132ª entrega
+  const r9 = remapearClavesCampeonato(actual.depositosCampeonato, de, a); // 134ª entrega
+  const r10 = remapearClavesCampeonato(actual.depositosOtros, de, a); // 134ª entrega
   const cambia =
     actual.movimientos.some((m) => m.campeonato === de) ||
-    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio || r7.cambio || r8.cambio;
+    r1.cambio || r2.cambio || r3.cambio || r4.cambio || r5.cambio || r6.cambio || r7.cambio || r8.cambio || r9.cambio || r10.cambio;
   if (!cambia) return;
   const prefijoViejo = `gn-${de}-`;
   actual.movimientos = actual.movimientos.map((m) => {
@@ -516,6 +542,8 @@ export async function renombrarCampeonatoEnCobranza(de, a) {
   actual.pagosCastigo = r6.mapa; // 118ª entrega
   actual.castigosTorneo = r7.mapa; // 125ª entrega
   actual.pagosAjuste = r8.mapa; // 132ª entrega
+  actual.depositosCampeonato = r9.mapa; // 134ª entrega
+  actual.depositosOtros = r10.mapa; // 134ª entrega
   await store.setJSON("data", actual);
   const completa = await respuestaCompleta(actual);
   await syncCobranza(filasParaExcel(completa));
@@ -648,6 +676,7 @@ export default async (req) => {
         hora: body.horaRegistro,
         descontado: motivoTipo === "castigo" ? body.descontadoDeposito === true : false, // 128ª entrega
         causa: motivoTipo === "ajuste" ? body.causa : "",
+        cat: motivoTipo === "castigo" ? body.categoria : undefined, // 134ª entrega
       });
     } else if (body?.accion === "registrarDeposito") {
       // 76ª entrega: confirma que TOLS le depositó a un jugador — por el Premio de un torneo ya
@@ -656,7 +685,7 @@ export default async (req) => {
       // depósito, distinta de `motivoId` cuando el motivo es un torneo) es obligatoria para un depósito
       // — a diferencia de un pago —, como pidió Federico.
       const campeonato = String(body.campeonato || "").trim();
-      const motivoTipo = body.motivoTipo === "gasto" ? "gasto" : body.motivoTipo === "torneo" ? "torneo" : "";
+      const motivoTipo = ["gasto", "torneo", "campeonato", "otros"].includes(body.motivoTipo) ? body.motivoTipo : "";
       const motivoId = String(body.motivoId || "").trim();
       const correo = String(body.correo || "").trim().toLowerCase();
       const fechaRegistro = String(body.fechaRegistro || "").trim();
@@ -666,7 +695,10 @@ export default async (req) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaRegistro)) {
         return new Response(JSON.stringify({ error: "La fecha del depósito es obligatoria (AAAA-MM-DD)." }), { status: 400, headers: HEADERS });
       }
-      const mapa = motivoTipo === "gasto" ? "depositosGasto" : "depositosTorneo";
+      if (motivoTipo === "otros" && !String(body.causa || "").trim()) {
+        return new Response(JSON.stringify({ error: "Escribe la causa del egreso (Otros)." }), { status: 400, headers: HEADERS });
+      }
+      const mapa = motivoTipo === "gasto" ? "depositosGasto" : motivoTipo === "campeonato" ? "depositosCampeonato" : motivoTipo === "otros" ? "depositosOtros" : "depositosTorneo";
       const claveBase = `${campeonato}|${motivoId}|${correo}`;
       const claveExacta = String(body.clave || "").trim();
       let clave = claveBase;
@@ -684,6 +716,7 @@ export default async (req) => {
         fecha: fechaRegistro,
         hora: body.horaRegistro,
         lugar: motivoTipo === "torneo" ? body.lugar : undefined,
+        causa: motivoTipo === "otros" ? body.causa : "",
       });
     } else {
       return new Response(JSON.stringify({ error: "Acción no reconocida." }), { status: 400, headers: HEADERS });
